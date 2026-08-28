@@ -4,23 +4,118 @@
  * Remove comment to implement.
  */
 
-/* These are possible color variables to set themes for your TOM
+/* These are possible color variables to set themes for your TOM */
 :root {
-    --primary: #007bff;
-    --secondary: #6c757d;
-    --success: #28a745;
-    --info: #17a2b8;
+    --primary: #a658e1;
+    --secondary: #7a3fa6;
+    --success: #31D656;
+    --info: #9517B8;
     --warning: #ffc107;
-    --danger: #dc3545;
+    --danger: #FF051C;
     --light: #f8f9fa;
-    --dark: #343a40;
+    --dark: #3f2256;
     --theme_primary: #fff;
     --theme_text_primary: #000;
     --theme_accent1: #fff;
-    --theme_accent2: rgba(0, 0, 0, .03);
+    --theme_accent2: #a658e1;
     --theme_accent3: #fff;
-    --theme_link_text: #007bff;
-    --theme_link_hover: #0056b3;
-    --theme_link_active: #0056b3;
+    --theme_link_text: #a658e1;
+    --theme_link_hover: #0AFF1C;
+    --theme_link_active: #0AFF1C;
+    --rges-purple-light: #a658e1;
+    --rges-purple-dark: #3f2256;
 }
-*/
+
+body {
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: #fff;
+    background-color: #000;
+}
+
+a {
+    color: var(--rges-purple-light);
+    background-color: transparent;
+}
+
+a:hover {
+    color: var(--rges-purple-light);
+    text-decoration: underline;
+}
+
+.navbar-dark.bg-dark {
+  background-color: var(--rges-purple-dark) !important;
+}
+
+.btn-primary, .btn-secondary, .btn-success, .btn-info,
+.btn-warning, .btn-danger, .btn-light, .btn-dark {
+    --bs-btn-hover-bg: var(--bs-btn-bg);
+    --bs-btn-hover-border-color: var(--bs-btn-border-color);
+    --bs-btn-active-bg: var(--bs-btn-bg);
+    --bs-btn-active-border-color: var(--bs-btn-border-color);
+}
+
+.btn-primary:hover, .btn-primary:focus, .btn-primary:active,
+.btn-secondary:hover, .btn-secondary:focus, .btn-secondary:active,
+.btn-success:hover, .btn-success:focus, .btn-success:active,
+.btn-info:hover, .btn-info:focus, .btn-info:active,
+.btn-warning:hover, .btn-warning:focus, .btn-warning:active,
+.btn-danger:hover, .btn-danger:focus, .btn-danger:active,
+.btn-light:hover, .btn-light:focus, .btn-light:active,
+.btn-dark:hover, .btn-dark:focus, .btn-dark:active {
+    filter: brightness(0.85);
+}
+
+.btn-primary {
+    --bs-btn-bg: var(--primary);
+    --bs-btn-border-color: var(--primary);
+}
+
+.btn-secondary {
+    --bs-btn-bg: var(--secondary);
+    --bs-btn-border-color: var(--secondary);
+}
+
+.btn-success {
+    --bs-btn-bg: var(--success);
+    --bs-btn-border-color: var(--success);
+}
+
+.btn-info {
+    --bs-btn-bg: var(--info);
+    --bs-btn-border-color: var(--info);
+    --bs-btn-color: #fff;
+}
+
+.btn-warning {
+    --bs-btn-bg: var(--warning);
+    --bs-btn-border-color: var(--warning);
+}
+
+.btn-danger {
+    --bs-btn-bg: var(--danger);
+    --bs-btn-border-color: var(--danger);
+}
+
+.btn-light {
+    --bs-btn-bg: var(--light);
+    --bs-btn-border-color: var(--light);
+}
+
+.btn-dark {
+    --bs-btn-bg: var(--dark);
+    --bs-btn-border-color: var(--dark);
+}
+
+.card-header {
+    color: #fff;
+}
+
+.card {
+    color: #000;
+}
+
+li {
+  color: #fff;
+}

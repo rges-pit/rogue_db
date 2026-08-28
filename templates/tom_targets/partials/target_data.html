@@ -1,0 +1,45 @@
+{% load tom_common_extras targets_extras %}
+<dl class="row">
+  {% for target_name in target.names %}
+    {% if forloop.first %}
+      <dt class="col-sm-6">Names</dt>
+    {% else %}
+      <dt class="col-sm-6">&nbsp;</dt>
+    {% endif %}
+    <dd class="col-sm-6">{{ target_name }}</dd>
+  {% endfor %}
+<dt class="col-sm-6">RA</dt><dd class="col-sm-6">{{ target.ra|deg_to_sexigesimal:"hms" }}</dd>
+<dt class="col-sm-6"></dt><dd class="col-sm-6">{{ target.ra|floatformat:4 }}</dd>
+<dt class="col-sm-6">Dec</dt><dd class="col-sm-6">{{ target.dec|deg_to_sexigesimal:"hms" }}</dd>
+<dt class="col-sm-6"></dt><dd class="col-sm-6">{{ target.dec|floatformat:4 }}</dd>
+<dt class="col-sm-6">l [deg]</dt><dd class="col-sm-6">{{ target.galactic_lat|floatformat:4 }}</dd>
+<dt class="col-sm-6">b [deg]</dt><dd class="col-sm-6">{{ target.galactic_lng|floatformat:4 }}</dd>
+
+<dt class="col-sm-6">Classification</dt>
+  <dd class="col-sm-6">{{ target.classification }}</dd>
+<dt class="col-sm-6">Category</dt>
+  <dd class="col-sm-6">{{ target.category }}</dd>
+
+  <dt class="col-sm-6">t<sub>0</sub> [HJD]</dt>
+  <dd class="col-sm-6">{{ target.t0 }}&#8723;{{ target.t0_error }}</dd>
+  <dt class="col-sm-6">u<sub>0</sub></dt>
+  <dd class="col-sm-6">{{ target.u0 }}&#8723;{{ target.u0_error }}</dd>
+  <dt class="col-sm-6">t<sub>E</sub> [days]</dt>
+  <dd class="col-sm-6">{{ target.tE }}&#8723;{{ target.tE_error }}</dd>
+  <dt class="col-sm-6">&pi;<sub>E,E</sub></dt>
+  <dd class="col-sm-6">{{ target.piEE }}&#8723;{{ target.piEE_error }}</dd>
+  <dt class="col-sm-6">&pi;<sub>E,N</sub></dt>
+  <dd class="col-sm-6">{{ target.piEN }}&#8723;{{ target.piEN_error }}</dd>
+  <dt class="col-sm-6">&rho;</dt>
+  <dd class="col-sm-6">{{ target.rho }}&#8723;{{ target.rho_error }}</dd>
+  <dt class="col-sm-6">&chi;<sup>2</sup></dt>
+  <dd class="col-sm-6">{{ target.chi2 }}</dd>
+
+  <dt class="col-sm-6">Baseline mag</dt>
+  <dd class="col-sm-6">{{ target.baseline_magnitude }}&#8723;{{ target.baseline_mag_error }}</dd>
+<dt class="col-sm-6">Source mag</dt>
+  <dd class="col-sm-6">{{ target.source_magnitude }}&#8723;{{ target.source_mag_error }}</dd>
+<dt class="col-sm-6">Blend mag</dt>
+  <dd class="col-sm-6">{{ target.blend_magnitude }}&#8723;{{ target.blend_mag_error }}</dd>
+
+</dl>

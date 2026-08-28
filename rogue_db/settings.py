@@ -46,7 +46,7 @@ ALLOWED_HOSTS = []
 TOM_NAME = 'rogue_db'
 
 # Use built-in css theme to change the look of your TOM. (Valid themes = [Dark,])
-# CSS_THEME = 'Dark'
+CSS_THEME = 'Dark'
 
 INSTALLED_APPS = TOMTOOLKIT_INSTALLED_APPS + [
     'custom_code',
@@ -129,7 +129,7 @@ AUTHENTICATION_BACKENDS = TOMTOOLKIT_AUTHENTICATION_BACKENDS
 # TOM_PASSWORD_RESET_ENABLED = True
 
 # Require two-factor authentication: 'all' for every user, 'superusers' for superusers only.
-# TOM_MFA_REQUIRED = 'all'
+TOM_MFA_REQUIRED = 'all'
 
 # Self-registration: 'open' (sign up and log in immediately) or 'approval_required'
 # (a superuser approves each account from the Users page). Default: only administrators create accounts.
@@ -359,7 +359,7 @@ REST_FRAMEWORK = {
 
 # Default Plotly theme setting, can set to any valid theme:
 # 'plotly', 'plotly_white', 'plotly_dark', 'ggplot2', 'seaborn', 'simple_white', 'none'
-PLOTLY_THEME = 'plotly_white'
+PLOTLY_THEME = 'plotly_dark'
 
 # Setting for displaying pagination information (e.g., "(0-0 of 0)").
 # Set this to False if you have a particularly large DB and paginated views are slow.
