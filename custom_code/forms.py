@@ -31,11 +31,6 @@ class TargetModelForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Crispy forms - the surrounding <form> tag is provided by the template.
-        # The template puts an Alpine.js `modelType` variable in scope (x-data) on
-        # that <form>, bound below to the model_type field via x-model. The
-        # Microlensing/Flare parameter panels use x-show against that variable so
-        # only the parameters relevant to the selected model type are shown.
         self.helper = FormHelper()
         self.helper.form_tag = False
         self.helper.disable_csrf = True

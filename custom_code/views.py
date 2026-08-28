@@ -78,7 +78,8 @@ class TargetModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
 
 class TargetModelCreateView(LoginRequiredMixin, CreateView):
     """
-    View for creating a TargetModel. Requires the user to be logged in.
+    View provides a form to enable a user to manually enter the parameters of a Target model.
+    Permissions are set to requires that the user is logged in.
     """
     template_name = 'custom_code/targetmodel_form.html'
     model = TargetModel
@@ -86,3 +87,4 @@ class TargetModelCreateView(LoginRequiredMixin, CreateView):
 
     def get_success_url(self):
         return reverse('targetmodels:list')
+
