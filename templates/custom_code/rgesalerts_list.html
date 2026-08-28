@@ -1,0 +1,43 @@
+{% extends 'tom_common/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block title %}Alerts{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-md-10">
+    <div class="row">
+      <div class="col-md-12">
+        <span class="float-end">
+        {{ alert_count }} Alert{{ alert_count|pluralize }} &nbsp;
+        <a href="{% url 'alerts:create' %}" class="btn btn-primary" title="Create an Alert">Create Alert</a>
+      </span>
+      </div>
+    </div>
+
+    {% block alert_table_content %}
+    <hr>
+    {# Search form (we refer to this id="filter-form" in the RGESAlertTable.Meta.attrs) #}
+    <form id="filter-form" class="mb-3"
+      hx-get="{% url 'alerts:list' %}"
+      hx-target="div.table-container"
+      hx-swap="outerHTML"
+      hx-indicator=".progress">
+        {% crispy filter.form %}
+    </form>
+
+    {# Progress indicator #}
+    <div class="progress">
+        <div class="indeterminate"></div>
+    </div>
+
+    {# The actual table #}
+    <div class="table-container">
+        {% include "custom_code/partials/alert_table_partial.html" %}
+    </div>
+
+    <hr>
+      {% endblock alert_table_content %}
+  </div>
+</div>
+{% endblock content %}

@@ -44,7 +44,7 @@ class RGESAlert(models.Model):
     roman_id = models.CharField(max_length=100, verbose_name='Roman ID')
     target = models.ForeignKey(
         RogueTarget,
-        on_null=True,
+        null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name='alerts'
@@ -60,13 +60,13 @@ class RGESAlert(models.Model):
         decimal_places=1,
         validators=[MinValueValidator(0.0), MaxValueValidator(100.0)],
         help_text="Classification confidence as a percentage",
-        null=True
+        null=True, blank=True
     )
     alert_delta_chi2 = models.DecimalField(
         max_digits=10,
         decimal_places=3,
         help_text="Classification confidence in a delta chi2",
-        null=True
+        null=True, blank=True
     )
     alert_classification = models.CharField(
         max_length=30,
@@ -82,42 +82,42 @@ class RGESAlert(models.Model):
         decimal_places=5,
         validators=[MinValueValidator(2433282.5), MaxValueValidator(2470000.0)],
         help_text="Time of microlensing event peak as a Julian Date",
-        null=True
+        null=True, blank=True
     )
     alert_tE = models.DecimalField(
         max_digits=10,
         decimal_places=5,
         validators=[MinValueValidator(0.0), MaxValueValidator(1000.0)],
         help_text="Einstein crossing time of a microlensing event in days",
-        null=True
+        null=True, blank=True
     )
     alert_u0 = models.DecimalField(
         max_digits=10,
         decimal_places=6,
         validators=[MinValueValidator(0.0), MaxValueValidator(100.0)],
         help_text="Impact parameter of a microlensing event",
-        null=True
+        null=True, blank=True
     )
     alert_rho = models.DecimalField(
         max_digits=7,
         decimal_places=4,
         validators=[MinValueValidator(0.0), MaxValueValidator(99.0)],
         help_text="Angular source size normalized by the angular Einstein radius of a microlensing event",
-        null=True
+        null=True, blank=True
     )
     alert_peak_mag = models.DecimalField(
         max_digits=5,
         decimal_places=3,
         validators=[MinValueValidator(-10.0), MaxValueValidator(30.0)],
         help_text="Peak brightness in magnitudes",
-        null=True
+        null=True, blank=True
     )
     alert_baseline_mag = models.DecimalField(
         max_digits=5,
         decimal_places=3,
         validators=[MinValueValidator(-10.0), MaxValueValidator(30.0)],
         help_text="Baseline brightness in magnitudes",
-        null=True
+        null=True, blank=True
     )
     alert_mag_passband = models.CharField(
         max_length=15,
