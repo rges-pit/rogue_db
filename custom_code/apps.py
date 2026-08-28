@@ -11,11 +11,14 @@ class CustomCodeConfig(AppConfig):
         Integration point for adding URL patterns to the TOM's URL configuration.
         """
         return [
-            path('alerts/', include('custom_code.urls'))
+            path('', include('custom_code.urls'))
         ]
 
     def nav_items(self):
         """
         Integration point for adding items to the navbar.
         """
-        return [{'partial': 'custom_code/partials/navbar_item.html'}]
+        return [
+            {'partial': 'custom_code/partials/navbar_item.html'},
+            {'partial': 'custom_code/partials/navbar_item_targetmodels.html'},
+        ]

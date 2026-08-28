@@ -1,7 +1,7 @@
 import django_tables2 as tables
 
 from tom_common.htmx_table import HTMXTable
-from .models import RGESAlert
+from .models import RGESAlert, TargetModel
 
 
 class RGESAlertTable(HTMXTable):
@@ -24,3 +24,21 @@ class RGESAlertTable(HTMXTable):
         exclude = ['selection']
 
     partial_template_name = "custom_code/partials/alert_table_partial.html"
+
+class TargetModelTable(HTMXTable):
+
+    target = tables.Column(
+        linkify=True,
+        attrs={"a": {"hx-boost": "false"}}
+    )
+
+    class Meta(HTMXTable.Meta):
+        model = TargetModel
+        fields = [
+            'target', 'model_type',
+        ]
+        # HTMXTable declares a 'selection' checkbox column for bulk actions; alerts
+        # have no such grouping form, so it's excluded here.
+        exclude = ['selection']
+
+    partial_template_name = "custom_code/partials/targetmodel_table_partial.html"

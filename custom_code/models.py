@@ -142,3 +142,57 @@ class RGESAlert(models.Model):
             ('change_alert', 'Change Alert'),
             ('delete_alert', 'Delete Alert'),
         )
+
+class TargetModel(models.Model):
+
+    class ModelTypes(models.TextChoices):
+        microlensing = 'Microlensing', 'Microlensing'
+        flare = 'Flare', 'Flare'
+        unknown = 'Unknown', 'Unknown'
+
+    model_type = models.CharField(
+        max_length=15,
+        choices=ModelTypes.choices,
+        default=ModelTypes.unknown,
+        null=True,
+        blank=True
+    )
+    target = models.ForeignKey(
+        RogueTarget,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='target_models'
+    )
+    # Microlensing model parameters
+    t0 = models.FloatField(default=0, null=True, blank=True)
+    t0_error = models.FloatField(default=0, null=True, blank=True)
+    u0 = models.FloatField(default=0, null=True, blank=True)
+    u0_error = models.FloatField(default=0, null=True, blank=True)
+    tE = models.FloatField(default=0, null=True, blank=True)
+    tE_error = models.FloatField(default=0, null=True, blank=True)
+    piEN = models.FloatField(default=0, null=True, blank=True)
+    piEN_error = models.FloatField(default=0, null=True, blank=True)
+    piEE = models.FloatField(default=0, null=True, blank=True)
+    piEE_error = models.FloatField(default=0, null=True, blank=True)
+    rho = models.FloatField(default=0, null=True, blank=True)
+    rho_error = models.FloatField(default=0, null=True, blank=True)
+
+    # Flare model parameters
+    peak_amplitude = models.FloatField(default=0, null=True, blank=True)
+    rise_time = models.FloatField(default=0, null=True, blank=True)
+    tau1 = models.FloatField(default=0, null=True, blank=True)
+    tau2 = models.FloatField(default=0, null=True, blank=True)
+    equivalent_duration = models.FloatField(default=0, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "target_model"
+        permissions = (
+            ('view_model', 'View Model'),
+            ('add_model', 'Add Model'),
+            ('change_model', 'Change Model'),
+            ('delete_model', 'Delete Model'),
+        )

@@ -1,0 +1,13 @@
+{% load render_table from django_tables2 %}
+
+{% render_table table %}
+
+{% if not table.data %}
+    <div class="alert alert-info mt-3">
+        {% if empty_database %}
+            There are no models in the database.
+        {% else %}
+            No models match those filters.
+        {% endif %}
+    </div>
+{% endif %}
