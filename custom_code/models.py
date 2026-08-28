@@ -1,5 +1,6 @@
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
+from .target_models import RogueTarget
 
 class RGESAlert(models.Model):
     """
@@ -41,6 +42,13 @@ class RGESAlert(models.Model):
         unknown = 'unknown', 'Unknown'
 
     roman_id = models.CharField(max_length=100, verbose_name='Roman ID')
+    target = models.ForeignKey(
+        RogueTarget,
+        on_null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='alerts'
+    )
     ra = models.FloatField(
         null=True, blank=True, verbose_name='Right Ascension', help_text='Right Ascension, in degrees.'
     )
