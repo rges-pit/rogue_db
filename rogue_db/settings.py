@@ -26,7 +26,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # See https://docs.djangoproject.com/en/stable/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'd)$^m-a7wa%5rf%m0gdugkn4^#5xx0(ej$j*$2ke!86rrz0#sj'
+SECRET_KEY = os.environ['SECRET_KEY']
 
 # Old SECRET_KEY values to keep accepting during a graceful rotation. When
 # you rotate SECRET_KEY, move the previous value into this list, restart,
