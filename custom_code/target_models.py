@@ -84,4 +84,3 @@ class RogueTarget(BaseTarget):
                     survey_name = tn.name
 
         return survey_name
-

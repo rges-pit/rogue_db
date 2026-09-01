@@ -41,40 +41,46 @@ class TargetModelForm(forms.ModelForm):
                 Column(Field('model_type', **{'x-model': 'modelType'}), css_class='col-md-6'),
             ),
             Div(
-                HTML('<h5>Microlensing Parameters</h5>'),
                 Row(
-                    Column('t0', css_class='col-md-3'),
-                    Column('t0_error', css_class='col-md-3'),
-                    Column('u0', css_class='col-md-3'),
-                    Column('u0_error', css_class='col-md-3'),
+                    Column('model_category', css_class='col-md-3'),
+                    Column('chisq', css_class='col-md-3'),
                 ),
-                Row(
-                    Column('tE', css_class='col-md-3'),
-                    Column('tE_error', css_class='col-md-3'),
-                    Column('rho', css_class='col-md-3'),
-                    Column('rho_error', css_class='col-md-3'),
+                Div(
+                    HTML('<h5>Microlensing Parameters</h5>'),
+                    Row(
+                        Column('t0', css_class='col-md-3'),
+                        Column('t0_error', css_class='col-md-3'),
+                        Column('u0', css_class='col-md-3'),
+                        Column('u0_error', css_class='col-md-3'),
+                    ),
+                    Row(
+                        Column('tE', css_class='col-md-3'),
+                        Column('tE_error', css_class='col-md-3'),
+                        Column('rho', css_class='col-md-3'),
+                        Column('rho_error', css_class='col-md-3'),
+                    ),
+                    Row(
+                        Column('piEN', css_class='col-md-3'),
+                        Column('piEN_error', css_class='col-md-3'),
+                        Column('piEE', css_class='col-md-3'),
+                        Column('piEE_error', css_class='col-md-3'),
+                    ),
+                    **{'x-show': "modelType == 'Microlensing'"},
                 ),
-                Row(
-                    Column('piEN', css_class='col-md-3'),
-                    Column('piEN_error', css_class='col-md-3'),
-                    Column('piEE', css_class='col-md-3'),
-                    Column('piEE_error', css_class='col-md-3'),
+                Div(
+                    HTML('<h5>Flare Parameters</h5>'),
+                    Row(
+                        Column('peak_amplitude', css_class='col-md-4'),
+                        Column('rise_time', css_class='col-md-4'),
+                        Column('equivalent_duration', css_class='col-md-4'),
+                    ),
+                    Row(
+                        Column('tau1', css_class='col-md-4'),
+                        Column('tau2', css_class='col-md-4'),
+                    ),
+                    **{'x-show': "modelType == 'Flare'"},
                 ),
                 css_class='border rounded p-3 mb-3',
-                **{'x-show': "modelType == 'Microlensing'", 'x-transition': ''},
-            ),
-            Div(
-                HTML('<h5>Flare Parameters</h5>'),
-                Row(
-                    Column('peak_amplitude', css_class='col-md-4'),
-                    Column('rise_time', css_class='col-md-4'),
-                    Column('equivalent_duration', css_class='col-md-4'),
-                ),
-                Row(
-                    Column('tau1', css_class='col-md-4'),
-                    Column('tau2', css_class='col-md-4'),
-                ),
-                css_class='border rounded p-3 mb-3',
-                **{'x-show': "modelType == 'Flare'", 'x-transition': ''},
+                **{'x-show': "modelType == 'Microlensing' || modelType == 'Flare'"},
             ),
         )

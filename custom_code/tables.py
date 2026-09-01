@@ -35,7 +35,7 @@ class TargetModelTable(HTMXTable):
     class Meta(HTMXTable.Meta):
         model = TargetModel
         fields = [
-            'target', 'model_type',
+            'target', 'model_type', 'model_category'
         ]
         # HTMXTable declares a 'selection' checkbox column for bulk actions; alerts
         # have no such grouping form, so it's excluded here.

@@ -155,8 +155,10 @@ class TargetModel(models.Model):
         choices=ModelTypes.choices,
         default=ModelTypes.unknown,
         null=True,
-        blank=True
+        blank=True,
+        db_index=True
     )
+    model_category = models.CharField(max_length=30, null=True, blank=True)
     target = models.ForeignKey(
         RogueTarget,
         null=True,
@@ -165,25 +167,30 @@ class TargetModel(models.Model):
         related_name='target_models'
     )
     # Microlensing model parameters
-    t0 = models.FloatField(default=0, null=True, blank=True)
+    # db_index=True on the base parameters (not their _error counterparts) since
+    # those are the fields TargetCutfileFilterSet filters on with min/max ranges.
+    t0 = models.FloatField(default=0, null=True, blank=True, db_index=True)
     t0_error = models.FloatField(default=0, null=True, blank=True)
-    u0 = models.FloatField(default=0, null=True, blank=True)
+    u0 = models.FloatField(default=0, null=True, blank=True, db_index=True)
     u0_error = models.FloatField(default=0, null=True, blank=True)
-    tE = models.FloatField(default=0, null=True, blank=True)
+    tE = models.FloatField(default=0, null=True, blank=True, db_index=True)
     tE_error = models.FloatField(default=0, null=True, blank=True)
-    piEN = models.FloatField(default=0, null=True, blank=True)
+    piEN = models.FloatField(default=0, null=True, blank=True, db_index=True)
     piEN_error = models.FloatField(default=0, null=True, blank=True)
-    piEE = models.FloatField(default=0, null=True, blank=True)
+    piEE = models.FloatField(default=0, null=True, blank=True, db_index=True)
     piEE_error = models.FloatField(default=0, null=True, blank=True)
-    rho = models.FloatField(default=0, null=True, blank=True)
+    rho = models.FloatField(default=0, null=True, blank=True, db_index=True)
     rho_error = models.FloatField(default=0, null=True, blank=True)
 
     # Flare model parameters
-    peak_amplitude = models.FloatField(default=0, null=True, blank=True)
-    rise_time = models.FloatField(default=0, null=True, blank=True)
-    tau1 = models.FloatField(default=0, null=True, blank=True)
-    tau2 = models.FloatField(default=0, null=True, blank=True)
-    equivalent_duration = models.FloatField(default=0, null=True, blank=True)
+    peak_amplitude = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    rise_time = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    tau1 = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    tau2 = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    equivalent_duration = models.FloatField(default=0, null=True, blank=True, db_index=True)
+
+    # Goodness of fit parameters
+    chisq = models.FloatField(default=0, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

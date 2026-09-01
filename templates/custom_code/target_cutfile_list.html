@@ -1,0 +1,163 @@
+{% extends 'tom_common/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block title %}Target Cutfile Selection{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-md-10">
+    <div class="row">
+      <h1>Target Cutfile Selection</h1>
+      <div class="col-md-12">
+        <span class="float-end">
+        {{ model_count }} Target Model{{ model_count|pluralize }} &nbsp;
+      </span>
+      </div>
+    </div>
+
+    {% block target_table_content %}
+    <hr>
+    {# Search form (we refer to this id="filter-form" in the TargetModelTable.Meta.attrs) #}
+    <form id="filter-form" class="mb-3"
+      x-data="{modelType: '{{ filter.form.model_type.value|default:'' }}'}"
+      hx-get="{% url 'cutfiles:list' %}"
+      hx-target="div.table-container"
+      hx-swap="outerHTML"
+      hx-indicator=".progress">
+        <div class="mb-3">
+            <label for="cutfile-upload" class="form-label">Load a saved cutfile</label>
+            <input type="file" id="cutfile-upload" class="form-control" accept="application/json,.json" onchange="loadCutfile(event)">
+        </div>
+        {% crispy filter.form %}
+    </form>
+
+    {# Progress indicator #}
+    <div class="progress">
+        <div class="indeterminate"></div>
+    </div>
+
+    {# The actual table #}
+    <div class="table-container">
+        {% include "custom_code/partials/targetmodel_table_partial.html" %}
+    </div>
+
+    <hr>
+      {% endblock target_table_content %}
+  </div>
+  </div>
+
+<script>
+// Which threshold fields belong to which model type -- shared by save and load
+// so the two stay in sync with each other and with the panels in filters.py.
+const CUTFILE_PARAM_NAMES_BY_MODEL_TYPE = {
+    Microlensing: ['t0', 'u0', 'tE', 'rho', 'piEN', 'piEE'],
+    Flare: ['peak_amplitude', 'rise_time', 'equivalent_duration', 'tau1', 'tau2'],
+};
+
+function saveCutfile() {
+    // Builds a JSON snapshot of the current filter form's min/max thresholds and
+    // triggers a browser download -- entirely client-side, no server round trip.
+    // Only the parameters relevant to the selected model type are included:
+    // Microlensing cutfiles get microlensing params, Flare cutfiles get flare
+    // params. If no model type (or an unrecognized one) is selected, there's no
+    // well-defined parameter set, so thresholds comes back empty.
+    const form = document.getElementById('filter-form');
+    const data = new FormData(form);
+
+    function toNumberOrNull(value) {
+        if (value === null || value === '') return null;
+        const n = parseFloat(value);
+        return Number.isNaN(n) ? null : n;
+    }
+
+    const modelType = data.get('model_type') || null;
+    const paramNames = CUTFILE_PARAM_NAMES_BY_MODEL_TYPE[modelType] || [];
+
+    const thresholds = {};
+    paramNames.forEach(name => {
+        thresholds[name] = {
+            min: toNumberOrNull(data.get(name + '_min')),
+            max: toNumberOrNull(data.get(name + '_max')),
+        };
+    });
+
+    const cutfile = {
+        model_type: modelType,
+        target: data.get('target') || null,
+        thresholds: thresholds,
+    };
+
+    const blob = new Blob([JSON.stringify(cutfile, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'cutfile.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function loadCutfile(event) {
+    // Reads a JSON cutfile (as produced by saveCutfile) picked via the file
+    // input, and populates the form from it -- entirely client-side.
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function() {
+        let cutfile;
+        try {
+            cutfile = JSON.parse(reader.result);
+        } catch (e) {
+            alert('That file is not valid JSON.');
+            event.target.value = '';
+            return;
+        }
+        applyCutfile(cutfile);
+        event.target.value = '';  // allow re-selecting the same file later
+    };
+    reader.onerror = function() {
+        alert('Could not read that file.');
+        event.target.value = '';
+    };
+    reader.readAsText(file);
+}
+
+function applyCutfile(cutfile) {
+    // Clear every threshold field first, so leftover values (typed in before
+    // the upload, or left over from a previously loaded file) don't linger for
+    // parameters the new file doesn't mention.
+    const allParamNames = Object.values(CUTFILE_PARAM_NAMES_BY_MODEL_TYPE).flat();
+    allParamNames.forEach(name => {
+        const minField = document.getElementById('id_' + name + '_min');
+        const maxField = document.getElementById('id_' + name + '_max');
+        if (minField) minField.value = '';
+        if (maxField) maxField.value = '';
+    });
+
+    // Set model type and let Alpine react so the matching panel shows, exactly
+    // as if the user had picked it from the dropdown themselves.
+    const modelTypeField = document.getElementById('id_model_type');
+    if (modelTypeField) {
+        const validValues = [...modelTypeField.options].map(o => o.value);
+        modelTypeField.value = validValues.includes(cutfile.model_type) ? cutfile.model_type : '';
+        modelTypeField.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    const targetField = document.getElementById('id_target');
+    if (targetField && cutfile.target) {
+        targetField.value = cutfile.target;
+    }
+
+    const thresholds = cutfile.thresholds || {};
+    Object.keys(thresholds).forEach(name => {
+        const minField = document.getElementById('id_' + name + '_min');
+        const maxField = document.getElementById('id_' + name + '_max');
+        const value = thresholds[name] || {};
+        if (minField) minField.value = value.min ?? '';
+        if (maxField) maxField.value = value.max ?? '';
+    });
+}
+</script>
+{% endblock content %}

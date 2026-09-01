@@ -5,7 +5,7 @@ from tom_common.htmx_table import HTMXTableViewMixin
 from django_filters.views import FilterView
 
 from .models import RGESAlert, TargetModel
-from .filters import RGESAlertFilterSet, TargetModelFilterSet
+from .filters import RGESAlertFilterSet, TargetModelFilterSet, TargetCutfileFilterSet
 from .tables import RGESAlertTable, TargetModelTable
 from .forms import RGESAlertForm, TargetModelForm
 
@@ -88,3 +88,30 @@ class TargetModelCreateView(LoginRequiredMixin, CreateView):
     def get_success_url(self):
         return reverse('targetmodels:list')
 
+class TargetCutfileView(HTMXTableViewMixin, FilterView):
+    """
+    This view enables a user to configure TargetModel selection criteria based on
+    min/max thresholds on model parameters, and see the matching TargetModels
+    displayed as a list.
+    """
+    template_name = 'custom_code/target_cutfile_list.html'
+    paginate_by = 20
+    strict = False
+    model = TargetModel
+    filterset_class = TargetCutfileFilterSet
+    table_class = TargetModelTable
+
+    ordering = ['-created_at']
+
+    def get_context_data(self, *args, **kwargs):
+        """
+        Adds the number of TargetModels visible and the query string to the context object.
+
+        :returns: context dictionary
+        :rtype: dict
+        """
+        context = super().get_context_data(*args, **kwargs)
+        context['model_count'] = context['record_count']
+        context['query_string'] = self.request.META['QUERY_STRING']
+
+        return context
