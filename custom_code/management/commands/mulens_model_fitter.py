@@ -90,7 +90,7 @@ class Command(BaseCommand):
         )
 
         target_pks = list(qs.values_list('pk', flat=True))
-        logger.info(f'Fitting {len(target_pks)} targets with up to {max_workers} parallel workers')
+        logger.info('Fitting ' + str(len(target_pks)) + ' targets with up to ' + str(max_workers) + ' parallel workers')
 
         if not target_pks:
             logger.info('No targets need fitting')
@@ -112,17 +112,17 @@ class Command(BaseCommand):
                 try:
                     _, name, success, error = future.result()
                 except Exception as e:
-                    logger.exception(f'Worker process crashed while fitting target pk={pk}')
+                    logger.exception('Worker process crashed while fitting target pk= ' + str(pk))
                     failed.append((pk, str(e)))
                     continue
 
                 if success:
                     succeeded.append(name)
-                    logger.info(f'Completed fit for {name}')
+                    logger.info('Completed fit for ' + name)
                 else:
                     failed.append((name or pk, error))
                     logger.error(f'Failed fit for {name or pk}: {error}')
 
-        logger.info(f'Finished: {len(succeeded)} succeeded, {len(failed)} failed')
+        logger.info('Finished: ' + str(len(succeeded)) + ' succeeded, ' + str(len(failed)) + ' failed')
         for name, error in failed:
             logger.error(f'  {name}: {error}')
