@@ -1,0 +1,12 @@
+{% load django_bootstrap5 tom_common_extras %}
+
+<li class="nav-item {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
+    <a class="nav-link" href="/">Home <span class="sr-only">(current)</span></a>
+</li>
+<li class="nav-item {% if request.resolver_match.namespace == 'targets' %}active{% endif %}">
+    <a class="nav-link" href="{% url 'targets:list' %}">Sources</a>
+</li>
+{% navbar_app_addons %}
+<li class="nav-item {% if 'user' in request.resolver_match.url_name %}active{% endif %}">
+    <a class="nav-link" href="{% url 'user-list' %}">Users</a>
+</li>

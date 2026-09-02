@@ -1,0 +1,85 @@
+{% load static django_bootstrap5 tom_common_extras %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Bootstrap CSS -->
+    {% bootstrap_css %}
+    <link rel="stylesheet" href="{% static 'font-awesome-4.7.0/css/font-awesome.min.css' %}">
+    <link rel="stylesheet" href="{% static 'tom_common/css/main.css' %}">
+    {% get_theme as theme %}
+    {% if theme %}
+      <link rel="stylesheet" href="{% static theme %}">
+    {% endif %}
+    <link rel="stylesheet" href="{% static 'tom_common/css/custom.css' %}">
+    {% block additional_css %}
+    {% endblock %}
+    <link rel="icon" type="image/x-icon" href="{% static 'tom_common/img/favicon-32.ico' %}" sizes="32x32" />
+
+    {% bootstrap_javascript %}
+    <!-- htmx.min.js was downloaded manually and added to the project. see https://htmx.org/docs/#download-a-copy -->
+    <script src="{% static 'tom_common/js/htmx.min.js' %}" defer></script>
+    <!-- Loading AlpineJS from a CDN For now, todo solution for 3rd party static assets. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <title>{% tom_name %} | {% block title %}{% endblock %}</title>
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-md navbar-dark bg-dark fixed-top">
+      <div class="container-fluid">
+      <a class="navbar-brand" href="/"><img src="{% static 'tom_common/img/logo-color-cropped.png' %}" class="img-fluid"> {% tom_name %}</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarsExampleDefault" aria-controls="navbarsExampleDefault" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="navbarsExampleDefault">
+        <ul class="navbar-nav me-auto">
+          {% comment "Navbar Content Template" %}
+          The navbar_content.html template defines the list (li) of nav-items that appear
+          in the navbar-nav (ul).
+
+          To customize your navbar-nav in your TOM:
+          1. Create a templates/tom_common directory at the project level.
+          2. Copy tom_common/templates/tom_common/navbar_content.html to your project's
+             templates/tom_common directory.
+          3. Customize your navbar content by editing your navbar_content.html.
+
+          For more information,
+          see the Django tutorial, "Writing your first Django app",
+          Part 7, Section "Customize the admin look and feel"
+          {% endcomment %}
+          {% include 'tom_common/navbar_content.html' %}
+
+        </ul>
+        <ul class="navbar-nav ms-auto" id="login-buttons">
+        {% include 'tom_common/partials/navbar_login.html' %}
+        </ul>
+      </div>
+      </div>
+    </nav>
+
+    <main role="main" class="container">
+      {% include 'tom_common/partials/messages.html' %}
+      <div class="content">
+        {% comment %}
+        content_container lets an extending template (e.g. allauth/layouts/base.html) wrap
+        every page's content in extra markup while pages keep overriding 'content' as usual.
+        {% endcomment %}
+        {% block content_container %}
+          {% block content %}
+          {% endblock content %}
+        {% endblock content_container %}
+      </div>
+
+    </main>
+
+  {% block javascript %}
+  {% endblock %}
+  {% block extra_javascript %}
+  {% endblock %}
+  <script src="{% static 'tom_common/js/relabel_terminology.js' %}" defer></script>
+  </body>
+</html>
