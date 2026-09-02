@@ -41,6 +41,7 @@ class RGESAlert(models.Model):
         y = 'y', 'SDSS y'
         unknown = 'unknown', 'Unknown'
 
+    alert_id = models.IntegerField(default=0, null=True, blank=True)
     roman_id = models.CharField(max_length=100, verbose_name='Roman ID')
     target = models.ForeignKey(
         RogueTarget,
@@ -130,6 +131,7 @@ class RGESAlert(models.Model):
         blank=True,
         null=True
     )
+    alert_contents = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
