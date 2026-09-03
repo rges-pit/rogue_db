@@ -1,0 +1,11 @@
+<!--
+Overrides allauth's default img element to expose `tags` as CSS classes.
+Needed for the TOTP QR code (tags="mfa,totp,qr"): allauth's generated QR
+SVG has black modules on a *transparent* background, and this project's
+dark theme (see static/tom_common/css/custom.css) sets the page background
+to black -- without a class hook here, the QR renders black-on-black and
+can't be scanned. See the `.qr` rule in custom.css for the actual fix.
+-->
+<img src="{{ attrs.src }}"
+     {% if attrs.alt %}alt="{{ attrs.alt }}"{% endif %}
+     {% if attrs.tags %}class="{{ attrs.tags|join:' ' }}"{% endif %}>

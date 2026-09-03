@@ -127,3 +127,13 @@ li {
 .input-group-text {
   color: #fff;
 }
+
+/* allauth's generated TOTP QR code SVG has black modules on a transparent
+   background, which is unscannable against this theme's black page
+   background -- give it an opaque white backing (see templates/allauth/
+   elements/img.html, which turns the img element's `tags` into classes). */
+.qr {
+  background-color: #fff;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}
