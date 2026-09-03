@@ -58,53 +58,18 @@
   <div class="col-md-8">
     <ul class="nav nav-tabs" role="tablist" id="tabs">
       <li class="nav-item">
-        <a class="nav-link" id="observe-tab" href="#observe" role="tab" data-bs-toggle="tab">Observe</a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" id="observations-tab" href="#observations" role="tab" data-bs-toggle="tab">Observations</a>
-      </li>
-      <li class="nav-item">
         <a class="nav-link" id="manage-data-tab" href="#manage-data" role="tab" data-bs-toggle="tab">Manage Data</a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" id="manage-groups-tab" href="#manage-groups" role="tab" data-bs-toggle="tab">Manage Groups</a>
       </li>
       <li class="nav-item">
         <a class="nav-link active" id="photometry-tab" href="#photometry" role="tab" data-bs-toggle="tab">Photometry</a>
       </li>
-      <li class="nav-item">
-        <a class="nav-link" id="spectroscopy-tab" href="#spectroscopy" role="tab" data-bs-toggle="tab">Spectroscopy</a>
-      </li>
       {% include_app_tabs %}
     </ul>
     <div class="tab-content">
-      <div class="tab-pane" id="observe">
-        <h4>Observe</h4>
-        {% observing_buttons object %}
-        <hr/>
-        {% observationtemplate_run object %}
-        <hr/>
-        <h4>Plan</h4>
-        {% if object.type == 'SIDEREAL' %}
-          {% target_plan %}
-          {% moon_distance object %}
-        {% elif target.type == 'NON_SIDEREAL' %}
-          <p>Airmass plotting for non-sidereal targets is not currently supported. If you would like to add this functionality, please check out the <a href="https://github.com/TOMToolkit/tom_nonsidereal_airmass" target="_blank">non-sidereal airmass plugin.</a></p>
-        {% endif %}
-      </div>
-      <div class="tab-pane" id="observations">
-        {% existing_observation_form object %}
-        <h4>Observations</h4>
-        <button hx-get="{% url 'targets:render-observation-table' pk=target.id %}"
-                hx-target="#observation-table"
-                hx-indicator=".progress"
-                hx-disabled-elt="this"
-                class="btn btn-secondary mb-3">Refresh Observation List
-        </button>
-        <div id="observation-table">
-        {% include 'tom_targets/partials/observation_table.html' %}
+      <div class="tab-pane active" id="photometry">
+        {% photometry_mulens_model target %}
+        {% get_photometry_data object %}
         </div>
-      </div>
       <div class="tab-pane" id="manage-data">
         {% if user.is_authenticated %}
           {% upload_dataproduct object %}
@@ -117,16 +82,6 @@
         <hr>
         {% endif %}
         {% dataproduct_list_for_target object %}
-      </div>
-      <div class="tab-pane" id="manage-groups">
-        {% target_groups target %}
-      </div>
-      <div class="tab-pane active" id="photometry">
-        {% photometry_mulens_model target %}
-        {% get_photometry_data object %}
-        </div>
-      <div class="tab-pane" id="spectroscopy">
-        {% spectroscopy_for_target target %}
       </div>
       {% include_app_tab_divs %}
 

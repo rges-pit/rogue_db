@@ -4,12 +4,13 @@ from django.views.generic.edit import CreateView
 from tom_common.htmx_table import HTMXTableViewMixin
 from django_filters.views import FilterView
 
-from .models import RGESAlert, EventModel, MicrolensingModel, FlareModel
+from .models import RGESAlert, Event, EventModel, MicrolensingModel, FlareModel
 from .filters import (
     RGESAlertFilterSet, EventModelFilterSet,
     MicrolensingCutfileFilterSet, FlareCutfileFilterSet,
+    EventFilterSet
 )
-from .tables import RGESAlertTable, EventModelTable
+from .tables import RGESAlertTable, EventModelTable, EventTable
 from .forms import RGESAlertForm, MicrolensingModelForm, FlareModelForm
 
 class RGESAlertListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
@@ -51,6 +52,38 @@ class RGESAlertCreateView(LoginRequiredMixin, CreateView):
     def get_success_url(self):
         return reverse('candidates:list')
 
+class EventListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
+    """
+    View to list all Events associated with a Target.  Login required.
+    """
+    template_name = 'custom_code/events_list.html'
+    paginate_by = 20
+    strict = False
+    model = Event
+    filterset_class = EventFilterSet
+    table_class = EventTable
+
+    ordering = ['-created_at']
+
+    def get_queryset(self, *args, **kwargs):
+        queryset = super().get_queryset(*args, **kwargs)
+        target_id = self.request.GET.get('target')
+        if target_id:
+            queryset = queryset.filter(target_id=target_id)
+        return queryset
+
+    def get_context_data(self, *args, **kwargs):
+        """
+        Adds the number of models visible and the query string to the context object.
+
+        :returns: context dictionary
+        :rtype: dict
+        """
+        context = super().get_context_data(*args, **kwargs)
+        context['event_count'] = context['record_count']
+        context['query_string'] = self.request.META['QUERY_STRING']
+
+        return context
 
 class EventModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     """

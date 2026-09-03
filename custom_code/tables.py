@@ -1,7 +1,7 @@
 import django_tables2 as tables
 
 from tom_common.htmx_table import HTMXTable
-from .models import RGESAlert, EventModel
+from .models import RGESAlert, EventModel, Event
 
 
 class RGESAlertTable(HTMXTable):
@@ -53,4 +53,20 @@ class EventModelTable(HTMXTable):
         # have no such grouping form, so it's excluded here.
         exclude = ['selection']
 
-    partial_template_name = "custom_code/partials/eventmodel_table_partial.html"
+    partial_template_name = "custom_code/partials/eventmodel_table.html"
+
+class EventTable(HTMXTable):
+    """
+    Table to present information on lightcurve events
+    """
+
+    class Meta(HTMXTable.Meta):
+        model = Event
+        fields = [
+            'target', 'event_id', 'window_start', 'window_end'
+        ]
+        # HTMXTable declares a 'selection' checkbox column for bulk actions; alerts
+        # have no such grouping form, so it's excluded here.
+        exclude = ['selection']
+
+    partial_template_name = "custom_code/partials/event_table.html"

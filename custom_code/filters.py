@@ -6,7 +6,7 @@ import django_filters
 
 from tom_common.htmx_table import HTMXTableFilterSet
 
-from .models import RGESAlert, EventModel, MicrolensingModel, FlareModel
+from .models import RGESAlert, Event, EventModel, MicrolensingModel, FlareModel
 from .target_models import RogueTarget
 
 
@@ -56,6 +56,14 @@ class RGESAlertFilterSet(HTMXTableFilterSet):
         model = RGESAlert
         fields = ['roman_id', 'event', 'alert_classification']
 
+class EventFilterSet(HTMXTableFilterSet):
+    """
+    Filters for Event objects relating to the given target
+    """
+
+    class Meta:
+        model = Event
+        fields = ['event_id', 'window_start', 'window_end']
 
 class EventModelFilterSet(HTMXTableFilterSet):
     """

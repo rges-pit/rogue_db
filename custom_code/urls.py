@@ -3,7 +3,7 @@ from django.urls import path, include
 from .views import (
     RGESAlertListView, RGESAlertCreateView,
     EventModelListView, MicrolensingModelCreateView, FlareModelCreateView,
-    TargetCutfileView,
+    TargetCutfileView, EventListView,
 )
 
 candidates_urlpatterns = [
@@ -21,8 +21,13 @@ cutfiles_urlpatterns = [
     path('', TargetCutfileView.as_view(), name='list'),
 ]
 
+events_urlpatterns = [
+    path('', EventListView.as_view(), name='list'),
+]
+
 urlpatterns = [
     path('candidates/', include((candidates_urlpatterns, 'candidates'), namespace='candidates')),
     path('event-models/', include((eventmodels_urlpatterns, 'eventmodels'), namespace='eventmodels')),
     path('cutfiles/', include((cutfiles_urlpatterns, 'cutfiles'), namespace='cutfiles')),
+    path('events/', include((events_urlpatterns, 'events'), namespace='events')),
 ]

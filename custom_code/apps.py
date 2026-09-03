@@ -23,3 +23,10 @@ class CustomCodeConfig(AppConfig):
             {'partial': 'custom_code/partials/navbar_item_eventmodels.html'},
             {'partial': 'custom_code/partials/navbar_item_cutfiles.html'},
         ]
+
+    def target_detail_tabs(self):
+        return [
+            {'partial': 'custom_code/partials/target_events_tab.html',
+             'context': 'custom_code.target_tabs.event_tab_context',
+             'label': 'Events'}
+        ]
