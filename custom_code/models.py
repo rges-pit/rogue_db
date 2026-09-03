@@ -145,7 +145,7 @@ class RGESAlert(models.Model):
             ('delete_alert', 'Delete Alert'),
         )
 
-class TargetModel(models.Model):
+class EventModel(models.Model):
 
     class ModelTypes(models.TextChoices):
         microlensing = 'Microlensing', 'Microlensing'
@@ -160,7 +160,7 @@ class TargetModel(models.Model):
         blank=True,
         db_index=True
     )
-    model_category = models.CharField(max_length=30, null=True, blank=True)
+
     target = models.ForeignKey(
         RogueTarget,
         null=True,
@@ -168,9 +168,20 @@ class TargetModel(models.Model):
         on_delete=models.SET_NULL,
         related_name='target_models'
     )
-    # Microlensing model parameters
-    # db_index=True on the base parameters (not their _error counterparts) since
-    # those are the fields TargetCutfileFilterSet filters on with min/max ranges.
+
+    # Goodness of fit parameters
+    chisq = models.FloatField(default=0, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+class MicrolensingModel(EventModel):
+    """
+    Microlensing model parameters
+    db_index=True on the base parameters (not their _error counterparts) since
+    those are the fields TargetCutfileFilterSet filters on with min/max ranges.
+    """
+    model_category = models.CharField(max_length=30, null=True, blank=True)
     t0 = models.FloatField(default=0, null=True, blank=True, db_index=True)
     t0_error = models.FloatField(default=0, null=True, blank=True)
     u0 = models.FloatField(default=0, null=True, blank=True, db_index=True)
@@ -184,24 +195,14 @@ class TargetModel(models.Model):
     rho = models.FloatField(default=0, null=True, blank=True, db_index=True)
     rho_error = models.FloatField(default=0, null=True, blank=True)
 
+class FlareModel(EventModel):
+    """
+    Flare model parameters
+    """
+
     # Flare model parameters
     peak_amplitude = models.FloatField(default=0, null=True, blank=True, db_index=True)
     rise_time = models.FloatField(default=0, null=True, blank=True, db_index=True)
     tau1 = models.FloatField(default=0, null=True, blank=True, db_index=True)
     tau2 = models.FloatField(default=0, null=True, blank=True, db_index=True)
     equivalent_duration = models.FloatField(default=0, null=True, blank=True, db_index=True)
-
-    # Goodness of fit parameters
-    chisq = models.FloatField(default=0, null=True, blank=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "target_model"
-        permissions = (
-            ('view_model', 'View Model'),
-            ('add_model', 'Add Model'),
-            ('change_model', 'Change Model'),
-            ('delete_model', 'Delete Model'),
-        )

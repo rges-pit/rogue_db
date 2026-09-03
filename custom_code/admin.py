@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import RGESAlert, TargetModel
+from .models import RGESAlert, MicrolensingModel, FlareModel
 
 @admin.register(RGESAlert)
 class RGESAlertAdmin(admin.ModelAdmin):
@@ -13,8 +13,8 @@ class RGESAlertAdmin(admin.ModelAdmin):
     search_fields = ('roman_id', 'alert_classification')
 
 
-@admin.register(TargetModel)
-class TargetModelAdmin(admin.ModelAdmin):
+@admin.register(MicrolensingModel)
+class MicrolensingModelAdmin(admin.ModelAdmin):
     # Columns to show in the list view table
     list_display = ('model_type', 'model_category')
 
@@ -23,3 +23,15 @@ class TargetModelAdmin(admin.ModelAdmin):
 
     # Search bar functionality at the top
     search_fields = ('model_type', 'model_category')
+
+
+@admin.register(FlareModel)
+class FlareModelAdmin(admin.ModelAdmin):
+    # Columns to show in the list view table
+    list_display = ('model_type',)
+
+    # Clickable filters on the right-hand sidebar
+    list_filter = ('model_type',)
+
+    # Search bar functionality at the top
+    search_fields = ('model_type',)

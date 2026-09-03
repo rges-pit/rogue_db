@@ -1,7 +1,7 @@
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
-from custom_code.models import TargetModel
+from custom_code.models import MicrolensingModel
 from datetime import datetime, timedelta
 import pytz
 from astropy.time import Time
@@ -120,9 +120,9 @@ def store_model_parameters(mulens, pylima_results):
             setattr(mulens, key, data)
     mulens.save()
 
-    # Store the PSPL and FSPL model fit parameters as TargetModel entries
+    # Store the PSPL and FSPL model fit parameters as MicrolensingModel entries
     for model_category in ['pspl', 'fspl']:
-        qs  = TargetModel.objects.filter(
+        qs  = MicrolensingModel.objects.filter(
             target=mulens,
             model_type='Microlensing',
             model_category=model_category.upper()
@@ -130,7 +130,7 @@ def store_model_parameters(mulens, pylima_results):
 
         if qs.count() == 0:
             if model_category == 'pspl':
-                rd = TargetModel.objects.create(
+                rd = MicrolensingModel.objects.create(
                     model_type='Microlensing',
                     model_category=model_category.upper(),
                     target=mulens,
@@ -147,7 +147,7 @@ def store_model_parameters(mulens, pylima_results):
                     chisq=pylima_results[model_category]['chi2'],
                 )
             else:
-                rd = TargetModel.objects.create(
+                rd = MicrolensingModel.objects.create(
                     model_type='Microlensing',
                     model_category=model_category.upper(),
                     target=mulens,

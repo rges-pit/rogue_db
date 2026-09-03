@@ -1,7 +1,7 @@
 import django_tables2 as tables
 
 from tom_common.htmx_table import HTMXTable
-from .models import RGESAlert, TargetModel
+from .models import RGESAlert, EventModel
 
 
 class RGESAlertTable(HTMXTable):
@@ -25,7 +25,14 @@ class RGESAlertTable(HTMXTable):
 
     partial_template_name = "custom_code/partials/alert_table_partial.html"
 
-class TargetModelTable(HTMXTable):
+
+class EventModelTable(HTMXTable):
+    """
+    Lists EventModel rows -- since this queries the shared MTI base table, it
+    shows every model regardless of type (Microlensing, Flare, ...), but only
+    ever has access to base-class fields. Type-specific parameters aren't
+    shown here; see the per-type cutfile search for those.
+    """
 
     target = tables.Column(
         linkify=True,
@@ -33,9 +40,9 @@ class TargetModelTable(HTMXTable):
     )
 
     class Meta(HTMXTable.Meta):
-        model = TargetModel
+        model = EventModel
         fields = [
-            'target', 'model_type', 'model_category'
+            'target', 'model_type'
         ]
         # HTMXTable declares a 'selection' checkbox column for bulk actions; alerts
         # have no such grouping form, so it's excluded here.

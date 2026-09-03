@@ -16,11 +16,24 @@
     </div>
 
     {% block target_table_content %}
+    {# Microlensing and Flare models live in separate tables (see custom_code/models.py),
+       so this page can only search one type per request -- pick it here, same as the
+       type tabs on the Target create form. #}
+    <ul class="nav nav-tabs mb-2">
+      <li class="nav-item">
+        <a class="nav-link {% if model_type == 'Microlensing' %}active{% endif %}"
+           href="{% url 'cutfiles:list' %}?model_type=Microlensing">Microlensing</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link {% if model_type == 'Flare' %}active{% endif %}"
+           href="{% url 'cutfiles:list' %}?model_type=Flare">Flare</a>
+      </li>
+    </ul>
+
     <hr>
-    {# Search form (we refer to this id="filter-form" in the TargetModelTable.Meta.attrs) #}
+    {# Search form (we refer to this id="filter-form" in the EventModelTable.Meta.attrs) #}
     <form id="filter-form" class="mb-3"
-      x-data="{modelType: '{{ filter.form.model_type.value|default:'' }}'}"
-      hx-get="{% url 'cutfiles:list' %}"
+      hx-get="{% url 'cutfiles:list' %}?model_type={{ model_type }}"
       hx-target="div.table-container"
       hx-swap="outerHTML"
       hx-indicator=".progress">
@@ -47,6 +60,12 @@
   </div>
 
 <script>
+// Which model type this page is currently showing -- the type is chosen via
+// the ?model_type= URL param (see the tabs above), not a form field, since
+// Microlensing and Flare models live in separate tables and each request can
+// only search one at a time.
+const CURRENT_MODEL_TYPE = "{{ model_type }}";
+
 // Which threshold fields belong to which model type -- shared by save and load
 // so the two stay in sync with each other and with the panels in filters.py.
 const CUTFILE_PARAM_NAMES_BY_MODEL_TYPE = {
@@ -57,10 +76,8 @@ const CUTFILE_PARAM_NAMES_BY_MODEL_TYPE = {
 function saveCutfile() {
     // Builds a JSON snapshot of the current filter form's min/max thresholds and
     // triggers a browser download -- entirely client-side, no server round trip.
-    // Only the parameters relevant to the selected model type are included:
-    // Microlensing cutfiles get microlensing params, Flare cutfiles get flare
-    // params. If no model type (or an unrecognized one) is selected, there's no
-    // well-defined parameter set, so thresholds comes back empty.
+    // Only the parameters relevant to the currently-viewed model type are
+    // included, since that's all this page's form ever has fields for.
     const form = document.getElementById('filter-form');
     const data = new FormData(form);
 
@@ -70,8 +87,7 @@ function saveCutfile() {
         return Number.isNaN(n) ? null : n;
     }
 
-    const modelType = data.get('model_type') || null;
-    const paramNames = CUTFILE_PARAM_NAMES_BY_MODEL_TYPE[modelType] || [];
+    const paramNames = CUTFILE_PARAM_NAMES_BY_MODEL_TYPE[CURRENT_MODEL_TYPE] || [];
 
     const thresholds = {};
     paramNames.forEach(name => {
@@ -82,7 +98,7 @@ function saveCutfile() {
     });
 
     const cutfile = {
-        model_type: modelType,
+        model_type: CURRENT_MODEL_TYPE,
         target: data.get('target') || null,
         thresholds: thresholds,
     };
@@ -125,25 +141,25 @@ function loadCutfile(event) {
 }
 
 function applyCutfile(cutfile) {
-    // Clear every threshold field first, so leftover values (typed in before
-    // the upload, or left over from a previously loaded file) don't linger for
-    // parameters the new file doesn't mention.
-    const allParamNames = Object.values(CUTFILE_PARAM_NAMES_BY_MODEL_TYPE).flat();
-    allParamNames.forEach(name => {
+    // This page can only show fields for one model type at a time (Microlensing
+    // and Flare models live in separate tables). If the loaded file is for the
+    // other type, send the user to that tab rather than silently ignoring or
+    // misapplying its thresholds.
+    if (cutfile.model_type && cutfile.model_type !== CURRENT_MODEL_TYPE) {
+        alert(
+            'This cutfile is for ' + cutfile.model_type + ' models, but you are viewing ' +
+            CURRENT_MODEL_TYPE + '. Switch tabs first, then load it again.'
+        );
+        return;
+    }
+
+    const paramNames = CUTFILE_PARAM_NAMES_BY_MODEL_TYPE[CURRENT_MODEL_TYPE] || [];
+    paramNames.forEach(name => {
         const minField = document.getElementById('id_' + name + '_min');
         const maxField = document.getElementById('id_' + name + '_max');
         if (minField) minField.value = '';
         if (maxField) maxField.value = '';
     });
-
-    // Set model type and let Alpine react so the matching panel shows, exactly
-    // as if the user had picked it from the dropdown themselves.
-    const modelTypeField = document.getElementById('id_model_type');
-    if (modelTypeField) {
-        const validValues = [...modelTypeField.options].map(o => o.value);
-        modelTypeField.value = validValues.includes(cutfile.model_type) ? cutfile.model_type : '';
-        modelTypeField.dispatchEvent(new Event('change', { bubbles: true }));
-    }
 
     const targetField = document.getElementById('id_target');
     if (targetField && cutfile.target) {

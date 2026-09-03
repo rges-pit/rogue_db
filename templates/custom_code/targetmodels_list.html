@@ -11,7 +11,13 @@
       <div class="col-md-12">
         <span class="float-end">
         {{ model_count }} Target Model{{ model_count|pluralize }} &nbsp;
-        <a href="{% url 'targetmodels:create' %}" class="btn btn-primary" title="Create a Target Model">Create Target Model</a>
+        <button class="btn btn-primary dropdown-toggle" type="button" id="createModelDropdown" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+          Create Target Model
+        </button>
+        <div class="dropdown-menu" aria-labelledby="createModelDropdown">
+          <a class="dropdown-item" href="{% url 'targetmodels:create-microlensing' %}">Microlensing Model</a>
+          <a class="dropdown-item" href="{% url 'targetmodels:create-flare' %}">Flare Model</a>
+        </div>
       </span>
       </div>
     </div>
