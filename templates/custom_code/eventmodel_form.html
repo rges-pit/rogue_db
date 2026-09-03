@@ -1,15 +1,15 @@
 {% extends 'tom_common/base.html' %}
 {% load django_bootstrap5 crispy_forms_tags %}
 
-{% block title %}New Target Model{% endblock %}
+{% block title %}New {{ model_type_label }} Model{% endblock %}
 
 {% block content %}
-<h3>Create a Target Model</h3>
+<h3>Create a {{ model_type_label }} Model</h3>
 {% bootstrap_form_errors form %}
-<form method="post" class="form" x-data="{modelType: '{{ form.model_type.value }}'}">
+<form method="post" class="form">
   {% csrf_token %}
   {% crispy form %}
   <button type="submit" class="btn btn-primary">Submit</button>
-  <a href="{% url 'targetmodels:list' %}" class="btn btn-secondary" title="Cancel">Cancel</a>
+  <a href="{% url 'eventmodels:list' %}" class="btn btn-secondary" title="Cancel">Cancel</a>
 </form>
 {% endblock content %}

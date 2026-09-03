@@ -4,10 +4,13 @@ from django.views.generic.edit import CreateView
 from tom_common.htmx_table import HTMXTableViewMixin
 from django_filters.views import FilterView
 
-from .models import RGESAlert, TargetModel
-from .filters import RGESAlertFilterSet, TargetModelFilterSet, TargetCutfileFilterSet
-from .tables import RGESAlertTable, TargetModelTable
-from .forms import RGESAlertForm, TargetModelForm
+from .models import RGESAlert, EventModel, MicrolensingModel, FlareModel
+from .filters import (
+    RGESAlertFilterSet, EventModelFilterSet,
+    MicrolensingCutfileFilterSet, FlareCutfileFilterSet,
+)
+from .tables import RGESAlertTable, EventModelTable
+from .forms import RGESAlertForm, MicrolensingModelForm, FlareModelForm
 
 class RGESAlertListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     """
@@ -48,17 +51,18 @@ class RGESAlertCreateView(LoginRequiredMixin, CreateView):
     def get_success_url(self):
         return reverse('candidates:list')
 
-class TargetModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
+
+class EventModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     """
-    View for listing TargetModels in the TOM. Requires the user to be logged in;
-    anonymous users are redirected to login.
+    View for listing EventModels (of any type) in the TOM. Requires the user
+    to be logged in; anonymous users are redirected to login.
     """
-    template_name = 'custom_code/targetmodels_list.html'
+    template_name = 'custom_code/eventmodels_list.html'
     paginate_by = 20
     strict = False
-    model = TargetModel
-    filterset_class = TargetModelFilterSet
-    table_class = TargetModelTable
+    model = EventModel
+    filterset_class = EventModelFilterSet
+    table_class = EventModelTable
 
     ordering = ['-created_at']
 
@@ -76,42 +80,81 @@ class TargetModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
         return context
 
 
-class TargetModelCreateView(LoginRequiredMixin, CreateView):
+class MicrolensingModelCreateView(LoginRequiredMixin, CreateView):
     """
-    View provides a form to enable a user to manually enter the parameters of a Target model.
-    Permissions are set to requires that the user is logged in.
+    View provides a form to enable a user to manually enter the parameters of
+    a Microlensing model fit. Requires the user to be logged in.
     """
-    template_name = 'custom_code/targetmodel_form.html'
-    model = TargetModel
-    form_class = TargetModelForm
+    template_name = 'custom_code/eventmodel_form.html'
+    model = MicrolensingModel
+    form_class = MicrolensingModelForm
+    extra_context = {'model_type_label': 'Microlensing'}
 
     def get_success_url(self):
-        return reverse('targetmodels:list')
+        return reverse('eventmodels:list')
+
+
+class FlareModelCreateView(LoginRequiredMixin, CreateView):
+    """
+    View provides a form to enable a user to manually enter the parameters of
+    a Flare model fit. Requires the user to be logged in.
+    """
+    template_name = 'custom_code/eventmodel_form.html'
+    model = FlareModel
+    form_class = FlareModelForm
+    extra_context = {'model_type_label': 'Flare'}
+
+    def get_success_url(self):
+        return reverse('eventmodels:list')
+
 
 class TargetCutfileView(HTMXTableViewMixin, FilterView):
     """
-    This view enables a user to configure TargetModel selection criteria based on
-    min/max thresholds on model parameters, and see the matching TargetModels
-    displayed as a list.
+    This view enables a user to configure Microlensing- or Flare-model
+    selection criteria based on min/max thresholds on that type's own
+    parameters, and see the matching models displayed as a list. Which type
+    is being searched is chosen via the `model_type` query parameter (see
+    the tabs in target_cutfile_list.html) -- Microlensing and Flare models
+    live in separate tables (see custom_code/models.py), so unlike the old
+    single-table search, this can only ever query one type per request.
     """
     template_name = 'custom_code/target_cutfile_list.html'
     paginate_by = 20
     strict = False
-    model = TargetModel
-    filterset_class = TargetCutfileFilterSet
-    table_class = TargetModelTable
+    # Not model-type-dependent: both searches display results through the same
+    # base-fields-only table (matching the pre-split behaviour, where the single
+    # TargetModelTable only ever showed target/model_type here too). Set as a
+    # plain attribute, not get_table_class(), because HTMXTableViewMixin's
+    # get_template_names() reads self.table_class directly for HTMX requests.
+    table_class = EventModelTable
 
     ordering = ['-created_at']
 
+    def get_model_type(self):
+        model_type = self.request.GET.get('model_type')
+        return model_type if model_type in ('Microlensing', 'Flare') else 'Microlensing'
+
+    def get_queryset(self, *args, **kwargs):
+        # HTMXTableViewMixin.get_context_data() checks self.model.objects.exists(),
+        # so self.model is set here (as well as being used below) rather than as a
+        # class attribute, since which model applies depends on the request.
+        self.model = FlareModel if self.get_model_type() == 'Flare' else MicrolensingModel
+        return super().get_queryset(*args, **kwargs)
+
+    def get_filterset_class(self):
+        return FlareCutfileFilterSet if self.get_model_type() == 'Flare' else MicrolensingCutfileFilterSet
+
     def get_context_data(self, *args, **kwargs):
         """
-        Adds the number of TargetModels visible and the query string to the context object.
+        Adds the number of models visible, which model type is being searched,
+        and the query string to the context object.
 
         :returns: context dictionary
         :rtype: dict
         """
         context = super().get_context_data(*args, **kwargs)
         context['model_count'] = context['record_count']
+        context['model_type'] = self.get_model_type()
         context['query_string'] = self.request.META['QUERY_STRING']
 
         return context

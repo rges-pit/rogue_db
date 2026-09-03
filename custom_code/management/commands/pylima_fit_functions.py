@@ -14,26 +14,26 @@ from astropy import units as unit
 
 logger = logging.getLogger(__name__)
 
-def run_fit(mulens, verbose=False):
+def run_fit(lcevent, verbose=False):
     """
     Function to perform a microlensing model fit to timeseries photometry.
 
     Parameters:
-        mulens   Target object
+        lcevent   (Lightcurve) Event object as opposed to the pyLIMA model event object
         cores integer, optional number of processing cores to use
     """
 
-    logger.info('Starting to model event ' + mulens.name)
+    logger.info('Starting to model most recent event for source ' + lcevent.target.name)
 
     # Retrieve timeseries photometry from the DB
-    datasets = data_utils.get_reduced_data(mulens)
+    datasets = data_utils.get_reduced_data(lcevent)
 
     # Fit configuration
     use_boundaries = True
 
     # Initialize the new event to be fitted:
-    current_event = event.Event(ra=mulens.ra, dec=mulens.dec)
-    current_event.name = mulens.name
+    current_event = event.Event(ra=lcevent.target.ra, dec=lcevent.target.dec)
+    current_event.name = lcevent.target.name
 
     # Using the lightcurves stored in the TOM for this target,
     # create a list of PyLIMA telescopes, and associate them with the event:
