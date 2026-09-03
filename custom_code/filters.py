@@ -54,7 +54,7 @@ class RGESAlertFilterSet(HTMXTableFilterSet):
 
     class Meta:
         model = RGESAlert
-        fields = ['roman_id', 'target', 'alert_classification']
+        fields = ['roman_id', 'event', 'alert_classification']
 
 
 class EventModelFilterSet(HTMXTableFilterSet):

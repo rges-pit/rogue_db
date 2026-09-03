@@ -58,8 +58,8 @@ class RGESAlert(models.Model):
 
     alert_id = models.IntegerField(default=0, null=True, blank=True)
     roman_id = models.CharField(max_length=100, verbose_name='Roman ID')
-    target = models.ForeignKey(
-        RogueTarget,
+    event = models.ForeignKey(
+        Event,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
