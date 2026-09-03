@@ -57,7 +57,7 @@ class EventModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     View for listing EventModels (of any type) in the TOM. Requires the user
     to be logged in; anonymous users are redirected to login.
     """
-    template_name = 'custom_code/targetmodels_list.html'
+    template_name = 'custom_code/eventmodels_list.html'
     paginate_by = 20
     strict = False
     model = EventModel
@@ -85,13 +85,13 @@ class MicrolensingModelCreateView(LoginRequiredMixin, CreateView):
     View provides a form to enable a user to manually enter the parameters of
     a Microlensing model fit. Requires the user to be logged in.
     """
-    template_name = 'custom_code/targetmodel_form.html'
+    template_name = 'custom_code/eventmodel_form.html'
     model = MicrolensingModel
     form_class = MicrolensingModelForm
     extra_context = {'model_type_label': 'Microlensing'}
 
     def get_success_url(self):
-        return reverse('targetmodels:list')
+        return reverse('eventmodels:list')
 
 
 class FlareModelCreateView(LoginRequiredMixin, CreateView):
@@ -99,13 +99,13 @@ class FlareModelCreateView(LoginRequiredMixin, CreateView):
     View provides a form to enable a user to manually enter the parameters of
     a Flare model fit. Requires the user to be logged in.
     """
-    template_name = 'custom_code/targetmodel_form.html'
+    template_name = 'custom_code/eventmodel_form.html'
     model = FlareModel
     form_class = FlareModelForm
     extra_context = {'model_type_label': 'Flare'}
 
     def get_success_url(self):
-        return reverse('targetmodels:list')
+        return reverse('eventmodels:list')
 
 
 class TargetCutfileView(HTMXTableViewMixin, FilterView):

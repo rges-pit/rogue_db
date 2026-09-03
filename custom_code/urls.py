@@ -11,7 +11,7 @@ candidates_urlpatterns = [
     path('create/', RGESAlertCreateView.as_view(), name='create'),
 ]
 
-targetmodels_urlpatterns = [
+eventmodels_urlpatterns = [
     path('', EventModelListView.as_view(), name='list'),
     path('create/microlensing/', MicrolensingModelCreateView.as_view(), name='create-microlensing'),
     path('create/flare/', FlareModelCreateView.as_view(), name='create-flare'),
@@ -23,6 +23,6 @@ cutfiles_urlpatterns = [
 
 urlpatterns = [
     path('candidates/', include((candidates_urlpatterns, 'candidates'), namespace='candidates')),
-    path('target-models/', include((targetmodels_urlpatterns, 'targetmodels'), namespace='targetmodels')),
+    path('event-models/', include((eventmodels_urlpatterns, 'eventmodels'), namespace='eventmodels')),
     path('cutfiles/', include((cutfiles_urlpatterns, 'cutfiles'), namespace='cutfiles')),
 ]

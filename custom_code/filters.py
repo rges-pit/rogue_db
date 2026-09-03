@@ -7,6 +7,7 @@ import django_filters
 from tom_common.htmx_table import HTMXTableFilterSet
 
 from .models import RGESAlert, EventModel, MicrolensingModel, FlareModel
+from .target_models import RogueTarget
 
 
 class RGESAlertFilterSet(HTMXTableFilterSet):
@@ -60,14 +61,21 @@ class EventModelFilterSet(HTMXTableFilterSet):
     """
     Filters for EventModel objects -- this queries the shared base table, so it
     lists every model regardless of type (Microlensing, Flare, ...), but only
-    ever sees base-class fields (target, model_type, chisq). Type-specific
+    ever sees base-class fields (event, model_type, chisq). Type-specific
     parameters (t0, peak_amplitude, etc.) live on the MicrolensingModel/
     FlareModel subclasses and aren't visible from this queryset -- see
     MicrolensingCutfileFilterSet/FlareCutfileFilterSet below for filtering those.
-        - target: Filter by the associated Target.
+        - target: Filter by the associated Target (reached via event.target,
+          since EventModel itself only has a Target indirectly through Event).
         - model_type: Filter by the model's type.
         - query: General search across target and model_type.
     """
+
+    target = django_filters.ModelChoiceFilter(
+        field_name='event__target',
+        queryset=RogueTarget.objects.all(),
+        label='Target',
+    )
 
     @property
     def form(self):
@@ -89,24 +97,30 @@ class EventModelFilterSet(HTMXTableFilterSet):
             return queryset
 
         q_set = (
-            Q(target__name__icontains=value)
-            | Q(target__aliases__name__icontains=value)
+            Q(event__target__name__icontains=value)
+            | Q(event__target__aliases__name__icontains=value)
             | Q(model_type__icontains=value)
         )
         return queryset.filter(q_set).distinct()
 
     class Meta:
         model = EventModel
-        fields = ['target', 'model_type']
+        fields = ['model_type']
 
 
 class MicrolensingCutfileFilterSet(HTMXTableFilterSet):
     """
     Filter to enable users to select a set of MicrolensingModels using min/max
     thresholds on the model's parameters (t0, u0, tE, rho, piEN, piEE), plus:
-        - target: Filter by the associated Target.
+        - target: Filter by the associated Target (reached via event.target).
         - query: General search across the associated target's name/aliases.
     """
+
+    target = django_filters.ModelChoiceFilter(
+        field_name='event__target',
+        queryset=RogueTarget.objects.all(),
+        label='Target',
+    )
 
     @property
     def form(self):
@@ -170,12 +184,12 @@ class MicrolensingCutfileFilterSet(HTMXTableFilterSet):
     def general_search(self, queryset, name, value):
         if not value:
             return queryset
-        q_set = Q(target__name__icontains=value) | Q(target__aliases__name__icontains=value)
+        q_set = Q(event__target__name__icontains=value) | Q(event__target__aliases__name__icontains=value)
         return queryset.filter(q_set).distinct()
 
     class Meta:
         model = MicrolensingModel
-        fields = ['target']
+        fields = []
 
 
 class FlareCutfileFilterSet(HTMXTableFilterSet):
@@ -183,9 +197,15 @@ class FlareCutfileFilterSet(HTMXTableFilterSet):
     Filter to enable users to select a set of FlareModels using min/max
     thresholds on the model's parameters (peak_amplitude, rise_time, tau1,
     tau2, equivalent_duration), plus:
-        - target: Filter by the associated Target.
+        - target: Filter by the associated Target (reached via event.target).
         - query: General search across the associated target's name/aliases.
     """
+
+    target = django_filters.ModelChoiceFilter(
+        field_name='event__target',
+        queryset=RogueTarget.objects.all(),
+        label='Target',
+    )
 
     @property
     def form(self):
@@ -255,9 +275,9 @@ class FlareCutfileFilterSet(HTMXTableFilterSet):
     def general_search(self, queryset, name, value):
         if not value:
             return queryset
-        q_set = Q(target__name__icontains=value) | Q(target__aliases__name__icontains=value)
+        q_set = Q(event__target__name__icontains=value) | Q(event__target__aliases__name__icontains=value)
         return queryset.filter(q_set).distinct()
 
     class Meta:
         model = FlareModel
-        fields = ['target']
+        fields = []

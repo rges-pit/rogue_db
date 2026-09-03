@@ -10,7 +10,7 @@ import json
 logger = logging.getLogger(__name__)
 
 
-def get_reduced_data(mulens):
+def get_reduced_data(event):
     """Function to extract the timeseries data from a QuerySet of PhotometryReducedDatums, and
     creates the necessary arrays.
     Also accepts a QuerySet of generic ReducedDatums (lc_model, tabular, etc.) for the same
@@ -18,30 +18,33 @@ def get_reduced_data(mulens):
     Note that the querysets must be provided separately and not derived directly from a query
     """
 
-    photometry_qs = PhotometryReducedDatum.objects.filter(target__name=mulens.name).order_by("timestamp")
+    photometry_qs = PhotometryReducedDatum.objects.filter(target__name=event.target.name).order_by("timestamp")
 
     datasets = {}
 
+    # Select only those datapoints from the lightcurves that lie within the event window
     for rd in photometry_qs:
-        # Identify different lightcurves from the filter label given
-        passband = rd.bandpass
-        if passband in datasets.keys():
-            lc = datasets[passband]
-        else:
-            lc = []
+        ts = Time(rd.timestamp).jd
+        if ts >= event.window_start and ts <= event.window_end:
+            # Identify different lightcurves from the filter label given
+            passband = rd.bandpass
+            if passband in datasets.keys():
+                lc = datasets[passband]
+            else:
+                lc = []
 
-        # Append the datapoint to the corresponding dataset
-        try:
-            lc.append([Time(rd.timestamp).jd, rd.brightness, rd.brightness_error])
-        except:
-            # Necessary to handle the datapoints where only a limit is available.
-            # Skipping these for now
+            # Append the datapoint to the corresponding dataset
             try:
-                lc.append([Time(rd.timestamp).jd, rd.brightness, 1.0])
-            except KeyError:
-                pass
+                lc.append([ts, rd.brightness, rd.brightness_error])
+            except:
+                # Necessary to handle the datapoints where only a limit is available.
+                # Skipping these for now
+                try:
+                    lc.append([ts, rd.brightness, 1.0])
+                except KeyError:
+                    pass
 
-        datasets[passband] = lc
+            datasets[passband] = lc
 
     # Convert the accumulated lightcurves into numpy arrays:
     for passband, lc in datasets.items():
@@ -94,7 +97,7 @@ def store_model_lightcurve(mulens, model):
 
     return mulens
 
-def store_model_parameters(mulens, pylima_results):
+def store_microlensing_model_parameters(event, pylima_results):
     """Function to store the fitted model parameters in the TOM"""
 
     # Store the best-fit model parameters on the Target object
@@ -117,13 +120,13 @@ def store_model_parameters(mulens, pylima_results):
                     data = 0.0
                 else:
                     data = pylima_results['best_model'][key]
-            setattr(mulens, key, data)
-    mulens.save()
+            setattr(event.target, key, data)
+    event.target.save()
 
     # Store the PSPL and FSPL model fit parameters as MicrolensingModel entries
     for model_category in ['pspl', 'fspl']:
         qs  = MicrolensingModel.objects.filter(
-            target=mulens,
+            event=event,
             model_type='Microlensing',
             model_category=model_category.upper()
         )
@@ -133,7 +136,7 @@ def store_model_parameters(mulens, pylima_results):
                 rd = MicrolensingModel.objects.create(
                     model_type='Microlensing',
                     model_category=model_category.upper(),
-                    target=mulens,
+                    event=event,
                     t0=pylima_results[model_category]['t0'],
                     t0_error=pylima_results[model_category]['t0_error'],
                     u0=pylima_results[model_category]['u0'],
@@ -150,7 +153,7 @@ def store_model_parameters(mulens, pylima_results):
                 rd = MicrolensingModel.objects.create(
                     model_type='Microlensing',
                     model_category=model_category.upper(),
-                    target=mulens,
+                    event=event,
                     t0=pylima_results[model_category]['t0'],
                     t0_error=pylima_results[model_category]['t0_error'],
                     u0=pylima_results[model_category]['u0'],
@@ -170,7 +173,7 @@ def store_model_parameters(mulens, pylima_results):
             rd = qs[0]
             rd.model_type = 'Microlensing'
             rd.model_category = model_category.upper()
-            rd.target = mulens
+            rd.event = event
             rd.t0=pylima_results[model_category]['t0']
             rd.t0_error=pylima_results[model_category]['t0_error']
             rd.u0=pylima_results[model_category]['u0']
@@ -187,4 +190,4 @@ def store_model_parameters(mulens, pylima_results):
             rd.chisq=pylima_results[model_category]['chi2']
             rd.save()
 
-    logger.info('Stored model parameters for event ' + mulens.name)
+    logger.info('Stored model parameters for event ' + event.target.name)

@@ -1,16 +1,16 @@
 {% extends 'tom_common/base.html' %}
 {% load crispy_forms_tags %}
 
-{% block title %}Target Cutfile Selection{% endblock %}
+{% block title %}Event Model Cutfile Selection{% endblock %}
 
 {% block content %}
 <div class="row">
   <div class="col-md-10">
     <div class="row">
-      <h1>Target Cutfile Selection</h1>
+      <h1>Event Model Cutfile Selection</h1>
       <div class="col-md-12">
         <span class="float-end">
-        {{ model_count }} Target Model{{ model_count|pluralize }} &nbsp;
+        {{ model_count }} Event Model{{ model_count|pluralize }} &nbsp;
       </span>
       </div>
     </div>
@@ -18,7 +18,7 @@
     {% block target_table_content %}
     {# Microlensing and Flare models live in separate tables (see custom_code/models.py),
        so this page can only search one type per request -- pick it here, same as the
-       type tabs on the Target create form. #}
+       type tabs on the Event Model create form. #}
     <ul class="nav nav-tabs mb-2">
       <li class="nav-item">
         <a class="nav-link {% if model_type == 'Microlensing' %}active{% endif %}"
@@ -51,7 +51,7 @@
 
     {# The actual table #}
     <div class="table-container">
-        {% include "custom_code/partials/targetmodel_table_partial.html" %}
+        {% include "custom_code/partials/eventmodel_table_partial.html" %}
     </div>
 
     <hr>

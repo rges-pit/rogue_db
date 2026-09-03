@@ -26,7 +26,7 @@ class RGESAlertForm(forms.ModelForm):
 class MicrolensingModelForm(forms.ModelForm):
     """
     Creates/edits a MicrolensingModel. Includes the fields inherited from
-    EventModel (target, model_type, chisq) as well as this type's own
+    EventModel (event, model_type, chisq) as well as this type's own
     parameters -- unlike the old single-table TargetModelForm, there's no
     model-type dropdown here, since a MicrolensingModel *is* a microlensing
     model by construction.
@@ -50,7 +50,7 @@ class MicrolensingModelForm(forms.ModelForm):
 
         self.helper.layout = Layout(
             Row(
-                Column('target', css_class='col-md-6'),
+                Column('event', css_class='col-md-6'),
                 Column('model_type', css_class='col-md-6'),
             ),
             Div(
@@ -85,7 +85,7 @@ class MicrolensingModelForm(forms.ModelForm):
 class FlareModelForm(forms.ModelForm):
     """
     Creates/edits a FlareModel. FlareModel has no model_category field (that's
-    Microlensing-specific), so this form's shared row is just target/model_type.
+    Microlensing-specific), so this form's shared row is just event/model_type.
     """
 
     class Meta:
@@ -102,7 +102,7 @@ class FlareModelForm(forms.ModelForm):
 
         self.helper.layout = Layout(
             Row(
-                Column('target', css_class='col-md-6'),
+                Column('event', css_class='col-md-6'),
                 Column('model_type', css_class='col-md-6'),
             ),
             Div(

@@ -34,7 +34,12 @@ class EventModelTable(HTMXTable):
     shown here; see the per-type cutfile search for those.
     """
 
+    # EventModel has no direct target field -- the target is reached through
+    # its Event (RogueTarget -> Event -> EventModel), so the column accessor
+    # traverses that relation rather than a same-named model field.
     target = tables.Column(
+        accessor='event__target',
+        order_by='event__target',
         linkify=True,
         attrs={"a": {"hx-boost": "false"}}
     )
@@ -48,4 +53,4 @@ class EventModelTable(HTMXTable):
         # have no such grouping form, so it's excluded here.
         exclude = ['selection']
 
-    partial_template_name = "custom_code/partials/targetmodel_table_partial.html"
+    partial_template_name = "custom_code/partials/eventmodel_table_partial.html"

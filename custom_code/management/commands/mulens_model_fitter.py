@@ -56,7 +56,7 @@ def fit_target(target_pk):
         else:
             logger.warning('No valid model fit produced so no model lightcurve for event ' + mulens.name)
 
-        data_utils.store_model_parameters(mulens, pylima_results)
+        data_utils.store_microlensing_model_parameters(mulens, pylima_results)
         return target_pk, mulens.name, True, None
 
     except Exception as e:

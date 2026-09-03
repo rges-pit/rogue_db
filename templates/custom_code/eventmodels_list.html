@@ -1,22 +1,22 @@
 {% extends 'tom_common/base.html' %}
 {% load crispy_forms_tags %}
 
-{% block title %}Target Models{% endblock %}
+{% block title %}Event Models{% endblock %}
 
 {% block content %}
 <div class="row">
-  <h1>Target Models</h1>
+  <h1>Event Models</h1>
   <div class="col-md-10">
     <div class="row">
       <div class="col-md-12">
         <span class="float-end">
-        {{ model_count }} Target Model{{ model_count|pluralize }} &nbsp;
+        {{ model_count }} Event Model{{ model_count|pluralize }} &nbsp;
         <button class="btn btn-primary dropdown-toggle" type="button" id="createModelDropdown" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-          Create Target Model
+          Create Event Model
         </button>
         <div class="dropdown-menu" aria-labelledby="createModelDropdown">
-          <a class="dropdown-item" href="{% url 'targetmodels:create-microlensing' %}">Microlensing Model</a>
-          <a class="dropdown-item" href="{% url 'targetmodels:create-flare' %}">Flare Model</a>
+          <a class="dropdown-item" href="{% url 'eventmodels:create-microlensing' %}">Microlensing Model</a>
+          <a class="dropdown-item" href="{% url 'eventmodels:create-flare' %}">Flare Model</a>
         </div>
       </span>
       </div>
@@ -24,9 +24,9 @@
 
     {% block targetmodel_table_content %}
     <hr>
-    {# Search form (we refer to this id="filter-form" in the TargetModelTable.Meta.attrs) #}
+    {# Search form (we refer to this id="filter-form" in the EventModelTable.Meta.attrs) #}
     <form id="filter-form" class="mb-3"
-      hx-get="{% url 'targetmodels:list' %}"
+      hx-get="{% url 'eventmodels:list' %}"
       hx-target="div.table-container"
       hx-swap="outerHTML"
       hx-indicator=".progress">
@@ -40,7 +40,7 @@
 
     {# The actual table #}
     <div class="table-container">
-        {% include "custom_code/partials/targetmodel_table_partial.html" %}
+        {% include "custom_code/partials/eventmodel_table_partial.html" %}
     </div>
 
     <hr>

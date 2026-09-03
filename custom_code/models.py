@@ -2,6 +2,21 @@ from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 from .target_models import RogueTarget
 
+class Event(models.Model):
+    """
+    An event is a feature in a source's lightcurve that occurs during a finite time window
+    """
+    target = models.ForeignKey(
+        RogueTarget,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='events'
+    )
+    event_id = models.CharField(max_length=30, null=True, blank=True)
+    window_start = models.FloatField(null=True, blank=True)
+    window_end = models.FloatField(null=True, blank=True)
+
 class RGESAlert(models.Model):
     """
     A discovery alert received from an RGES-PIT detection pipeline
@@ -152,6 +167,14 @@ class EventModel(models.Model):
         flare = 'Flare', 'Flare'
         unknown = 'Unknown', 'Unknown'
 
+    event = models.ForeignKey(
+        Event,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='event_models'
+    )
+    
     model_type = models.CharField(
         max_length=15,
         choices=ModelTypes.choices,
@@ -159,14 +182,6 @@ class EventModel(models.Model):
         null=True,
         blank=True,
         db_index=True
-    )
-
-    target = models.ForeignKey(
-        RogueTarget,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='target_models'
     )
 
     # Goodness of fit parameters
