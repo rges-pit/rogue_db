@@ -64,6 +64,9 @@
         <a class="nav-link active" id="photometry-tab" href="#photometry" role="tab" data-bs-toggle="tab">Photometry</a>
       </li>
       {% include_app_tabs %}
+      <li class="nav-item">
+        <a class="nav-link" id="comments-tab" href="#comments" role="tab" data-bs-toggle="tab">Comments</a>
+      </li>
     </ul>
     <div class="tab-content">
       <div class="tab-pane active" id="photometry">
@@ -84,9 +87,9 @@
         {% dataproduct_list_for_target object %}
       </div>
       {% include_app_tab_divs %}
-
       {% comments_enabled as comments_are_enabled %}
       {% if comments_are_enabled %}
+      <div class="tab-pane" id="comments">
       <hr/>
       <h5>Comments</h5>
           {% render_comment_list for object %}
@@ -94,6 +97,7 @@
           {% if user.is_authenticated %}
             {% render_comment_form for object %}
           {% endif %}
+      </div>
       {% endif %}
     </div>
   </div>
