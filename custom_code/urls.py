@@ -2,7 +2,8 @@ from django.urls import path, include
 
 from .views import (
     RGESAlertListView, RGESAlertCreateView,
-    EventModelListView, MicrolensingModelCreateView, FlareModelCreateView,
+    EventModelListView, PSPLModelCreateView, FSPLModelCreateView, WideBoundPlanetModelCreateView,
+    DavenportFlareModelCreateView, PitkinFlareModelCreateView,
     TargetCutfileView, EventListView,
 )
 
@@ -13,8 +14,11 @@ candidates_urlpatterns = [
 
 eventmodels_urlpatterns = [
     path('', EventModelListView.as_view(), name='list'),
-    path('create/microlensing/', MicrolensingModelCreateView.as_view(), name='create-microlensing'),
-    path('create/flare/', FlareModelCreateView.as_view(), name='create-flare'),
+    path('create/pspl/', PSPLModelCreateView.as_view(), name='create-pspl'),
+    path('create/fspl/', FSPLModelCreateView.as_view(), name='create-fspl'),
+    path('create/wideboundplanet/', WideBoundPlanetModelCreateView.as_view(), name='create-wide-bound-planet'),
+    path('create/davenportflare/', DavenportFlareModelCreateView.as_view(), name='create-davenport-flare'),
+    path('create/pitkinportflare/', PitkinFlareModelCreateView.as_view(), name='create-pitkin-flare'),
 ]
 
 cutfiles_urlpatterns = [

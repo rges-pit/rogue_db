@@ -15,8 +15,11 @@
           Create Event Model
         </button>
         <div class="dropdown-menu" aria-labelledby="createModelDropdown">
-          <a class="dropdown-item" href="{% url 'eventmodels:create-microlensing' %}">Microlensing Model</a>
-          <a class="dropdown-item" href="{% url 'eventmodels:create-flare' %}">Flare Model</a>
+          <a class="dropdown-item" href="{% url 'eventmodels:create-pspl' %}">PSPL microlensing model</a>
+          <a class="dropdown-item" href="{% url 'eventmodels:create-fspl' %}">FSPL microlensing model</a>
+          <a class="dropdown-item" href="{% url 'eventmodels:create-wide-bound-planet' %}">Wide bound planet microlensing model</a>
+          <a class="dropdown-item" href="{% url 'eventmodels:create-davenport-flare' %}">Davenport flare model</a>
+          <a class="dropdown-item" href="{% url 'eventmodels:create-pitkin-flare' %}">Pitkin flare model</a>
         </div>
       </span>
       </div>

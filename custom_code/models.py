@@ -14,8 +14,30 @@ class Event(models.Model):
         related_name='events'
     )
     event_id = models.CharField(max_length=30, null=True, blank=True)
-    window_start = models.FloatField(null=True, blank=True)
-    window_end = models.FloatField(null=True, blank=True)
+    start_time = models.FloatField(null=True, blank=True)
+    duration = models.FloatField(null=True, blank=True)
+    time_to_second_peak = models.FloatField(null=True, blank=True)
+    second_peak_mag = models.FloatField(null=True, blank=True)
+    coverage_fraction = models.FloatField(null=True, blank=True)
+    symmetry = models.FloatField(null=True, blank=True)
+    Npoint_above_3sigma = models.FloatField(null=True, blank=True)
+    delta_chi2_PSPL = models.FloatField(null=True, blank=True) # Relative to flat line
+    delta_BIC_PSPL = models.FloatField(null=True, blank=True)
+    delta_chi2_FSPL = models.FloatField(null=True, blank=True) # Relative to flat line
+    delta_BIC_FSPL = models.FloatField(null=True, blank=True)
+    delta_chi2_PSPL_bestflare = models.FloatField(null=True, blank=True)
+    delta_BIC_PSPL_bestflare = models.FloatField(null=True, blank=True)
+    delta_chi2_FSPL_bestflare = models.FloatField(null=True, blank=True)
+    delta_BIC_FSPL_bestflare = models.FloatField(null=True, blank=True)
+    DIA_centroid_shift = models.FloatField(null=True, blank=True)
+    PSF_centroid_shift = models.FloatField(null=True, blank=True)
+    Nlinked_events = models.IntegerField(default=0, null=True, blank=True)
+    nearest_moving_object = models.CharField(max_length=60, null=True, blank=True)
+    angular_separation_moving_object = models.FloatField(null=True, blank=True)
+    frac_below_baseline = models.FloatField(null=True, blank=True)
+    max_excursion_below_baseline = models.FloatField(null=True, blank=True)
+    max_peak_periodogram = models.FloatField(null=True, blank=True)
+    period = models.FloatField(null=True, blank=True)
 
 class RGESAlert(models.Model):
     """
@@ -56,6 +78,11 @@ class RGESAlert(models.Model):
         y = 'y', 'SDSS y'
         unknown = 'unknown', 'Unknown'
 
+    class AlertOrigin(models.TextChoices):
+        aethra = 'aethra', 'Aethra'
+        neural_network = 'neural network', 'Neural Network'
+        unknown = 'unknown', 'Unknown'
+
     alert_id = models.IntegerField(default=0, null=True, blank=True)
     roman_id = models.CharField(max_length=100, verbose_name='Roman ID')
     event = models.ForeignKey(
@@ -91,7 +118,14 @@ class RGESAlert(models.Model):
         null=True
     )
     ffp_candidate = models.BooleanField(default=False)
-    alert_origin = models.CharField(blank=True, null=True, max_length=60, verbose_name="Alert Origin")
+    alert_origin = models.CharField(
+        max_length=60,
+        choices=AlertOrigin.choices,
+        default=AlertOrigin.unknown,
+        blank=True,
+        null=True,
+        verbose_name="Alert Origin"
+    )
     alert_notes = models.TextField(blank=True, null=True)
     alert_t0 = models.DecimalField(
         max_digits=13,
@@ -163,8 +197,11 @@ class RGESAlert(models.Model):
 class EventModel(models.Model):
 
     class ModelTypes(models.TextChoices):
-        microlensing = 'Microlensing', 'Microlensing'
-        flare = 'Flare', 'Flare'
+        pspl = 'PSPL microlensing', 'PSPL microlensing'
+        fspl = 'FSPL microlensing', 'FSPL microlensing'
+        wide_bound_planet = 'Wide bound planet', 'Wide bound planet'
+        davenport_flare = 'Davenport flare', 'Davenport flare'
+        pitkin_flare = 'Pitkin flare', 'Pitkin flare'
         unknown = 'Unknown', 'Unknown'
 
     event = models.ForeignKey(
@@ -176,7 +213,7 @@ class EventModel(models.Model):
     )
     
     model_type = models.CharField(
-        max_length=15,
+        max_length=60,
         choices=ModelTypes.choices,
         default=ModelTypes.unknown,
         null=True,
@@ -186,17 +223,34 @@ class EventModel(models.Model):
 
     # Goodness of fit parameters
     chisq = models.FloatField(default=0, null=True, blank=True)
+    BIC = models.FloatField(default=0, null=True, blank=True)
+    fit_covariance = models.JSONField(default=dict, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-class MicrolensingModel(EventModel):
+class PSPLModel(EventModel):
     """
-    Microlensing model parameters
-    db_index=True on the base parameters (not their _error counterparts) since
-    those are the fields TargetCutfileFilterSet filters on with min/max ranges.
+    Model parameters for a Point-Source, Point-Lens microlensing model
     """
-    model_category = models.CharField(max_length=30, null=True, blank=True)
+    t0 = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    t0_error = models.FloatField(default=0, null=True, blank=True)
+    u0 = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    u0_error = models.FloatField(default=0, null=True, blank=True)
+    tE = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    tE_error = models.FloatField(default=0, null=True, blank=True)
+    piEN = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    piEN_error = models.FloatField(default=0, null=True, blank=True)
+    piEE = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    piEE_error = models.FloatField(default=0, null=True, blank=True)
+    A = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    A_error = models.FloatField(default=0, null=True, blank=True)
+    blend_parameters = models.JSONField(default=dict, null=True, blank=True)
+
+class FSPLModel(EventModel):
+    """
+    Model parameters for a Finite-Source, Point-Lens microlensing model
+    """
     t0 = models.FloatField(default=0, null=True, blank=True, db_index=True)
     t0_error = models.FloatField(default=0, null=True, blank=True)
     u0 = models.FloatField(default=0, null=True, blank=True, db_index=True)
@@ -209,15 +263,74 @@ class MicrolensingModel(EventModel):
     piEE_error = models.FloatField(default=0, null=True, blank=True)
     rho = models.FloatField(default=0, null=True, blank=True, db_index=True)
     rho_error = models.FloatField(default=0, null=True, blank=True)
+    A = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    A_error = models.FloatField(default=0, null=True, blank=True)
+    blend_parameters = models.JSONField(default=dict, null=True, blank=True)
 
-class FlareModel(EventModel):
+class WideBoundPlanetModel(EventModel):
     """
-    Flare model parameters
+    Model parameters describing wide-orbit, but bound, planetary binary microlensing events
     """
+    tc = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    tc_error = models.FloatField(default=0, null=True, blank=True)
+    uc = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    uc_error = models.FloatField(default=0, null=True, blank=True)
+    tE = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    tE_error = models.FloatField(default=0, null=True, blank=True)
+    rho = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    rho_error = models.FloatField(default=0, null=True, blank=True)
+    s = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    s_error = models.FloatField(default=0, null=True, blank=True)
+    q = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    q_error = models.FloatField(default=0, null=True, blank=True)
+    alpha = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    alpha_error = models.FloatField(default=0, null=True, blank=True)
+    A = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    A_error = models.FloatField(default=0, null=True, blank=True)
+    blend_parameters = models.JSONField(default=dict, null=True, blank=True)
 
-    # Flare model parameters
+class DavenportFlareModel(EventModel):
+    """
+    Model parameters for flare events as defined by Davenport et al. (2014), ApJ 797 122
+    """
+    t_peak = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    t_peak_error = models.FloatField(default=0, null=True, blank=True)
     peak_amplitude = models.FloatField(default=0, null=True, blank=True, db_index=True)
-    rise_time = models.FloatField(default=0, null=True, blank=True, db_index=True)
-    tau1 = models.FloatField(default=0, null=True, blank=True, db_index=True)
-    tau2 = models.FloatField(default=0, null=True, blank=True, db_index=True)
-    equivalent_duration = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    peak_amplitude_error = models.FloatField(default=0, null=True, blank=True)
+    t_FWHM = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    t_FWHM_error = models.FloatField(default=0, null=True, blank=True)
+
+class PitkinFlareModel(EventModel):
+    """
+    Model parametrs for flare events as defined by Pitkin et al. (2014), MNRAS, 445, 3, 11
+    """
+    t_peak = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    t_peak_error = models.FloatField(default=0, null=True, blank=True)
+    peak_amplitude = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    peak_amplitude_error = models.FloatField(default=0, null=True, blank=True)
+    tau_gaussian_rise = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    tau_gaussian_rise_error = models.FloatField(default=0, null=True, blank=True)
+    tau_exponential_decay = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    tau_exponential_decay_error = models.FloatField(default=0, null=True, blank=True)
+
+class SkewNormalModel(EventModel):
+    """
+    Model parameters for a skew fit to the event lightcurve
+    """
+    t_peak = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    t_peak_error = models.FloatField(default=0, null=True, blank=True)
+    peak_amplitude = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    peak_amplitude_error = models.FloatField(default=0, null=True, blank=True)
+    omega = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    omega_error = models.FloatField(default=0, null=True, blank=True)
+    alpha = models.FloatField(default=0, null=True, blank=True, db_index=True)
+    alpha_error = models.FloatField(default=0, null=True, blank=True)
+
+class StraightLineModel(EventModel):
+    """
+    Model parameters for a straight line model fit
+    """
+    intercept = models.FloatField(default=0, null=True, blank=True)
+    intercept_error = models.FloatField(default=0, null=True, blank=True)
+    gradient = models.FloatField(default=0, null=True, blank=True)
+    gradient_error = models.FloatField(default=0, null=True, blank=True)

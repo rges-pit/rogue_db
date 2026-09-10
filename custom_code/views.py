@@ -4,14 +4,18 @@ from django.views.generic.edit import CreateView
 from tom_common.htmx_table import HTMXTableViewMixin
 from django_filters.views import FilterView
 
-from .models import RGESAlert, Event, EventModel, MicrolensingModel, FlareModel
+from .models import (RGESAlert, Event, EventModel,
+                     PSPLModel, FSPLModel, WideBoundPlanetModel,
+                     DavenportFlareModel, PitkinFlareModel)
 from .filters import (
     RGESAlertFilterSet, EventModelFilterSet,
-    MicrolensingCutfileFilterSet, FlareCutfileFilterSet,
+    PSPLCutfileFilterSet, FSPLCutfileFilterSet,
+    DavenportFlareCutfileFilterSet, PitkinFlareCutfileFilterSet,
     EventFilterSet
 )
 from .tables import RGESAlertTable, EventModelTable, EventTable
-from .forms import RGESAlertForm, MicrolensingModelForm, FlareModelForm
+from .forms import (RGESAlertForm, PSPLModelForm, FSPLModelForm, WideBoundPlanetModelForm,
+                    DavenportFlareModelForm, PitkinFlareModelForm)
 
 class RGESAlertListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     """
@@ -113,69 +117,117 @@ class EventModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
         return context
 
 
-class MicrolensingModelCreateView(LoginRequiredMixin, CreateView):
+class PSPLModelCreateView(LoginRequiredMixin, CreateView):
     """
     View provides a form to enable a user to manually enter the parameters of
-    a Microlensing model fit. Requires the user to be logged in.
+    a Point-Source, Point-Lens microlensing model fit. Requires the user to be logged in.
     """
     template_name = 'custom_code/eventmodel_form.html'
-    model = MicrolensingModel
-    form_class = MicrolensingModelForm
-    extra_context = {'model_type_label': 'Microlensing'}
+    model = PSPLModel
+    form_class = PSPLModelForm
+    extra_context = {'model_type_label': 'PSPL'}
 
     def get_success_url(self):
         return reverse('eventmodels:list')
 
+class FSPLModelCreateView(LoginRequiredMixin, CreateView):
+    """
+    View provides a form to enable a user to manually enter the parameters of
+    a Finite-Source, Point-Lens microlensing model fit. Requires the user to be logged in.
+    """
+    template_name = 'custom_code/eventmodel_form.html'
+    model = FSPLModel
+    form_class = FSPLModelForm
+    extra_context = {'model_type_label': 'FSPL'}
 
-class FlareModelCreateView(LoginRequiredMixin, CreateView):
+    def get_success_url(self):
+        return reverse('eventmodels:list')
+
+class WideBoundPlanetModelCreateView(LoginRequiredMixin, CreateView):
+    """
+    View provides a form to enable a user to manually enter the parameters of
+    a wide-bound planet microlensing model fit. Requires the user to be logged in.
+    """
+    template_name = 'custom_code/eventmodel_form.html'
+    model = WideBoundPlanetModel
+    form_class = WideBoundPlanetModelForm
+    extra_context = {'model_type_label': 'Wide bound planet'}
+
+    def get_success_url(self):
+        return reverse('eventmodels:list')
+
+class DavenportFlareModelCreateView(LoginRequiredMixin, CreateView):
     """
     View provides a form to enable a user to manually enter the parameters of
     a Flare model fit. Requires the user to be logged in.
     """
     template_name = 'custom_code/eventmodel_form.html'
-    model = FlareModel
-    form_class = FlareModelForm
+    model = DavenportFlareModel
+    form_class = DavenportFlareModelForm
     extra_context = {'model_type_label': 'Flare'}
 
     def get_success_url(self):
         return reverse('eventmodels:list')
 
 
+class PitkinFlareModelCreateView(LoginRequiredMixin, CreateView):
+    """
+    View provides a form to enable a user to manually enter the parameters of
+    a Flare model fit. Requires the user to be logged in.
+    """
+    template_name = 'custom_code/eventmodel_form.html'
+    model = PitkinFlareModel
+    form_class = PitkinFlareModelForm
+    extra_context = {'model_type_label': 'Flare'}
+
+    def get_success_url(self):
+        return reverse('eventmodels:list')
+
 class TargetCutfileView(HTMXTableViewMixin, FilterView):
     """
-    This view enables a user to configure Microlensing- or Flare-model
+    This view enables a user to configure microlensing or flare-model
     selection criteria based on min/max thresholds on that type's own
-    parameters, and see the matching models displayed as a list. Which type
-    is being searched is chosen via the `model_type` query parameter (see
-    the tabs in target_cutfile_list.html) -- Microlensing and Flare models
-    live in separate tables (see custom_code/models.py), so unlike the old
-    single-table search, this can only ever query one type per request.
+    parameters, and see the matching models displayed as a list.
     """
     template_name = 'custom_code/target_cutfile_list.html'
     paginate_by = 20
     strict = False
-    # Not model-type-dependent: both searches display results through the same
-    # base-fields-only table (matching the pre-split behaviour, where the single
-    # TargetModelTable only ever showed target/model_type here too). Set as a
-    # plain attribute, not get_table_class(), because HTMXTableViewMixin's
-    # get_template_names() reads self.table_class directly for HTMX requests.
     table_class = EventModelTable
 
     ordering = ['-created_at']
 
     def get_model_type(self):
+        # Values match the ?model_type= query params used by the tab links
+        # in target_cutfile_list.html.
+        model_set = ('pspl', 'fspl', 'davenport_flare', 'pitkin_flare')
         model_type = self.request.GET.get('model_type')
-        return model_type if model_type in ('Microlensing', 'Flare') else 'Microlensing'
+        return model_type if model_type in model_set else 'pspl'
 
     def get_queryset(self, *args, **kwargs):
-        # HTMXTableViewMixin.get_context_data() checks self.model.objects.exists(),
-        # so self.model is set here (as well as being used below) rather than as a
-        # class attribute, since which model applies depends on the request.
-        self.model = FlareModel if self.get_model_type() == 'Flare' else MicrolensingModel
+        if self.get_model_type() == 'pspl':
+            self.model = PSPLModel
+        elif self.get_model_type() == 'fspl':
+            self.model = FSPLModel
+        elif self.get_model_type() == 'davenport_flare':
+            self.model = DavenportFlareModel
+        elif self.get_model_type() == 'pitkin_flare':
+            self.model = PitkinFlareModel
+        else:
+            self.model = PSPLModel
         return super().get_queryset(*args, **kwargs)
 
     def get_filterset_class(self):
-        return FlareCutfileFilterSet if self.get_model_type() == 'Flare' else MicrolensingCutfileFilterSet
+        if self.get_model_type() == 'pspl':
+            filter_set = PSPLCutfileFilterSet
+        elif self.get_model_type() == 'fspl':
+            filter_set = FSPLCutfileFilterSet
+        elif self.get_model_type() == 'davenport_flare':
+            filter_set = DavenportFlareCutfileFilterSet
+        elif self.get_model_type() == 'pitkin_flare':
+            filter_set = PitkinFlareCutfileFilterSet
+        else:
+            filter_set = PSPLCutfileFilterSet
+        return filter_set
 
     def get_context_data(self, *args, **kwargs):
         """

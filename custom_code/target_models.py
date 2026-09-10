@@ -43,6 +43,10 @@ class RogueTarget(BaseTarget):
     ad_test = models.FloatField(default=0)
     mag_now = models.FloatField(default=0)
     mag_now_passband = models.CharField(max_length=10, default='', null=True, blank=True)
+    nearest_flare_star = models.CharField(max_length=60, default='', null=True, blank=True)
+    angular_separation_flare_star = models.FloatField(default=0, null=True, blank=True)
+    nearest_variable_star = models.CharField(max_length=60, default='', null=True, blank=True)
+    angular_separation_variable = models.FloatField(default=0, null=True, blank=True)
 
     class Meta:
         verbose_name = "target"

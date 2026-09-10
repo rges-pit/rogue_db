@@ -63,7 +63,7 @@ class EventTable(HTMXTable):
     class Meta(HTMXTable.Meta):
         model = Event
         fields = [
-            'target', 'event_id', 'window_start', 'window_end'
+            'target', 'event_id', 'start_time', 'duration'
         ]
         # HTMXTable declares a 'selection' checkbox column for bulk actions; alerts
         # have no such grouping form, so it's excluded here.

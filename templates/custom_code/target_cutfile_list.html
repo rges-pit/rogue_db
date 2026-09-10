@@ -16,22 +16,28 @@
     </div>
 
     {% block target_table_content %}
-    {# Microlensing and Flare models live in separate tables (see custom_code/models.py),
-       so this page can only search one type per request -- pick it here, same as the
-       type tabs on the Event Model create form. #}
+
     <ul class="nav nav-tabs mb-2">
       <li class="nav-item">
-        <a class="nav-link {% if model_type == 'Microlensing' %}active{% endif %}"
-           href="{% url 'cutfiles:list' %}?model_type=Microlensing">Microlensing</a>
+        <a class="nav-link {% if model_type == 'pspl' %}active{% endif %}"
+           href="{% url 'cutfiles:list' %}?model_type=pspl">PSPL microlensing</a>
       </li>
       <li class="nav-item">
-        <a class="nav-link {% if model_type == 'Flare' %}active{% endif %}"
-           href="{% url 'cutfiles:list' %}?model_type=Flare">Flare</a>
+        <a class="nav-link {% if model_type == 'fspl' %}active{% endif %}"
+           href="{% url 'cutfiles:list' %}?model_type=fspl">FSPL microlensing</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link {% if model_type == 'davenport_flare' %}active{% endif %}"
+           href="{% url 'cutfiles:list' %}?model_type=davenport_flare">Davenport Flare</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link {% if model_type == 'pitkin_flare' %}active{% endif %}"
+           href="{% url 'cutfiles:list' %}?model_type=pitkin_flare">Pitkin Flare</a>
       </li>
     </ul>
 
     <hr>
-    {# Search form (we refer to this id="filter-form" in the EventModelTable.Meta.attrs) #}
+    {# Search form #}
     <form id="filter-form" class="mb-3"
       hx-get="{% url 'cutfiles:list' %}?model_type={{ model_type }}"
       hx-target="div.table-container"
@@ -60,17 +66,18 @@
   </div>
 
 <script>
-// Which model type this page is currently showing -- the type is chosen via
+// Defines which model type this page is currently showing; the type is chosen via
 // the ?model_type= URL param (see the tabs above), not a form field, since
-// Microlensing and Flare models live in separate tables and each request can
-// only search one at a time.
+// the models live in separate tables and each request can only search one at a time.
 const CURRENT_MODEL_TYPE = "{{ model_type }}";
 
 // Which threshold fields belong to which model type -- shared by save and load
 // so the two stay in sync with each other and with the panels in filters.py.
 const CUTFILE_PARAM_NAMES_BY_MODEL_TYPE = {
-    Microlensing: ['t0', 'u0', 'tE', 'rho', 'piEN', 'piEE'],
-    Flare: ['peak_amplitude', 'rise_time', 'equivalent_duration', 'tau1', 'tau2'],
+    pspl: ['t0', 'u0', 'tE', 'piEN', 'piEE', 'chi2', 'bic'],
+    fspl: ['t0', 'u0', 'tE', 'rho', 'piEN', 'piEE', 'chi2', 'bic'],
+    davenport_flare: ['t_peak', 'peak_amplitude', 't_FWHM', 'chi2', 'bic'],
+    pitkin_flare: ['t_peak', 'peak_amplitude', 'tau_gaussian_rise', 'tau_exponential_decay', 'chi2', 'bic'],
 };
 
 function saveCutfile() {

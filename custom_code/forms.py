@@ -2,7 +2,8 @@ from django import forms
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Layout, Div, Row, Column, HTML
 
-from .models import RGESAlert, MicrolensingModel, FlareModel
+from .models import (RGESAlert, PSPLModel, FSPLModel, WideBoundPlanetModel,
+                     DavenportFlareModel, PitkinFlareModel)
 
 
 class RGESAlertForm(forms.ModelForm):
@@ -23,26 +24,21 @@ class RGESAlertForm(forms.ModelForm):
         self.helper.layout = Layout(Div(*layout_fields, css_class="row"))
 
 
-class MicrolensingModelForm(forms.ModelForm):
+class PSPLModelForm(forms.ModelForm):
     """
-    Creates/edits a MicrolensingModel. Includes the fields inherited from
-    EventModel (event, model_type, chisq) as well as this type's own
-    parameters -- unlike the old single-table TargetModelForm, there's no
-    model-type dropdown here, since a MicrolensingModel *is* a microlensing
-    model by construction.
+    Creates/edits a PSPLModel. Includes the fields inherited from
+    EventModel (event, model_type, chisq, ...) as well as this type's own
+    parameters.
     """
 
     class Meta:
-        model = MicrolensingModel
+        model = PSPLModel
         fields = '__all__'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # This form always creates a MicrolensingModel, so default model_type
-        # to match rather than leaving it on the model's generic 'Unknown'
-        # default -- model_type stays editable in case it's ever deliberately
-        # reclassified, but shouldn't require the user to remember to set it.
-        self.fields['model_type'].initial = MicrolensingModel.ModelTypes.microlensing
+        self.fields['model_type'].initial = PSPLModel.ModelTypes.pspl
+        self.fields['model_type'].disabled = True
 
         self.helper = FormHelper()
         self.helper.form_tag = False
@@ -51,14 +47,61 @@ class MicrolensingModelForm(forms.ModelForm):
         self.helper.layout = Layout(
             Row(
                 Column('event', css_class='col-md-6'),
-                Column('model_type', css_class='col-md-6'),
             ),
             Div(
                 Row(
-                    Column('model_category', css_class='col-md-3'),
                     Column('chisq', css_class='col-md-3'),
+                    Column('BIC', css_class='col-md-3'),
                 ),
-                HTML('<h5>Microlensing Parameters</h5>'),
+                HTML('<h5>PSPL Microlensing Parameters</h5>'),
+                Row(
+                    Column('t0', css_class='col-md-3'),
+                    Column('t0_error', css_class='col-md-3'),
+                    Column('u0', css_class='col-md-3'),
+                    Column('u0_error', css_class='col-md-3'),
+                    Column('tE', css_class='col-md-3'),
+                    Column('tE_error', css_class='col-md-3'),
+                ),
+                Row(
+                    Column('piEN', css_class='col-md-3'),
+                    Column('piEN_error', css_class='col-md-3'),
+                    Column('piEE', css_class='col-md-3'),
+                    Column('piEE_error', css_class='col-md-3'),
+                ),
+                css_class='border rounded p-3 mb-3',
+            ),
+        )
+
+class FSPLModelForm(forms.ModelForm):
+    """
+    Creates/edits an FSPLModel. Includes the fields inherited from
+    EventModel (event, model_type, chisq, rho, ...) as well as this type's own
+    parameters.
+    """
+
+    class Meta:
+        model = FSPLModel
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['model_type'].initial = FSPLModel.ModelTypes.fspl
+        self.fields['model_type'].disabled = True
+
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.disable_csrf = True
+
+        self.helper.layout = Layout(
+            Row(
+                Column('event', css_class='col-md-6'),
+            ),
+            Div(
+                Row(
+                    Column('chisq', css_class='col-md-3'),
+                    Column('BIC', css_class='col-md-3'),
+                ),
+                HTML('<h5>FSPL Microlensing Parameters</h5>'),
                 Row(
                     Column('t0', css_class='col-md-3'),
                     Column('t0_error', css_class='col-md-3'),
@@ -81,20 +124,21 @@ class MicrolensingModelForm(forms.ModelForm):
             ),
         )
 
-
-class FlareModelForm(forms.ModelForm):
+class WideBoundPlanetModelForm(forms.ModelForm):
     """
-    Creates/edits a FlareModel. FlareModel has no model_category field (that's
-    Microlensing-specific), so this form's shared row is just event/model_type.
+    Creates/edits an FSPLModel. Includes the fields inherited from
+    EventModel (event, model_type, chisq, rho, ...) as well as this type's own
+    parameters.
     """
 
     class Meta:
-        model = FlareModel
+        model = WideBoundPlanetModel
         fields = '__all__'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['model_type'].initial = FlareModel.ModelTypes.flare
+        self.fields['model_type'].initial = WideBoundPlanetModel.ModelTypes.wide_bound_planet
+        self.fields['model_type'].disabled = True
 
         self.helper = FormHelper()
         self.helper.form_tag = False
@@ -103,21 +147,118 @@ class FlareModelForm(forms.ModelForm):
         self.helper.layout = Layout(
             Row(
                 Column('event', css_class='col-md-6'),
-                Column('model_type', css_class='col-md-6'),
             ),
             Div(
                 Row(
                     Column('chisq', css_class='col-md-3'),
+                    Column('BIC', css_class='col-md-3'),
+                ),
+                HTML('<h5>Wide Bound Planet Microlensing Parameters</h5>'),
+                Row(
+                    Column('tc', css_class='col-md-3'),
+                    Column('tc_error', css_class='col-md-3'),
+                    Column('uc', css_class='col-md-3'),
+                    Column('uc_error', css_class='col-md-3'),
+                ),
+                Row(
+                    Column('tE', css_class='col-md-3'),
+                    Column('tE_error', css_class='col-md-3'),
+                    Column('rho', css_class='col-md-3'),
+                    Column('rho_error', css_class='col-md-3'),
+                ),
+                Row(
+                    Column('s', css_class='col-md-3'),
+                    Column('s_error', css_class='col-md-3'),
+                    Column('q', css_class='col-md-3'),
+                    Column('q_error', css_class='col-md-3'),
+                    Column('alpha', css_class='col-md-3'),
+                    Column('alpha_error', css_class='col-md-3'),
+                ),
+                css_class='border rounded p-3 mb-3',
+            ),
+        )
+
+class DavenportFlareModelForm(forms.ModelForm):
+    """
+    Creates/edits a DavenportFlareModel.
+    """
+
+    class Meta:
+        model = DavenportFlareModel
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['model_type'].initial = DavenportFlareModel.ModelTypes.davenport_flare
+        self.fields['model_type'].disabled = True
+
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.disable_csrf = True
+
+        self.helper.layout = Layout(
+            Row(
+                Column('event', css_class='col-md-6'),
+            ),
+            Div(
+                Row(
+                    Column('chisq', css_class='col-md-3'),
+                    Column('BIC', css_class='col-md-3'),
                 ),
                 HTML('<h5>Flare Parameters</h5>'),
                 Row(
+                    Column('t_peak', css_class='col-md-4'),
+                    Column('t_peak_error', css_class='col-md-4'),
                     Column('peak_amplitude', css_class='col-md-4'),
-                    Column('rise_time', css_class='col-md-4'),
-                    Column('equivalent_duration', css_class='col-md-4'),
+                    Column('peak_amplitude_error', css_class='col-md-4'),
                 ),
                 Row(
-                    Column('tau1', css_class='col-md-4'),
-                    Column('tau2', css_class='col-md-4'),
+                    Column('t_FWHM', css_class='col-md-4'),
+                    Column('t_FWHM_error', css_class='col-md-4'),
+                ),
+                css_class='border rounded p-3 mb-3',
+            ),
+        )
+
+class PitkinFlareModelForm(forms.ModelForm):
+    """
+    Creates/edits a PitkinFlareModel.
+    """
+
+    class Meta:
+        model = PitkinFlareModel
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['model_type'].initial = PitkinFlareModel.ModelTypes.pitkin_flare
+        self.fields['model_type'].disabled = True
+
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.disable_csrf = True
+
+        self.helper.layout = Layout(
+            Row(
+                Column('event', css_class='col-md-6'),
+            ),
+            Div(
+                Row(
+                    Column('chisq', css_class='col-md-3'),
+                    Column('BIC', css_class='col-md-3'),
+                ),
+                HTML('<h5>Flare Parameters</h5>'),
+                Row(
+                    Column('t_peak', css_class='col-md-4'),
+                    Column('t_peak_error', css_class='col-md-4'),
+                    Column('peak_amplitude', css_class='col-md-4'),
+                    Column('peak_amplitude_error', css_class='col-md-4'),
+                ),
+                Row(
+                    Column('tau_gaussian_rise', css_class='col-md-4'),
+                    Column('tau_gaussian_rise_error', css_class='col-md-4'),
+                    Column('tau_exponential_decay_rise', css_class='col-md-4'),
+                    Column('tau_exponential_decay_rise_error', css_class='col-md-4'),
                 ),
                 css_class='border rounded p-3 mb-3',
             ),
