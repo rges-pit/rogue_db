@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import (RGESAlert, Event,
+from .models import (RGESAlert, Event, VariableStar,
                      PSPLModel, FSPLModel, DavenportFlareModel, PitkinFlareModel,
                      SkewNormalModel, StraightLineModel)
 
@@ -91,3 +91,14 @@ class StraightLineModelAdmin(admin.ModelAdmin):
 
     # Search bar functionality at the top
     search_fields = ('model_type', 'intercept', 'gradient')
+
+@admin.register(VariableStar)
+class VariableStarAdmin(admin.ModelAdmin):
+    # Columns to show in the list view table
+    list_display = ('ra', 'dec', 'type', 'ogle_id', 'vvv_id', 'gaia_id')
+
+    # Clickable filters on the right-hand sidebar
+    list_filter = ('ra', 'dec', 'type', 'ogle_id', 'vvv_id', 'gaia_id')
+
+    # Search bar functionality at the top
+    search_fields = ('ra', 'dec', 'type', 'ogle_id', 'vvv_id', 'gaia_id')

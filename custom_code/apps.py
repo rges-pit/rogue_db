@@ -30,3 +30,6 @@ class CustomCodeConfig(AppConfig):
              'context': 'custom_code.target_tabs.event_tab_context',
              'label': 'Events'}
         ]
+
+    def ready(self):
+        import custom_code.signals  # noqa

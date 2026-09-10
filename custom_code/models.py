@@ -334,3 +334,37 @@ class StraightLineModel(EventModel):
     intercept_error = models.FloatField(default=0, null=True, blank=True)
     gradient = models.FloatField(default=0, null=True, blank=True)
     gradient_error = models.FloatField(default=0, null=True, blank=True)
+
+class VariableStar(models.Model):
+    """
+    Parameters of known variable stars
+    """
+
+    ra = models.FloatField(
+        default=0,
+        validators=[
+           MinValueValidator(0.0),
+           MaxValueValidator(360.0)
+       ]
+       )
+    dec = models.FloatField(
+        default=0,
+        validators=[
+           MinValueValidator(-90.0),
+           MaxValueValidator(90.0)
+       ]
+       )
+    ogle_id = models.CharField(max_length=30, null=True, blank=True)
+    vvv_id = models.CharField(max_length=30, null=True, blank=True)
+    gaia_id = models.CharField(max_length=30, null=True, blank=True)
+    type = models.CharField(max_length=30, null=True, blank=True)
+
+    def get_name(self):
+        if self.ogle_id:
+            return self.ogle_id
+        elif self.gaia_id:
+            return self.gaia_id
+        elif self.vvv_id:
+            return self.vvv_id
+        else:
+            return 'NoID'
