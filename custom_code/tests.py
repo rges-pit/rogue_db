@@ -1,5 +1,5 @@
 from django.test import TestCase
-from custom_code.solar_system import query_horizons_for_roman, query_sbident_for_event
+from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
 
 class TestSolarSystemFunctions(TestCase):
     def setUp(self):
@@ -32,24 +32,18 @@ class TestSolarSystemFunctions(TestCase):
 
         self.assertEqual(spacecraft_vector, expected_vector)
 
-    def test_query_sbident_for_event(self):
-
-        jd_event = self.start_time + self.duration / 2.0
-
-        expected_output =
-
-        query_sbident_for_event(
-            self.ra, self.dec, jd_event, self.spacecraft_vector, fov_width=2.0 / 3600.0
-        )
-
-        self.assertEqual(0, 1)
-
     def test_parse_sbident_response(self):
 
-        "data_second_pass": [
+        content = {"data_second_pass": [
             ["10193 Nishimoto (1996 PR1)", "10:16:58.22", "+10 28'34.3\"", "2.E3", "814.", "1951.", "19.4",
              "-2.564E+01", "1.035E+01"],
             ["15319 (1993 NU1)", "10:19:52.66", "+10 06'12.0\"", "4.E3", "-528.", "4422.", "18.5", "-3.293E+01",
              "1.591E+01"],
-            ...
-        ]
+        ]}
+        expected_name = '10193 Nishimoto (1996 PR1)'
+        expected_sep = 1951.0
+
+        closest_name, closest_sep = parse_sbident_response(content)
+
+        self.assertEqual(expected_name, closest_name)
+        self.assertEqual(expected_sep, closest_sep)

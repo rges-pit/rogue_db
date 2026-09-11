@@ -2,14 +2,19 @@ from custom_code.models import Event
 import requests
 from astropy.coordinates import SkyCoord
 from astropy import units as u
+import numpy as np
 import logging
 
 logger = logging.getLogger(__name__)
 
-def find_moving_objects_near_event(event, radius=2):
+def find_moving_objects_near_event(event, radius=2.0):
     """
     Function to query JPL's Small Body Identification Tool to see if there are any
     known asteroids or comets nearby that may have caused the Event
+
+    Parameters:
+        event   Event object
+        radius  float   Search radius in arcsec
     """
 
     # First get Roman's vector at the time of the Event.
@@ -19,6 +24,17 @@ def find_moving_objects_near_event(event, radius=2):
 
     # Now we can query JPL's Small Bodies Identification Tool for any asteroids and comets
     # close to our Target coordinates at this time
+    closest_name, closest_separation = query_sbident_for_event(
+        event.target.ra, event.target.dec, jd_event, spacecraft_vector,
+        fov_width=radius/3600.0
+    )
+
+    if closest_name:
+        Event.objects.filter(pk=event.pk).update(
+            nearest_moving_object=closest_name,
+            angular_separation_moving_object=closest_separation/3600.0,  # Stored in deg
+        )
+        logger.info('Identified a moving object close to event ' + str(event.pk))
 
 def query_horizons_for_roman(jd_event):
     """
@@ -71,7 +87,8 @@ def query_sbident_for_event(ra, dec, jd_event, spacecraft_vector, fov_width=2.0/
 
     ssd_url = 'https://ssd-api.jpl.nasa.gov/sb_ident.api'
 
-    object_list = []
+    closest_name = None
+    closest_separation = None
 
     # Convert the spacecraft vector parameters to a string
     vector = ','.join(
@@ -99,11 +116,28 @@ def query_sbident_for_event(ra, dec, jd_event, spacecraft_vector, fov_width=2.0/
         content = r.json()
 
         # Parse the sb_ident's output
-        print(content)
-        if 'data_second_pass' in content.keys():
-            for entry in content['data_second_pass']:
-                moving_bodies = SkyCoord()  # For the list of entries
-                source = SkyCoord(target.ra, target.dec, frame='icrs', unit=(u.deg, u.deg))
-                separation = source.separation(moving_bodies)
+        closest_name, closest_separation = parse_sbident_response(content)
 
-                # And find minimum as for variables
+    return closest_name, closest_separation
+
+def parse_sbident_response(content):
+    """
+    Function to parse the list of object IDs and separations
+    """
+
+    closest_name = None
+    closest_separation = None
+
+    if 'data_second_pass' in content.keys():
+        object_names = []
+        separations = []
+        for entry in content['data_second_pass']:
+            object_names.append(entry[0])
+            separations.append(float(entry[5]))
+        separations = np.array(separations)
+        object_names = np.array(object_names)
+        closest_idx = int(np.argmin(separations))
+        closest_name = object_names[closest_idx]
+        closest_separation = separations[closest_idx]
+
+    return closest_name, closest_separation
