@@ -1,8 +1,8 @@
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
-from custom_code.models import MicrolensingModel
-from datetime import datetime, timedelta
+from custom_code.models import MicrolensingModel, StraightLineModel, Event
+from datetime import datetime
 import pytz
 from astropy.time import Time
 import json
@@ -53,6 +53,47 @@ def get_reduced_data(event):
     logger.info('Found ' + str(len(datasets)) + ' datasets')
 
     return datasets
+
+def fetch_lightcurve(datasets, dataset_id='W146'):
+    """
+    Function to extract the prioritized single lightcurve from a set of multiple datasets.
+    This is used when a fitting function is designed to handle a single lightcurve,
+    and the lightcurves are not normalized.
+    """
+
+    # If a dataset_id is given, extract the lightcurve data as an array.
+    # If not, extract the first lightcurve found from the following
+    # passbands in order of priority
+    lightcurve = None
+    if dataset_id:
+        lightcurve = extract_photometry_from_dataset(datasets, dataset_id)
+    else:
+        priority_order = ['W146', 'F184', 'F213', 'I', 'ip', 'G', 'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp']
+
+        dataset_order = [passband for passband in priority_order if passband in datasets.keys()]
+
+        if len(dataset_order) > 0:
+            lightcurve = extract_photometry_from_dataset(datasets, dataset_order[0])
+
+    return lightcurve
+
+def extract_photometry_from_dataset(datasets, dataset_id, emag_limit=None):
+    """
+    Function to extract the photometry from a single dataset
+
+    Returns:
+        lightcurve  array with columns 'time', 'mag', 'err_mag'
+    """
+
+    photometry = datasets[dataset_id]
+
+    # Enabling optional filtering for datapoints of low photometric precision
+    if emag_limit:
+        mask = (np.abs(photometry[:, -2].astype(float)) < emag_limit)
+    else:
+        mask = (np.abs(photometry[:, -2].astype(float)) < 99.0)
+
+    return photometry[mask].astype(float)
 
 def store_model_lightcurve(mulens, model):
     """Function to store in the TOM the timeseries lightcurve corresponding to a fitted model.
@@ -191,3 +232,40 @@ def store_microlensing_model_parameters(event, pylima_results):
             rd.save()
 
     logger.info('Stored model parameters for event ' + event.target.name)
+
+def store_straightline_model_parameters(event, results):
+
+    # If there is an existing straight line fit in the database for this event,
+    # update it; otherwise create a new entry
+    qs = StraightLineModel.objects.filter(
+        event=event,
+        model_type='Straight line'
+    )
+
+    if qs.count() == 0:
+        StraightLineModel.objects.create(
+            event = event,
+            model_type = 'Straight line',
+            chisq = results['chisq'],
+            BIC = results['BIC'],
+            fit_covariance = json.dumps(results['covar'].tolist()),
+            intercept = results['coeffs'][0],
+            gradient = results['coeffs'][1]
+        )
+
+    else:
+        slmodel = qs[0]
+        slmodel.chisq = results['chisq']
+        slmodel.BIC = results['BIC']
+        slmodel.fit_covariance = json.dumps(results['covar'].tolist())
+        slmodel.intercept = results['coeffs'][0]
+        slmodel.gradient = results['coeffs'][1]
+        slmodel.save()
+
+    # Update the Event itself with the diagnostics from the straight line fit
+    Event.objects.filter(pk=event.pk).update(
+        frac_below_baseline=results['frac_below_baseline'],
+        max_excursion_below_baseline=results['max_excursion_below_baseline'],
+    )
+
+    logger.info('Stored straight line model parameters and diagnostics for event ' + event.target.name)

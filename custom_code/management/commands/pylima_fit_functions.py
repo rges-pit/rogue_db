@@ -20,7 +20,6 @@ def run_fit(lcevent, verbose=False):
 
     Parameters:
         lcevent   (Lightcurve) Event object as opposed to the pyLIMA model event object
-        cores integer, optional number of processing cores to use
     """
 
     logger.info('Starting to model most recent event for source ' + lcevent.target.name)
@@ -146,7 +145,7 @@ def pylima_telescopes_from_datasets(datasets, emag_limit=None):
     """
 
     # Sort the available datasets into order, giving preference to main survey datasets
-    priority_order = ['I', 'ip', 'G', 'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp']
+    priority_order = ['W146', 'F184', 'F213', 'I', 'ip', 'G', 'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp']
 
     dataset_order = []
     for name in priority_order:

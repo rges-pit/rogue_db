@@ -202,6 +202,7 @@ class EventModel(models.Model):
         wide_bound_planet = 'Wide bound planet', 'Wide bound planet'
         davenport_flare = 'Davenport flare', 'Davenport flare'
         pitkin_flare = 'Pitkin flare', 'Pitkin flare'
+        straightline = 'Straight line', 'Straight line'
         unknown = 'Unknown', 'Unknown'
 
     event = models.ForeignKey(
