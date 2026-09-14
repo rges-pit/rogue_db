@@ -4,7 +4,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-def run_straightline_fit(lcevent):
+def run_event_straightline_fit(lcevent):
     """
     Function to fit a straight line to an Event lightcurve segment
 
@@ -37,12 +37,55 @@ def run_straightline_fit(lcevent):
         chi2 = np.sum(((lightcurve[:,1] - model_mag) / lightcurve[:,2]) ** 2)
         bic = chi2 + len(coeffs) * np.log(len(lightcurve))
 
+        logger.info('Completed straight line fit with coefficients: ' + repr(coeffs))
+
+        return {
+            'coeffs': coeffs, 'chisq': chi2, 'BIC': bic,
+            'covar': covar
+        }
+
+    else:
+        logger.info('No valid data found')
+        return {
+            'coeffs': np.zeros(0), 'chisq': None, 'BIC': None,
+            'covar': np.zeros(0)
+        }
+
+def run_baseline_fit(source):
+    """
+    Function to fit a straight line model to the baseline target's lightcurve,
+    i.e. the whole lightcurve with the intervals flagged as events removed.
+
+    Parameters:
+        source  Target  RogueTarget object
+    """
+
+    logger.info('Starting baseline fit to event for source ' + source.name)
+
+    # Retrieve Roman's primary timeseries photometry from the DB, excluding events
+    datasets = data_utils.get_baseline_data(source)
+    lightcurve = data_utils.fetch_lightcurve(datasets)
+
+    # Set a cap of a minimum of ten points for a sensible fit
+    if len(lightcurve) > 10:
+        # Fit a straight line (f(x) = p[0] + p[1]*x) to the lightcurve segment
+        # and generate fitted lightcurve
+        coeffs, covar = np.polyfit(
+            lightcurve[:,0], lightcurve[:,1], deg=1, w=1.0/lightcurve[:,2],
+            full=False, cov=True
+        )
+        model_mag = coeffs[0] + coeffs[1] * lightcurve[:,0]
+
+        # Calculate the chi2 and BIC = chi2 + k ln(n) of this model to the lightcurve
+        chi2 = np.sum(((lightcurve[:,1] - model_mag) / lightcurve[:,2]) ** 2)
+        bic = chi2 + len(coeffs) * np.log(len(lightcurve))
+
         # Calculate diagnostics for the straight line fit
         mean_mag = np.median(model_mag)
         frac_below_baseline = float(len(np.where(lightcurve[:,1] < mean_mag)[0])) / float(len(lightcurve))
         max_excursion_below_baseline = (lightcurve[:,1] - mean_mag).min()
 
-        logger.info('Completed straight line fit with coefficients: ' + repr(coeffs))
+        logger.info('Completed baseline line fit with coefficients: ' + repr(coeffs))
 
         return {
             'coeffs': coeffs, 'chisq': chi2, 'BIC': bic,

@@ -1,5 +1,13 @@
 from django.test import TestCase
+from custom_code.models import Event
+from custom_code.management.commands import data_utils
+from tom_targets.models import Target
+from tom_dataproducts.models import PhotometryReducedDatum
 from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
+from django.utils import text, timezone
+from datetime import datetime, timedelta, tzinfo
+from astropy.time import Time
+import pytz
 
 class TestSolarSystemFunctions(TestCase):
     def setUp(self):
@@ -47,3 +55,34 @@ class TestSolarSystemFunctions(TestCase):
 
         self.assertEqual(expected_name, closest_name)
         self.assertEqual(expected_sep, closest_sep)
+
+class TestDataUtils(TestCase):
+    def setUp(self):
+        self.target = Target.objects.create(
+            name='TestObject',
+            classification='Microlensing PSPL',
+            category='Microlensing stellar/planet',
+        )
+        self.ndata = 100
+        self.mean_mag = 17.0
+        self.start_time = datetime.strptime('2026-09-01T00:00:00.0', '%Y-%m-%dT%H:%M:%S.%f')
+        self.jd_start_time = Time(self.start_time)
+        self.datums = [PhotometryReducedDatum(**{
+            'target': self.target,
+            'timestamp': self.start_time + i*timedelta(minutes=15.0),
+            'brightness': self.mean_mag,
+            'brightness_error': 0.001,
+            'bandpass': 'W213'
+        }) for i in range(0,self.ndata,1)]
+        PhotometryReducedDatum.objects.bulk_create(self.datums)
+        self.event = Event.objects.create(
+            target=self.target,
+            event_id='test_event',
+            start_time=self.jd_start_time.jd + 20*(15.0/24.0*60.0),
+            duration=60/(24.0*60.0) # Units of days
+        )
+
+    def test_get_baseline_data(self):
+
+        datasets = data_utils.get_baseline_data(self.target)
+

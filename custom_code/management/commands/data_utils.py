@@ -54,6 +54,60 @@ def get_reduced_data(event):
 
     return datasets
 
+def get_baseline_data(source):
+    """
+    Function to retrieve the full lightcurve of the source, removing those sections of it
+    which are flagged as events
+
+    Parameters:
+        source  Target  RogueTarget object
+
+    Returns:
+        datasets dict   Dictionary of lightcurve arrays
+    """
+
+    # Extract the full available photometry
+    photometry_qs = PhotometryReducedDatum.objects.filter(target__name=source.name).order_by("timestamp")
+
+    # Extract the known set of events for this source
+    events_qs = Event.objects.filter(target=source)
+
+    datasets = {}
+
+    # Select only those datapoints from the lightcurves that lie outside the event windows
+    for rd in photometry_qs:
+        ts = Time(rd.timestamp).jd
+        for event in events_qs:
+            if ts < event.start_time or ts > event.start_time + event.duration:
+                # Identify different lightcurves from the filter label given
+                passband = rd.bandpass
+                if passband in datasets.keys():
+                    lc = datasets[passband]
+                else:
+                    lc = []
+
+                # Append the datapoint to the corresponding dataset
+                try:
+                    lc.append([ts, rd.brightness, rd.brightness_error])
+                except:
+                    # Necessary to handle the datapoints where only a limit is available.
+                    # Skipping these for now
+                    try:
+                        lc.append([ts, rd.brightness, 1.0])
+                    except KeyError:
+                        pass
+
+                datasets[passband] = lc
+
+    # Convert the accumulated lightcurves into numpy arrays:
+    for passband, lc in datasets.items():
+        datasets[passband] = np.array(lc)
+
+    logger.info('Found ' + str(len(datasets)) + ' datasets')
+
+    return datasets
+
+
 def fetch_lightcurve(datasets):
     """
     Function to extract the prioritized single lightcurve from a set of multiple datasets.
@@ -245,7 +299,7 @@ def update_microlensing_model(mulens_model, fit_results):
         logger.info('Stored ' + mulens_model.model_type
                     + ' model parameters for event ' + mulens_model.event.target.name)
 
-def store_straightline_model_parameters(event, results):
+def store_event_straightline_model_parameters(event, results):
 
     # If there is an existing straight line fit in the database for this event,
     # update it; otherwise create a new entry
@@ -273,12 +327,6 @@ def store_straightline_model_parameters(event, results):
         slmodel.intercept = results['coeffs'][0]
         slmodel.gradient = results['coeffs'][1]
         slmodel.save()
-
-    # Update the Event itself with the diagnostics from the straight line fit
-    Event.objects.filter(pk=event.pk).update(
-        frac_below_baseline=results['frac_below_baseline'],
-        max_excursion_below_baseline=results['max_excursion_below_baseline'],
-    )
 
     logger.info('Stored straight line model parameters and diagnostics for event ' + event.target.name)
 
