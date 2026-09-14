@@ -18,4 +18,11 @@ def compare_model_goodness_of_fit(event, model1, model2):
         event.delta_chi2_FSPL = delta_chisq
         event.delta_BIC_FSPL = delta_bic
         event.save()
-
+    elif model1.model_type == 'PSPL microlensing' and model2.model_type == 'Davenport flare':
+        event.delta_chi2_PSPL_bestflare = delta_chisq
+        event.delta_BIC_PSPL_bestflare = delta_bic
+        event.save()
+    elif model1.model_type == 'FSPL microlensing' and model2.model_type == 'Davenport flare':
+        event.delta_chi2_FSPL_bestflare = delta_chisq
+        event.delta_BIC_FSPL_bestflare = delta_bic
+        event.save()

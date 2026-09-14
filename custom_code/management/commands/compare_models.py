@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand
 from tom_targets.models import Target
-from custom_code.models import Event, StraightLineModel, PSPLModel, FSPLModel
+from custom_code.models import (
+    Event, StraightLineModel, PSPLModel, FSPLModel, DavenportFlareModel)
 from custom_code import diagnostics
 
 import logging
@@ -26,10 +27,14 @@ class Command(BaseCommand):
             )
             pspl = PSPLModel.objects.filter(event=event)
             fspl = FSPLModel.objects.filter(event=event)
+            davenport_flare = DavenportFlareModel.objects.filter(event=event)
 
             if straight_line.count() > 0 and pspl.count() > 0:
                 diagnostics.compare_model_goodness_of_fit(event, pspl[0], straight_line[0])
             if straight_line.count() > 0 and fspl.count() > 0:
                 diagnostics.compare_model_goodness_of_fit(event, fspl[0], straight_line[0])
-
+            if pspl.count() > 0 and davenport_flare.count() > 0:
+                diagnostics.compare_model_goodness_of_fit(event, pspl[0], davenport_flare[0])
+            if fspl.count() > 0 and davenport_flare.count() > 0:
+                diagnostics.compare_model_goodness_of_fit(event, fspl[0], davenport_flare[0])
             logger.info('Stored goodness-of-fit diagnostics for ' + target.name)
