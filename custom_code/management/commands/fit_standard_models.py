@@ -17,17 +17,18 @@ class Command(BaseCommand):
 
         # Find the most recent event associated with the requested target.
         target = Target.objects.get(name=options['source_name'])
-        event = Event.objects.filter(target=target).order_by('-window_end')[0]
+        event = Event.objects.filter(target=target).order_by('-start_time')[0]
 
         # If a latest event is found, perform the model fits and store the parameters
         if event:
             # Straight line model fit
             results = general_fit_functions.run_straightline_fit(event)
-            data_utils.store_straightline_model_parameters(event, results)
+            if len(results['coeffs']) > 0:
+                data_utils.store_straightline_model_parameters(event, results)
 
             # TO DO: Skew normal model fit
-            
-            logger.info('Completed standard model fits for ' + options['target_name'])
+
+            logger.info('Completed standard model fits for ' + options['source_name'])
 
         else:
-            logger.warning('Found no database entry for ' + options['target_name'])
+            logger.warning('Found no database entry for ' + options['source_name'])

@@ -221,6 +221,9 @@ def gather_model_parameters(pevent, model_fit, verbose):
         ndata += len(tel.lightcurve)
     model_params['red_chi2'] = np.around(model_params['chi2'] / float(ndata - len(param_keys)),3)
 
+    # Calculate the BIC:
+    model_params['BIC'] = model_params['chi2'] + len(param_keys) * np.log(ndata)
+
     # Retrieve the flux parameters, converting from PyLIMA's key nomenclature to MOPs
     # Fetch the source flux
     try:

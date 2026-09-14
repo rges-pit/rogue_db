@@ -21,29 +21,39 @@ def run_straightline_fit(lcevent):
 
     # Retrieve Roman's primary timeseries photometry from the DB
     datasets = data_utils.get_reduced_data(lcevent)
-    lightcurve = data_utils.fetch_lightcurve(datasets, dataset_id='W146')
+    lightcurve = data_utils.fetch_lightcurve(datasets)
 
-    # Fit a straight line (f(x) = p[0] + p[1]*x) to the lightcurve segment
-    # and generate fitted lightcurve
-    coeffs, residuals, rank, singular_values, rcond, covar = np.polyfit(
-        lightcurve[:,0], lightcurve[:,1], deg=1, w=1.0/lightcurve[:,2],
-        full=False, cov=True
-    )
-    model_mag = coeffs[0] + coeffs[1] * lightcurve[:,0]
+    # Set a cap of a minimum of ten points for a sensible fit
+    if len(lightcurve) > 10:
+        # Fit a straight line (f(x) = p[0] + p[1]*x) to the lightcurve segment
+        # and generate fitted lightcurve
+        coeffs, covar = np.polyfit(
+            lightcurve[:,0], lightcurve[:,1], deg=1, w=1.0/lightcurve[:,2],
+            full=False, cov=True
+        )
+        model_mag = coeffs[0] + coeffs[1] * lightcurve[:,0]
 
-    # Calculate the chi2 and BIC = chi2 + k ln(n) of this model to the lightcurve
-    chi2 = np.sum(((lightcurve[:,1] - model_mag) / lightcurve[:,2]) ** 2)
-    bic = chi2 + len(coeffs) * np.log(len(lightcurve))
+        # Calculate the chi2 and BIC = chi2 + k ln(n) of this model to the lightcurve
+        chi2 = np.sum(((lightcurve[:,1] - model_mag) / lightcurve[:,2]) ** 2)
+        bic = chi2 + len(coeffs) * np.log(len(lightcurve))
 
-    # Calculate diagnostics for the straight line fit
-    mean_mag = np.median(model_mag)
-    frac_below_baseline = float(len(np.where(lightcurve[:,1] < mean_mag)[0])) / float(len(lightcurve))
-    max_excursion_below_baseline = (lightcurve[:,1] - mean_mag).min()
+        # Calculate diagnostics for the straight line fit
+        mean_mag = np.median(model_mag)
+        frac_below_baseline = float(len(np.where(lightcurve[:,1] < mean_mag)[0])) / float(len(lightcurve))
+        max_excursion_below_baseline = (lightcurve[:,1] - mean_mag).min()
 
-    logger.info('Completed straight line fit with coefficients: ' + repr(coeffs))
+        logger.info('Completed straight line fit with coefficients: ' + repr(coeffs))
 
-    return {
-        'coeffs': coeffs, 'chisq': chi2, 'BIC': bic,
-        'covar': covar, 'frac_below_baseline': frac_below_baseline,
-        'max_excursion_below_baseline': max_excursion_below_baseline
-    }
+        return {
+            'coeffs': coeffs, 'chisq': chi2, 'BIC': bic,
+            'covar': covar, 'frac_below_baseline': frac_below_baseline,
+            'max_excursion_below_baseline': max_excursion_below_baseline
+        }
+
+    else:
+        logger.info('No valid data found')
+        return {
+            'coeffs': np.zeros(0), 'chisq': None, 'BIC': None,
+            'covar': np.zeros(0), 'frac_below_baseline': None,
+            'max_excursion_below_baseline': None
+        }

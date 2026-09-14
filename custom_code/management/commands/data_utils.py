@@ -1,7 +1,7 @@
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
-from custom_code.models import MicrolensingModel, StraightLineModel, Event
+from custom_code.models import PSPLModel, FSPLModel, StraightLineModel, Event
 from datetime import datetime
 import pytz
 from astropy.time import Time
@@ -25,7 +25,7 @@ def get_reduced_data(event):
     # Select only those datapoints from the lightcurves that lie within the event window
     for rd in photometry_qs:
         ts = Time(rd.timestamp).jd
-        if ts >= event.window_start and ts <= event.window_end:
+        if ts >= event.start_time and ts <= event.start_time + event.duration:
             # Identify different lightcurves from the filter label given
             passband = rd.bandpass
             if passband in datasets.keys():
@@ -54,7 +54,7 @@ def get_reduced_data(event):
 
     return datasets
 
-def fetch_lightcurve(datasets, dataset_id='W146'):
+def fetch_lightcurve(datasets):
     """
     Function to extract the prioritized single lightcurve from a set of multiple datasets.
     This is used when a fitting function is designed to handle a single lightcurve,
@@ -64,16 +64,13 @@ def fetch_lightcurve(datasets, dataset_id='W146'):
     # If a dataset_id is given, extract the lightcurve data as an array.
     # If not, extract the first lightcurve found from the following
     # passbands in order of priority
-    lightcurve = None
-    if dataset_id:
-        lightcurve = extract_photometry_from_dataset(datasets, dataset_id)
-    else:
-        priority_order = ['W146', 'F184', 'F213', 'I', 'ip', 'G', 'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp']
+    lightcurve = np.zeros(1)
+    priority_order = ['W146', 'F184', 'F213', 'I', 'OGLE-I', 'ip', 'G', 'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp']
 
-        dataset_order = [passband for passband in priority_order if passband in datasets.keys()]
+    dataset_order = [passband for passband in priority_order if passband in datasets.keys()]
 
-        if len(dataset_order) > 0:
-            lightcurve = extract_photometry_from_dataset(datasets, dataset_order[0])
+    if len(dataset_order) > 0:
+        lightcurve = extract_photometry_from_dataset(datasets, dataset_order[0])
 
     return lightcurve
 
@@ -164,74 +161,89 @@ def store_microlensing_model_parameters(event, pylima_results):
             setattr(event.target, key, data)
     event.target.save()
 
-    # Store the PSPL and FSPL model fit parameters as MicrolensingModel entries
-    for model_category in ['pspl', 'fspl']:
-        qs  = MicrolensingModel.objects.filter(
-            event=event,
-            model_type='Microlensing',
-            model_category=model_category.upper()
-        )
-
-        if qs.count() == 0:
-            if model_category == 'pspl':
-                rd = MicrolensingModel.objects.create(
-                    model_type='Microlensing',
-                    model_category=model_category.upper(),
-                    event=event,
-                    t0=pylima_results[model_category]['t0'],
-                    t0_error=pylima_results[model_category]['t0_error'],
-                    u0=pylima_results[model_category]['u0'],
-                    u0_error=pylima_results[model_category]['u0_error'],
-                    tE=pylima_results[model_category]['tE'],
-                    tE_error=pylima_results[model_category]['tE_error'],
-                    piEN=pylima_results[model_category]['piEN'],
-                    piEN_error=pylima_results[model_category]['piEN_error'],
-                    piEE=pylima_results[model_category]['piEE'],
-                    piEE_error=pylima_results[model_category]['piEE_error'],
-                    chisq=pylima_results[model_category]['chi2'],
-                )
-            else:
-                rd = MicrolensingModel.objects.create(
-                    model_type='Microlensing',
-                    model_category=model_category.upper(),
-                    event=event,
-                    t0=pylima_results[model_category]['t0'],
-                    t0_error=pylima_results[model_category]['t0_error'],
-                    u0=pylima_results[model_category]['u0'],
-                    u0_error=pylima_results[model_category]['u0_error'],
-                    tE=pylima_results[model_category]['tE'],
-                    tE_error=pylima_results[model_category]['tE_error'],
-                    piEN=pylima_results[model_category]['piEN'],
-                    piEN_error=pylima_results[model_category]['piEN_error'],
-                    piEE=pylima_results[model_category]['piEE'],
-                    piEE_error=pylima_results[model_category]['piEE_error'],
-                    rho=pylima_results[model_category]['rho'],
-                    rho_error=pylima_results[model_category]['rho_error'],
-                    chisq=pylima_results[model_category]['chi2'],
-                )
-
-        else:
-            rd = qs[0]
-            rd.model_type = 'Microlensing'
-            rd.model_category = model_category.upper()
-            rd.event = event
-            rd.t0=pylima_results[model_category]['t0']
-            rd.t0_error=pylima_results[model_category]['t0_error']
-            rd.u0=pylima_results[model_category]['u0']
-            rd.u0_error=pylima_results[model_category]['u0_error']
-            rd.tE=pylima_results[model_category]['tE']
-            rd.tE_error=pylima_results[model_category]['tE_error']
-            rd.piEN=pylima_results[model_category]['piEN']
-            rd.piEN_error=pylima_results[model_category]['piEN_error']
-            rd.piEE=pylima_results[model_category]['piEE']
-            rd.piEE_error=pylima_results[model_category]['piEE_error']
-            if model_category == 'fspl':
-                rd.rho=pylima_results[model_category]['rho']
-                rd.rho_error=pylima_results[model_category]['rho_error']
-            rd.chisq=pylima_results[model_category]['chi2']
-            rd.save()
+    # Fetch existing PSPL and FSPL models for this event, or create them,
+    # and update them with the fitted parameters
+    pspl_model = fetch_microlensing_model(event, 'PSPL microlensing')
+    update_microlensing_model(pspl_model, pylima_results['pspl'])
+    fspl_model = fetch_microlensing_model(event, 'FSPL microlensing')
+    update_microlensing_model(fspl_model, pylima_results['fspl'])
 
     logger.info('Stored model parameters for event ' + event.target.name)
+
+def fetch_microlensing_model(event, model_type):
+    """
+    Function to check to see if the given event has an existing model of the given type;
+    if so, this entry will be updated; otherwise a new one will be created.
+    If an unrecognised model_type is passed, None will be returned
+
+    Parameters:
+        event   Event object
+        model_type  string   Microlensing model type descriptor
+
+    Returned:
+        mulens_model    PSPLModel, FSPLModel or None
+    """
+
+    mulens_model = None
+
+    if model_type == 'PSPL microlensing':
+        qs = PSPLModel.objects.filter(
+            event=event,
+            model_type='PSPL microlensing'
+        )
+    elif model_type == 'FSPL microlensing':
+        qs = FSPLModel.objects.filter(
+            event=event,
+            model_type='FSPL microlensing'
+        )
+
+    if qs.count() == 0:
+        if model_type == 'PSPL microlensing':
+            mulens_model = PSPLModel.objects.create(
+                event=event,
+                model_type='PSPL microlensing'
+            )
+        elif model_type == 'FSPL microlensing':
+            mulens_model = FSPLModel.objects.create(
+                event=event,
+                model_type='FSPL microlensing'
+            )
+        logger.info('Created ' + mulens_model.model_type + ' model for event ' + event.target.name)
+
+    else:
+        mulens_model = qs[0]
+        logger.info('Retrieved ' + mulens_model.model_type + ' model for event ' + event.target.name)
+
+    return mulens_model
+
+
+def update_microlensing_model(mulens_model, fit_results):
+    """
+    Update the provided microlensing Model object, which may be of any type, with
+    the dictionary of fitted results.  Note that the type of the Model and results must match.
+    If an unknown type of model is requested, mulens_model = None and no action will be taken.
+    """
+
+    if mulens_model:
+        mulens_model.t0 = fit_results['t0']
+        mulens_model.t0_error = fit_results['t0_error']
+        mulens_model.u0 = fit_results['u0']
+        mulens_model.u0_error = fit_results['u0_error']
+        mulens_model.tE = fit_results['tE']
+        mulens_model.tE_error = fit_results['tE_error']
+        mulens_model.piEN = fit_results['piEN']
+        mulens_model.piEN_error = fit_results['piEN_error']
+        mulens_model.piEE = fit_results['piEE']
+        mulens_model.piEE_error = fit_results['piEE_error']
+        if mulens_model.model_type == 'FSPL microlensing':
+            mulens_model.rho = fit_results['rho']
+            mulens_model.rho_error = fit_results['rho_error']
+        mulens_model.chisq = fit_results['chi2']
+        mulens_model.BIC = fit_results['BIC']
+        mulens_model.save()
+
+        logger.info('Stored ' + mulens_model.model_type
+                    + ' model parameters for event ' + mulens_model.event.target.name)
 
 def store_straightline_model_parameters(event, results):
 

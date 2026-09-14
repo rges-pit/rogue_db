@@ -16,7 +16,7 @@ class Command(BaseCommand):
 
         # Find the most recent event associated with the requested target.
         target = Target.objects.get(name=options['source_name'])
-        event = Event.objects.filter(target=target).order_by('-window_end')[0]
+        event = Event.objects.filter(target=target).order_by('-start_time')[0]
 
         if event:
             pylima_results = pylima_fit_functions.run_fit(event, verbose=False)
