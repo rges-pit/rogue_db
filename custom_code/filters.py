@@ -72,7 +72,7 @@ class EventFilterSet(HTMXTableFilterSet):
             'delta_chi2_PSPL_bestflare', 'delta_BIC_PSPL_bestflare',
             'delta_chi2_FSPL_bestflare', 'delta_BIC_FSPL_bestflare', 'DIA_centroid_shift',
             'PSF_centroid_shift', 'Nlinked_events', 'nearest_moving_object',
-            'angular_separation_moving_object', 'frac_below_baseline', 'max_excursion_below_baseline',
+            'angular_separation_moving_object', 
             'max_peak_periodogram', 'period'
         ]
 

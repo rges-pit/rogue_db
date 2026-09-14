@@ -34,8 +34,6 @@ class Event(models.Model):
     Nlinked_events = models.IntegerField(default=0, null=True, blank=True)
     nearest_moving_object = models.CharField(max_length=60, null=True, blank=True)
     angular_separation_moving_object = models.FloatField(null=True, blank=True)
-    frac_below_baseline = models.FloatField(null=True, blank=True)
-    max_excursion_below_baseline = models.FloatField(null=True, blank=True)
     max_peak_periodogram = models.FloatField(null=True, blank=True)
     period = models.FloatField(null=True, blank=True)
 
