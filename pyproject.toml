@@ -32,6 +32,7 @@ cryptography = ">=48.0.1"
 requests = ">=2.34.4"
 markdown = ">=3.8.1"
 certifi = "2026.7.22"
+altaipony = "2.1.2"
 
 [tool.poetry.group.dev.dependencies]
 factory-boy = "2.12.0"

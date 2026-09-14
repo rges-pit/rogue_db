@@ -1,7 +1,7 @@
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
-from custom_code.models import PSPLModel, FSPLModel, StraightLineModel, Event
+from custom_code.models import PSPLModel, FSPLModel, StraightLineModel, Event, DavenportFlareModel
 from datetime import datetime
 import pytz
 from astropy.time import Time
@@ -281,3 +281,43 @@ def store_straightline_model_parameters(event, results):
     )
 
     logger.info('Stored straight line model parameters and diagnostics for event ' + event.target.name)
+
+def store_davenportflare_model_parameters(event, results):
+    """
+    Function to store the parameters from a Davenport flare model fit
+
+    This function stores the first entry in the list of fitted flares
+    """
+
+    qs = DavenportFlareModel.objects.filter(
+        event=event,
+        model_type='Davenport flare'
+    )
+
+    if qs.count() == 0:
+        DavenportFlareModel.objects.create(
+            event=event,
+            model_type='Davenport flare',
+            t_peak=results['t_peak'][0],
+            t_peak_error=results['t_peak_err'][0],
+            peak_amplitude=results['amplitude'][0],
+            peak_amplitude_error=results['amplitude_err'][0],
+            t_FWHM=results['fwhm'][0],
+            t_FWHM_error=results['fwhm_err'][0],
+            chisq=results['chisq'][0],
+            BIC=results['BIC'][0]
+        )
+
+    else:
+        flare = qs[0]
+        flare.t_peak = results['t_peak'][0]
+        flare.t_peak_error = results['t_peak_err'][0]
+        flare.peak_amplitude = results['amplitude'][0]
+        flare.peak_amplitude_error = results['amplitude_err'][0]
+        flare.t_FWHM = results['fwhm'][0]
+        flare.t_FWHM_error = results['fwhm_err'][0]
+        flare.chisq = results['chisq'][0]
+        flare.BIC = results['BIC'][0]
+        flare.save()
+
+    logger.info('Stored Davenport flare model parameters for event ' + event.target.name)

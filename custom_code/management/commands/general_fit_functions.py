@@ -17,7 +17,7 @@ def run_straightline_fit(lcevent):
         BIC         float       Bayesian Information Criteria of the fit
     """
 
-    logger.info('Starting starting straight line fit to event for source ' + lcevent.target.name)
+    logger.info('Starting straight line fit to event for source ' + lcevent.target.name)
 
     # Retrieve Roman's primary timeseries photometry from the DB
     datasets = data_utils.get_reduced_data(lcevent)
