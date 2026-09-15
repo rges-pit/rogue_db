@@ -358,6 +358,7 @@ class VariableStar(models.Model):
     ogle_id = models.CharField(max_length=30, null=True, blank=True)
     vvv_id = models.CharField(max_length=30, null=True, blank=True)
     gaia_id = models.CharField(max_length=30, null=True, blank=True)
+    moa_id = models.CharField(max_length=30, null=True, blank=True)
     type = models.CharField(max_length=30, null=True, blank=True)
 
     def get_name(self):
@@ -367,5 +368,7 @@ class VariableStar(models.Model):
             return self.gaia_id
         elif self.vvv_id:
             return self.vvv_id
+        elif self.moa_id:
+            return self.moa_id
         else:
             return 'NoID'
