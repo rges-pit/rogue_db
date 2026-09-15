@@ -95,10 +95,10 @@ class StraightLineModelAdmin(admin.ModelAdmin):
 @admin.register(VariableStar)
 class VariableStarAdmin(admin.ModelAdmin):
     # Columns to show in the list view table
-    list_display = ('ra', 'dec', 'type', 'ogle_id', 'vvv_id', 'gaia_id')
+    list_display = ('ra', 'dec', 'type', 'ogle_id', 'vvv_id', 'gaia_id', 'moa_id')
 
     # Clickable filters on the right-hand sidebar
-    list_filter = ('ra', 'dec', 'type', 'ogle_id', 'vvv_id', 'gaia_id')
+    list_filter = ('ra', 'dec', 'type', 'ogle_id', 'vvv_id', 'gaia_id', 'moa_id')
 
     # Search bar functionality at the top
-    search_fields = ('ra', 'dec', 'type', 'ogle_id', 'vvv_id', 'gaia_id')
+    search_fields = ('ra', 'dec', 'type', 'ogle_id', 'vvv_id', 'gaia_id', 'moa_id')

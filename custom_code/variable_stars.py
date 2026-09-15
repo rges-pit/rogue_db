@@ -41,6 +41,7 @@ def find_nearest_rges_variable_catalog(target, radius=2):
         # star is closer than the search radius
         if closest_separation_deg <= radius:  # In degrees
             vstar = qs[closest_idx]
+
             RogueTarget.objects.filter(pk=target.pk).update(
                 nearest_variable_star=vstar.get_name(),
                 angular_separation_variable=closest_separation_deg,
