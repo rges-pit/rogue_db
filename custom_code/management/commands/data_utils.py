@@ -1,7 +1,8 @@
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
-from custom_code.models import PSPLModel, FSPLModel, StraightLineModel, Event, DavenportFlareModel
+from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, Event,
+                                DavenportFlareModel, PitkinFlareModel)
 from datetime import datetime
 import pytz
 from astropy.time import Time
@@ -346,26 +347,70 @@ def store_davenportflare_model_parameters(event, results):
         DavenportFlareModel.objects.create(
             event=event,
             model_type='Davenport flare',
-            t_peak=results['t_peak'][0],
-            t_peak_error=results['t_peak_err'][0],
-            peak_amplitude=results['amplitude'][0],
-            peak_amplitude_error=results['amplitude_err'][0],
-            t_FWHM=results['fwhm'][0],
-            t_FWHM_error=results['fwhm_err'][0],
-            chisq=results['chisq'][0],
-            BIC=results['BIC'][0]
+            t_peak=results['t_peak'],
+            t_peak_error=results['t_peak_error'],
+            peak_amplitude=results['peak_amplitude'],
+            peak_amplitude_error=results['peak_amplitude_error'],
+            t_FWHM=results['t_FWHM'],
+            t_FWHM_error=results['t_FWHM_error'],
+            chisq=results['chisq'],
+            BIC=results['BIC']
         )
 
     else:
         flare = qs[0]
-        flare.t_peak = results['t_peak'][0]
-        flare.t_peak_error = results['t_peak_err'][0]
-        flare.peak_amplitude = results['amplitude'][0]
-        flare.peak_amplitude_error = results['amplitude_err'][0]
-        flare.t_FWHM = results['fwhm'][0]
-        flare.t_FWHM_error = results['fwhm_err'][0]
-        flare.chisq = results['chisq'][0]
-        flare.BIC = results['BIC'][0]
+        flare.t_peak = results['t_peak']
+        flare.t_peak_error = results['t_peak_error']
+        flare.peak_amplitude = results['peak_amplitude']
+        flare.peak_amplitude_error = results['peak_amplitude_error']
+        flare.t_FWHM = results['t_FWHM']
+        flare.t_FWHM_error = results['t_FWHM_error']
+        flare.chisq = results['chisq']
+        flare.BIC = results['BIC']
         flare.save()
 
     logger.info('Stored Davenport flare model parameters for event ' + event.target.name)
+
+def store_pitkinflare_model_parameters(event, results):
+    """
+    Function to store the parameters from a Pitkin flare model fit
+
+    This function stores the first entry in the list of fitted flares
+    """
+
+    qs = PitkinFlareModel.objects.filter(
+        event=event,
+        model_type='Pitkin flare'
+    )
+
+    if qs.count() == 0:
+        PitkinFlareModel.objects.create(
+            event=event,
+            model_type='Pitkin flare',
+            t_peak=results['t_peak'],
+            t_peak_error=results['t_peak_error'],
+            peak_amplitude=results['peak_amplitude'],
+            peak_amplitude_error=results['peak_amplitude_error'],
+            tau_gaussian_rise=results['tau_gaussian_rise'],
+            tau_gaussian_rise_error=results['tau_gaussian_rise_error'],
+            tau_exponential_decay=results['tau_exponential_decay'],
+            tau_exponential_decay_error=results['tau_exponential_decay_error'],
+            chisq=results['chisq'],
+            BIC=results['BIC']
+        )
+
+    else:
+        flare = qs[0]
+        flare.t_peak = results['t_peak']
+        flare.t_peak_error = results['t_peak_error']
+        flare.peak_amplitude = results['amplitude']
+        flare.peak_amplitude_error = results['amplitude_error']
+        flare.tau_gaussian_rise = results['tau_gaussian_rise']
+        flare.tau_gaussian_rise_error = results['tau_gaussian_rise_error']
+        flare.tau_exponential_decay = results['tau_exponential_decay']
+        flare.tau_exponential_decay_error = results['tau_exponential_decay_error']
+        flare.chisq = results['chisq']
+        flare.BIC = results['BIC']
+        flare.save()
+
+    logger.info('Stored Pitkin flare model parameters for event ' + event.target.name)

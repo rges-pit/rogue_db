@@ -3,6 +3,7 @@ from custom_code.models import Event
 from tom_targets.models import Target
 from custom_code.management.commands import flare_fit_functions
 from custom_code.management.commands import data_utils
+from custom_code import diagnostics
 
 import logging
 
@@ -24,8 +25,11 @@ class Command(BaseCommand):
         if event:
 
             # Davenport flare model fit
-            results = flare_fit_functions.run_davenport_flare_fit(event)
+            davenport_results = flare_fit_functions.run_davenport_flare_fit(event)
+            if len(davenport_results) > 0:
+                data_utils.store_davenportflare_model_parameters(event, davenport_results)
 
-            # Store results
-            if len(results) > 0:
-                data_utils.store_davenportflare_model_parameters(event, results)
+            # Pitkin flare model fit
+            pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(event)
+            if len(pitkin_results) > 0:
+                data_utils.store_pitkinflare_model_parameters(event, pitkin_results)
