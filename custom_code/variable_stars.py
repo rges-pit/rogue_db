@@ -42,10 +42,18 @@ def find_nearest_rges_variable_catalog(target, radius=2):
         if closest_separation_deg <= radius:  # In degrees
             vstar = qs[closest_idx]
 
-            RogueTarget.objects.filter(pk=target.pk).update(
-                nearest_variable_star=vstar.get_name(),
-                angular_separation_variable=closest_separation_deg,
-            )
+            if vstar.type == 'flare':
+                RogueTarget.objects.filter(pk=target.pk).update(
+                    nearest_flare_star=vstar.get_name(),
+                    angular_separation_flare_star=closest_separation_deg,
+                )
+            else:
+                RogueTarget.objects.filter(pk=target.pk).update(
+                    nearest_variable_star=vstar.get_name(),
+                    angular_separation_variable=closest_separation_deg,
+                    nearest_variable_type=vstar.type
+                )
+
             logger.info('Identified a variable star close to target ' + str(target.pk))
 
 # def check_external_variable_catalog(target):
