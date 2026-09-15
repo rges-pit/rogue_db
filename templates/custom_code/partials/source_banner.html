@@ -18,5 +18,18 @@
   </div>
   <div class="col-sm">
     <h5>{{ target.classification }}</h5>
+    {% if target.nearest_flare_star|length > 0 %}
+        <h6 style="color: var(--warning)">
+        Nearby known flare star: {{ target.nearest_flare_star }}<br/>
+        Separation: {{ flare_separation_arcsec|floatformat:4 }} arcsec
+        </h6>
+    {% endif %}
+    {% if target.nearest_variable_star|length > 0 %}
+        <h6 style="color: var(--warning)">
+        Nearby known variable star: {{ target.nearest_variable_star }}<br/>
+        Separation: {{ variable_separation_arcsec|floatformat:4 }} arcsec<br/>
+        Type: {{ target.nearest_variable_type }}
+        </h6>
+    {% endif %}
   </div>
 </div>
