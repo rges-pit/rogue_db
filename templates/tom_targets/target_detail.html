@@ -1,5 +1,5 @@
 {% extends 'tom_common/base.html' %}
-{% load comments django_bootstrap5 tom_common_extras targets_extras observation_extras dataproduct_extras static cache plotting_functions %}
+{% load comments django_bootstrap5 tom_common_extras targets_extras observation_extras dataproduct_extras static cache plotting_functions view_layouts %}
 {% load dataservices_extras %}
 {% block title %}Target {{ object.name }}{% endblock %}
 {% block additional_css %}
@@ -36,43 +36,39 @@
     }
   });
 </script>
+{% source_banner_data object %}
 <div class="row">
   <div class="col-md-4">
     <div id="target-info">
-      {% target_feature object %}
-      {% if object.future_observations %}
-      <div class="alert alert-success">
-        {{ object.future_observations|length }} upcoming observation{{ object.future_observations|pluralize }}
-      </div>
-      {% endif %}
-      {% target_unknown_statuses object %}
       {% target_buttons object %}
-      {% target_data object %}
-      {% recent_photometry object limit=3 %}
-      {% if object.type == 'SIDEREAL' %}
-      {% aladin_finderchart object %}
-      {% endif %}
-
     </div>
-  </div>
-  <div class="col-md-8">
-    <ul class="nav nav-tabs" role="tablist" id="tabs">
-      <li class="nav-item">
-        <a class="nav-link" id="manage-data-tab" href="#manage-data" role="tab" data-bs-toggle="tab">Manage Data</a>
-      </li>
+    <ul class="nav nav-pills flex-column mt-3" role="tablist" id="tabs">
       <li class="nav-item">
         <a class="nav-link active" id="photometry-tab" href="#photometry" role="tab" data-bs-toggle="tab">Photometry</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" id="imaging-tab" href="#imaging" role="tab" data-bs-toggle="tab">Imaging</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" id="manage-data-tab" href="#manage-data" role="tab" data-bs-toggle="tab">Manage Data</a>
       </li>
       {% include_app_tabs %}
       <li class="nav-item">
         <a class="nav-link" id="comments-tab" href="#comments" role="tab" data-bs-toggle="tab">Comments</a>
       </li>
     </ul>
+  </div>
+  <div class="col-md-8">
     <div class="tab-content">
       <div class="tab-pane active" id="photometry">
         {% photometry_mulens_model target %}
         {% get_photometry_data object %}
         </div>
+        {% if object.type == 'SIDEREAL' %}
+          <div class="tab-pane" id="imaging">
+          {% aladin_finderchart object %}
+          </div>
+        {% endif %}
       <div class="tab-pane" id="manage-data">
         {% if user.is_authenticated %}
           {% upload_dataproduct object %}

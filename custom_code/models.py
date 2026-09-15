@@ -334,6 +334,17 @@ class StraightLineModel(EventModel):
     gradient = models.FloatField(default=0, null=True, blank=True)
     gradient_error = models.FloatField(default=0, null=True, blank=True)
 
+# Maps EventModel.model_type so a view can go from an EventModel row to
+# the fully-populated subclass instance without needing a separate lookup
+MODEL_TYPE_CLASSES = {
+    EventModel.ModelTypes.pspl: PSPLModel,
+    EventModel.ModelTypes.fspl: FSPLModel,
+    EventModel.ModelTypes.wide_bound_planet: WideBoundPlanetModel,
+    EventModel.ModelTypes.davenport_flare: DavenportFlareModel,
+    EventModel.ModelTypes.pitkin_flare: PitkinFlareModel,
+    EventModel.ModelTypes.straightline: StraightLineModel,
+}
+
 class VariableStar(models.Model):
     """
     Parameters of known variable stars

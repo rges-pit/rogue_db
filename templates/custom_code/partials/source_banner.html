@@ -1,0 +1,22 @@
+{% load static tom_common_extras targets_extras %}
+<div class="row source-banner">
+  <div class="col-sm">
+    {% for name in target.names %}
+      {% if forloop.first %}
+        <h3 style="color: var(--rges-purple-light)">{{ name }}</h3>
+      {% else %}
+        <h5>{{ name }}</h5>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <div class="col-sm">
+    <h5>
+      RA: {{ target.ra|deg_to_sexigesimal:"hms" }} = {{ target.ra|floatformat:5 }}&deg;<br/>
+      Dec: {{ target.dec|deg_to_sexigesimal:"dms" }} = {{ target.dec|floatformat:5 }}&deg;<br/>
+      l: {{ target.galactic_lng|floatformat:4 }}&deg; b: {{ target.galactic_lat|floatformat:4 }}&deg;<br/>
+    </h5>
+  </div>
+  <div class="col-sm">
+    <h5>{{ target.classification }}</h5>
+  </div>
+</div>

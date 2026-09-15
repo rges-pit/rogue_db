@@ -1,5 +1,8 @@
 import django_tables2 as tables
 
+from django.urls import reverse
+from django.utils.html import format_html
+
 from tom_common.htmx_table import HTMXTable
 from .models import RGESAlert, EventModel, Event
 
@@ -28,15 +31,10 @@ class RGESAlertTable(HTMXTable):
 
 class EventModelTable(HTMXTable):
     """
-    Lists EventModel rows -- since this queries the shared MTI base table, it
-    shows every model regardless of type (Microlensing, Flare, ...), but only
-    ever has access to base-class fields. Type-specific parameters aren't
-    shown here; see the per-type cutfile search for those.
+    Lists EventModel rows including all model types.
     """
 
-    # EventModel has no direct target field -- the target is reached through
-    # its Event (RogueTarget -> Event -> EventModel), so the column accessor
-    # traverses that relation rather than a same-named model field.
+    # EventModel has no direct target field
     target = tables.Column(
         accessor='event__target',
         order_by='event__target',
@@ -47,13 +45,22 @@ class EventModelTable(HTMXTable):
     class Meta(HTMXTable.Meta):
         model = EventModel
         fields = [
-            'target', 'model_type'
+            'target', 'model_type', 'chisq', 'BIC'
         ]
-        # HTMXTable declares a 'selection' checkbox column for bulk actions; alerts
-        # have no such grouping form, so it's excluded here.
+
         exclude = ['selection']
 
     partial_template_name = "custom_code/partials/eventmodel_table.html"
+
+    def render_model_type(self, value, record):
+        if not value:
+            return value
+        url = f"{reverse('eventmodels:parameters')}?model={record.pk}"
+        return format_html(
+            '<a href="#" hx-get="{}" hx-target="#model-parameters-container" '
+            'hx-swap="innerHTML" hx-indicator="#model-parameters-progress">{}</a>',
+            url, value,
+        )
 
 class EventTable(HTMXTable):
     """
@@ -63,10 +70,23 @@ class EventTable(HTMXTable):
     class Meta(HTMXTable.Meta):
         model = Event
         fields = [
-            'target', 'event_id', 'start_time', 'duration'
+            'event_id', 'start_time', 'duration'
         ]
         # HTMXTable declares a 'selection' checkbox column for bulk actions; alerts
         # have no such grouping form, so it's excluded here.
         exclude = ['selection']
 
     partial_template_name = "custom_code/partials/event_table.html"
+
+    def render_event_id(self, value, record):
+        # Clicking an event_id loads that Event's EventModels into the
+        # #event-models-container placeholder below the table (see
+        # target_events_tab.html) rather than navigating away.
+        if not value:
+            return value
+        url = f"{reverse('eventmodels:list')}?event={record.pk}"
+        return format_html(
+            '<a href="#" hx-get="{}" hx-target="#event-models-container" '
+            'hx-swap="innerHTML" hx-indicator="#event-models-progress">{}</a>',
+            url, value,
+        )
