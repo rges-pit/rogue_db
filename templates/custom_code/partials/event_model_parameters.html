@@ -1,0 +1,17 @@
+{% if parameters %}
+{{ model_type }} model parameters
+<table class="table table-sm table-striped">
+    <tbody>
+        {% for label, value in parameters %}
+        <tr>
+            <th>{{ label }}</th>
+            <td>{{ value }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="alert alert-info">
+    No fit parameters are available for model type "{{ model_type }}".
+</div>
+{% endif %}

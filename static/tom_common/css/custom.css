@@ -137,3 +137,37 @@ li {
   padding: 0.5rem;
   border-radius: 0.25rem;
 }
+
+/* Source banner for TargetDetailPage */
+.source-banner {
+    width: 100%;
+    margin: -2rem 5rem 0rem 0rem;
+    padding: 1rem 0rem 0rem 0rem;
+    background-color: #191c17;
+    border-color: var(--rges-purple-dark);
+    color: white;
+    justify-content: center;
+}
+
+/* Vertical section nav on TargetDetailView (target_detail.html #tabs) */
+#tabs {
+  gap: 0.5rem;
+}
+
+#tabs .nav-link {
+  color: var(--rges-purple-light);
+  background-color: var(--bs-gray-800);
+}
+
+#tabs .nav-link.active {
+  color: #fff;
+  background-color: var(--rges-purple-light);
+}
+
+/* Rounded corners for tables, matching the buttons' default Bootstrap
+   radius -- overflow:hidden is what makes the radius actually clip the
+   table's cell borders/backgrounds instead of being ignored. */
+.table {
+  border-radius: var(--bs-border-radius);
+  overflow: hidden;
+}

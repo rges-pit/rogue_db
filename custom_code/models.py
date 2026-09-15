@@ -34,8 +34,6 @@ class Event(models.Model):
     Nlinked_events = models.IntegerField(default=0, null=True, blank=True)
     nearest_moving_object = models.CharField(max_length=60, null=True, blank=True)
     angular_separation_moving_object = models.FloatField(null=True, blank=True)
-    frac_below_baseline = models.FloatField(null=True, blank=True)
-    max_excursion_below_baseline = models.FloatField(null=True, blank=True)
     max_peak_periodogram = models.FloatField(null=True, blank=True)
     period = models.FloatField(null=True, blank=True)
 
@@ -335,6 +333,17 @@ class StraightLineModel(EventModel):
     intercept_error = models.FloatField(default=0, null=True, blank=True)
     gradient = models.FloatField(default=0, null=True, blank=True)
     gradient_error = models.FloatField(default=0, null=True, blank=True)
+
+# Maps EventModel.model_type so a view can go from an EventModel row to
+# the fully-populated subclass instance without needing a separate lookup
+MODEL_TYPE_CLASSES = {
+    EventModel.ModelTypes.pspl: PSPLModel,
+    EventModel.ModelTypes.fspl: FSPLModel,
+    EventModel.ModelTypes.wide_bound_planet: WideBoundPlanetModel,
+    EventModel.ModelTypes.davenport_flare: DavenportFlareModel,
+    EventModel.ModelTypes.pitkin_flare: PitkinFlareModel,
+    EventModel.ModelTypes.straightline: StraightLineModel,
+}
 
 class VariableStar(models.Model):
     """

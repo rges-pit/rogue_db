@@ -1,10 +1,12 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.shortcuts import get_object_or_404
 from django.urls import reverse
+from django.views.generic.base import TemplateView
 from django.views.generic.edit import CreateView
 from tom_common.htmx_table import HTMXTableViewMixin
 from django_filters.views import FilterView
 
-from .models import (RGESAlert, Event, EventModel,
+from .models import (RGESAlert, Event, EventModel, MODEL_TYPE_CLASSES,
                      PSPLModel, FSPLModel, WideBoundPlanetModel,
                      DavenportFlareModel, PitkinFlareModel)
 from .filters import (
@@ -103,6 +105,17 @@ class EventModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
 
     ordering = ['-created_at']
 
+    def get_queryset(self, *args, **kwargs):
+        # Optional scoping to one Event's models -- used by the Events tab on
+        # TargetDetailView (see EventTable.render_event_id), which links each
+        # event_id to ?event=<pk> here. The standalone EventModel list page
+        # doesn't set this param, so it still shows every model, unfiltered.
+        queryset = super().get_queryset(*args, **kwargs)
+        event_id = self.request.GET.get('event')
+        if event_id:
+            queryset = queryset.filter(event_id=event_id)
+        return queryset
+
     def get_context_data(self, *args, **kwargs):
         """
         Adds the number of models visible and the query string to the context object.
@@ -114,6 +127,33 @@ class EventModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
         context['model_count'] = context['record_count']
         context['query_string'] = self.request.META['QUERY_STRING']
 
+        return context
+
+
+class EventModelParametersView(LoginRequiredMixin, TemplateView):
+    """
+    Renders the type-specific fit parameters for one EventModel row (?model=<pk>).
+    Requires the user to be logged in.
+    """
+    template_name = 'custom_code/partials/event_model_parameters.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        base = get_object_or_404(EventModel, pk=self.request.GET.get('model'))
+        model_class = MODEL_TYPE_CLASSES.get(base.model_type)
+
+        parameters = []
+        if model_class:
+            instance = get_object_or_404(model_class, pk=base.pk)
+
+            parameters = [
+                (field.verbose_name, getattr(instance, field.attname))
+                for field in type(instance)._meta.local_fields
+                if not getattr(field.remote_field, 'parent_link', False)
+            ]
+
+        context['model_type'] = base.model_type
+        context['parameters'] = parameters
         return context
 
 
