@@ -80,6 +80,7 @@ class RGESAlert(models.Model):
     class AlertOrigin(models.TextChoices):
         aethra = 'aethra', 'Aethra'
         neural_network = 'neural network', 'Neural Network'
+        msos = 'MSOS', 'MSOS'
         unknown = 'unknown', 'Unknown'
 
     alert_id = models.IntegerField(default=0, null=True, blank=True)
