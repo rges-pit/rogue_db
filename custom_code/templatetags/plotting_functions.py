@@ -70,12 +70,7 @@ def plot_interactive_lightcurve(datasets, model_datums, height=600, width=700, s
     fig = go.Figure(data=plot_data, layout=layout)
     current_time = Time.now().jd - 2460000
     if show_current_time:
-        # Shapes are included in x-axis autorange by default, same as data
-        # traces. That's fine for the full target lightcurve, where "now" is
-        # always within the plotted history, but for a single zoomed-in event
-        # window (whose data may sit thousands of days from "now") including
-        # it would stretch the axis to cover the gap and squeeze the actual
-        # event data into a sliver -- see photometry_event's show_current_time=False.
+
         fig.add_shape(
             # Line Vertical
             dict(
