@@ -1,75 +1,140 @@
-from rest_framework.serializers import ModelSerializer
-from custom_code.models import RGESAlert
-from custom_code.utils import flux_to_mag, mag_to_flux
+from rest_framework import serializers
+from custom_code.models import RGESAlert, Event
 from tom_targets.models import Target
-from tom_dataproducts.serializers import ReducedDatumSerializer
+from tom_dataproducts.models import try_parse_reduced_datum, PhotometryReducedDatum
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 from astropy.time import Time
+from django.utils import timezone
+import datetime
 import numpy as np
-from custom_code import validators
+from custom_code import utils
 
-class RGESAlertSerializer(ModelSerializer):
-    """
-    Serializer to convert alerts in JSON format to RGESAlert objects and Targets.
-    """
 
-    class Meta:
-        model = RGESAlert
-        fields = '__all__'
-        validators = []
+class LightCurveBandSerializer(serializers.Serializer):
+    """One passband's raw time series, as provided in an MSOS alert packet."""
+    time = serializers.ListField(child=serializers.FloatField())
+    flux = serializers.ListField(child=serializers.FloatField())
+    flux_err = serializers.ListField(child=serializers.FloatField())
+
+
+class LightCurvesSerializer(serializers.Serializer):
+    F087 = LightCurveBandSerializer()
+    F146 = LightCurveBandSerializer()
+    F213 = LightCurveBandSerializer()
+
+
+class MSOSMetadataSerializer(serializers.Serializer):
+    """
+    Only the metadata fields create() actually uses below -- the packet's
+    'metadata' dict has dozens of other simulation-parameter fields (piE,
+    thetaE, Lens_*, Source_*, extinction_*, ...), all preserved verbatim in
+    alert_contents via self.initial_data rather than through this serializer.
+    """
+    t0lens1 = serializers.FloatField()
+    u0lens1 = serializers.FloatField()
+    tE_ref = serializers.FloatField()
+    rho = serializers.FloatField()
+    Source_F146 = serializers.FloatField()
+    EventID = serializers.FloatField()
+
+
+class MSOSAlertSerializer(serializers.Serializer):
+    """
+    Serializer for a raw MSOS alert packet (JSON), converting it into
+    RGESAlert, Target and Event records.
+    """
+    id = serializers.CharField()
+    objname = serializers.CharField()
+    ra = serializers.FloatField()
+    dec = serializers.FloatField()
+    metadata = MSOSMetadataSerializer()
+    light_curves = LightCurvesSerializer()
 
     def create(self, validated_data):
 
         s = SkyCoord(validated_data['ra'], validated_data['dec'], frame='icrs', unit=(u.deg, u.deg))
-        s.transform_to('galactic')
+        g = s.transform_to('galactic')
 
-        t = Target.objects.create(
+        # name is the natural identity of a Target -- everything else lives in
+        # defaults, so a rerun on the same packet finds and reuses this
+        # Target instead of comparing every field as part of the lookup.
+        t, created = Target.objects.get_or_create(
             name=validated_data['objname'],
-            ra=validated_data['ra'],
-            dec=validated_data['dec'],
-            type='SIDEREAL',
-            permissions='PUBLIC',
-            galactic_lng=s.l.deg,
-            galactic_lat=s.b.deg,
+            defaults=dict(
+                ra=validated_data['ra'],
+                dec=validated_data['dec'],
+                type='SIDEREAL',
+                permissions='PUBLIC',
+                galactic_lng=g.l.deg,
+                galactic_lat=g.b.deg,
+                t0=float(validated_data['metadata']['t0lens1']),
+                u0=float(validated_data['metadata']['u0lens1']),
+                tE=float(validated_data['metadata']['tE_ref']),
+                source_magnitude=float(validated_data['metadata']['Source_F146']),
+                baseline_magnitude=float(validated_data['metadata']['Source_F146']),
+            ),
         )
 
-        ## NEEDS REAL ALERT KEYWORD
-        if 'confidence' in validated_data.keys():
-            alert_confidence = validated_data['confidence']
-        else:
-            alert_confidence = None
-        ## NEEDS REAL ALERT KEYWORD
-        if 'delta_chisq' in validated_data.keys():
-            delta_chisq = validated_data['delta_chisq']
-        else:
-            delta_chisq = None
+        current_time = timezone.now()
 
-        current_time = Time.now()
+        # self.initial_data (the raw input dict), not validated_data: only
+        # the fields declared above survive into validated_data, so sourcing
+        # from initial_data keeps any other packet fields -- not otherwise
+        # used here -- intact in alert_contents instead of silently dropping
+        # them.
+        alert_data = {key: value for key, value in self.initial_data.items() if 'light_curve' not in key}
 
-        alert_data = {key:value for key, value in validated_data.items() if 'light_curve' not in key}
+        duration = 2.0*float(validated_data['metadata']['tE_ref'])
+        tstart = float(validated_data['metadata']['t0lens1']) - duration
+        event_id = str(int(validated_data['metadata']['EventID']))
 
-        alert = RGESAlert.objects.create(
-            alert_id=validated_data['id'],
-            roman_id=validated_data['objname'],
-            target=t,
-            ra=validated_data['ra'],
-            dec=validated_data['dec'],
-            alert_neural_network_confidence=alert_confidence,
-            alert_delta_chi2=delta_chisq,
-            alert_classification='Microlensing',
-            ffp_candidate=True,
-            alert_origin='RGES',    # Classifier name needed in alert packet
-            alert_notes='',
-            alert_t0=validated_data['t0lens1'],
-            alert_u0=validated_data['u0lens1'],
-            alert_tE=validated_data['tE_ref'],  # Is this the right value?
-            alert_rho=validated_data['rho'],
-            alert_peak_mag=0.0,
-            alert_baseline_mag=validated_data['Source_F213'],  # What about the other passbands?
-            alert_mag_passband='F213',
-            alert_timestamp=current_time, # Because there is no timestamp in the alert packet
-            alert_contents=alert_data,
+        # event_id alone is the lookup key, same reasoning as Target above --
+        # start_time/duration are recomputed from the packet every run, and
+        # target could in principle change, so none of those belong in the
+        # lookup either.
+        event, created = Event.objects.get_or_create(
+            event_id=event_id,
+            defaults=dict(
+                target=t,
+                start_time=tstart,
+                duration=duration,
+            ),
+        )
+
+        # RGESAlert has no direct target field -- target is reached via
+        # event.target, so the Event above has to exist first.
+        #
+        # alert_id alone is the lookup key. Previously alert_timestamp=
+        # current_time (a fresh timezone.now() every run) was part of the
+        # lookup kwargs, which meant it could never match a prior run's row
+        # -- get_or_create always took the "create" branch, duplicating the
+        # alert on every rerun of the same file. Moving it (and everything
+        # else) into defaults means a rerun now finds and reuses the
+        # existing RGESAlert instead.
+        alert, created = RGESAlert.objects.get_or_create(
+            alert_id=event_id,
+            defaults=dict(
+                roman_id=validated_data['objname'],
+                event=event,
+                ra=s.ra.deg,
+                dec=s.dec.deg,
+                alert_neural_network_confidence=0.0,
+                alert_delta_chi2=0.0,
+                alert_classification='Microlensing',
+                ffp_candidate=True,
+                alert_origin='MSOS',    # Classifier name needed in alert packet
+                alert_notes='',
+                alert_t0=float(validated_data['metadata']['t0lens1']),
+                alert_u0=float(validated_data['metadata']['u0lens1']),
+                alert_tE=float(validated_data['metadata']['tE_ref']),  # Is this the right value?
+                alert_rho=float(validated_data['metadata']['rho']),
+                alert_peak_mag=0.0,
+                alert_baseline_mag=float(validated_data['metadata']['Source_F146']),  # What about the other passbands?
+                alert_mag_passband='F146',
+                alert_timestamp=current_time, # Because there is no timestamp in the alert packet
+                alert_contents=alert_data,
+            ),
         )
 
         # Parse the lightcurve data into PhotometryReducedDatums
@@ -77,23 +142,30 @@ class RGESAlertSerializer(ModelSerializer):
 
         for passband in ['F087', 'F146', 'F213']:
             lc = lightcurves[passband]
-            payload = [{
-                'target': t.pk,
-                'data_product': None,          # No actual file path available
-                'data_type': 'photometry',
-                'source_name': 'MSOS_alert_'+validated_data['id'],  # Replace with classifier ID
-                'source_location': 'Roman',      # Check this
-                'timestamp': lc[0,i],
-                'value': {
-                    'mag': lc[1,i],
-                    'mag_err': lc[2,i],
-                    'bandpass': passband
-                }
-            } for i in range(0, len(lc), 1)]
+            source_name = 'MSOS_alert_' + event_id  # Replace with classifier ID
 
-            serializer = ReducedDatumSerializer(data=payload, many=True, context=self.get_serializer_context()})
-            serializer.is_valid(raise_exception=True)
-            rds = serializer.save()
+            # Bulk create due to large number of datapoints
+            reduced_datums = [
+                try_parse_reduced_datum({
+                    'target': t,
+                    'data_product': None,          # No actual file path available
+                    'data_type': 'photometry',
+                    'source_name': source_name,
+                    'source_location': 'Roman',      # Check this
+                    'timestamp': timezone.make_aware(Time(lc[i, 0], format='jd').datetime, datetime.timezone.utc),
+                    'value': {
+                        'mag': lc[i, 1],
+                        'mag_err': lc[i, 2],
+                        'bandpass': passband
+                    }
+                })
+                for i in range(len(lc))
+            ]
+            # ignore_conflicts: without it, rerunning ingestion on a file
+            # already ingested hits the unique_photometry constraint and
+            # raises IntegrityError, aborting the whole batch instead of
+            # just skipping the points that already exist.
+            PhotometryReducedDatum.objects.bulk_create(reduced_datums, ignore_conflicts=True)
 
         return alert
 
@@ -106,9 +178,12 @@ class RGESAlertSerializer(ModelSerializer):
 
         lightcurves = {}
         for passband in ['F087', 'F146', 'F213']:
-            mag, mag_err = utils.flux_to_mag(
-                validated_data['light_curves'][passband]['flux'],
-                validated_data['light_curves'][passband]['flux_err']
+            # flux_to_mag does elementwise comparisons (flux > 0.0), which
+            # needs numpy arrays -- the serializer's ListField validation
+            # gives back plain Python lists.
+            mag, mag_err, _, _ = utils.flux_to_mag(
+                np.array(validated_data['light_curves'][passband]['flux']),
+                np.array(validated_data['light_curves'][passband]['flux_err'])
             )
             lc = [
                 [validated_data['light_curves'][passband]['time'][i], mag[i], mag_err[i]]
