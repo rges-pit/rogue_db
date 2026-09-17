@@ -1,5 +1,5 @@
 from django import template
-from custom_code.models import VariableStar
+from custom_code.models import EventModel
 
 register = template.Library()
 
@@ -15,3 +15,25 @@ def source_banner_data(target):
         'flare_separation_arcsec': flare_separation_arcsec,
         'variable_separation_arcsec': variable_separation_arcsec
         }
+
+@register.inclusion_tag('custom_code/partials/event_banner.html')
+def event_banner_data(event):
+    """
+    Function to compile the data presented in the banner on the EventDetailPage
+    """
+    flare_separation_arcsec = event.target.angular_separation_flare_star * 3600.0
+    variable_separation_arcsec = event.target.angular_separation_variable * 3600.0
+    return {
+        'event': event,
+        'target': event.target,
+        'flare_separation_arcsec': flare_separation_arcsec,
+        'variable_separation_arcsec': variable_separation_arcsec
+        }
+
+@register.inclusion_tag('custom_code/partials/event_model_buttons.html')
+def event_model_buttons(event):
+    """
+    Function to create a button for each EventModel for the given Event
+    """
+    models = EventModel.objects.filter(event=event)
+    return {'models': models}

@@ -1,0 +1,28 @@
+{% load static tom_common_extras targets_extras %}
+<div class="row source-banner">
+  <div class="col-sm">
+      <h3 style="color: var(--rges-purple-light)">{{ event.event_id }}</h3>
+  </div>
+  <div class="col-sm">
+      <h6>
+          Source: <a href="{% url 'targets:detail' pk=target.id %}">{{ target.name }}</a><br/>
+          RA: {{ target.ra|deg_to_sexigesimal:"hms" }} = {{ target.ra|floatformat:5 }}&deg;<br/>
+          Dec: {{ target.dec|deg_to_sexigesimal:"dms" }} = {{ target.dec|floatformat:5 }}&deg;<br/>
+      </h6>
+  </div>
+    <div class="col-sm">
+    <h5>{{ event.target.classification }}</h5>
+    {% if event.target.nearest_flare_star|length > 0 %}
+        <h6 style="color: var(--warning)">Nearby known flare star: </h6>
+        <p>{{ event.target.nearest_flare_star }}</p>
+        <p>Separation: {{ flare_separation_arcsec|floatformat:4 }} arcsec</p>
+        </h6>
+    {% endif %}
+    {% if target.nearest_variable_star|length > 0 %}
+        <h6 style="color: var(--warning)">Nearby known variable star:</h6>
+        <p style="color: var(--warning)">{{ target.nearest_variable_star }}<br/>
+            Separation: {{ variable_separation_arcsec|floatformat:4 }} arcsec<br/>
+            Type: {{ target.nearest_variable_type }}</p>
+    {% endif %}
+    </div>
+</div>

@@ -24,6 +24,7 @@
     --theme_link_active: #0AFF1C;
     --rges-purple-light: #a658e1;
     --rges-purple-dark: #3f2256;
+    --panel-dark: #1F1F1F;
 }
 
 body {
@@ -147,6 +148,7 @@ li {
     border-color: var(--rges-purple-dark);
     color: white;
     justify-content: center;
+    margin-bottom: 10px;
 }
 
 /* Vertical section nav on TargetDetailView (target_detail.html #tabs) */
@@ -164,10 +166,58 @@ li {
   background-color: var(--rges-purple-light);
 }
 
-/* Rounded corners for tables, matching the buttons' default Bootstrap
-   radius -- overflow:hidden is what makes the radius actually clip the
-   table's cell borders/backgrounds instead of being ignored. */
+.dashboard-panel {
+  background-color: var(--panel-dark);
+}
+
 .table {
   border-radius: var(--bs-border-radius);
   overflow: hidden;
 }
+
+.event-table {
+  width: 100%;
+  background-color: #000;
+  color: #fff;
+  border-color: #fff;
+  border-radius: var(--bs-border-radius);
+  overflow: hidden;
+  /* Bootstrap's reboot sets table { border-collapse: collapse } globally --
+     border-radius has no effect at all on table cells under collapsed
+     borders (a CSS spec limitation, not a specificity issue), which is why
+     the corner-cell radius below was being silently ignored. */
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.event-table td,
+.event-table th {
+  background-color: #000;
+  border-color: #fff;
+  border: 1px solid #fff;
+  color: #fff;
+}
+
+/* overflow:hidden on .event-table only clips the table's own box -- it can't
+   bend a corner cell's square border to follow that curve, so without this
+   the clip just cuts the corner cell's white border off mid-line, leaving a
+   gap that shows the black background behind it. Rounding the corner cells
+   to match makes their own border trace the curve instead. */
+.event-table thead tr:first-child th:first-child {
+  border-top-left-radius: var(--bs-border-radius);
+}
+.event-table thead tr:first-child th:last-child {
+  border-top-right-radius: var(--bs-border-radius);
+}
+.event-table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: var(--bs-border-radius);
+}
+.event-table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: var(--bs-border-radius);
+}
+
+.event-table-container {
+    margin-top: 10px;
+    margin-bottom: 10px;
+  }
+
