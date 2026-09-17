@@ -1,9 +1,9 @@
 {% load crispy_forms_tags %}
 
-{# Search form (we refer to this id="filter-form" in EventTable.Meta.attrs) #}
+{# Search form (we refer to this id="filter-form" in TargetEventTable.Meta.attrs) #}
 {# ?target={{ target.pk }} is baked in so every HTMX round-trip (sort, page, filter) stays scoped to this target #}
 <form id="filter-form" class="mb-3"
-  hx-get="{% url 'events:list' %}?target={{ target.pk }}"
+  hx-get="{% url 'events:for-target' %}?target={{ target.pk }}"
   hx-target="div.table-container"
   hx-swap="outerHTML"
   hx-indicator=".progress">

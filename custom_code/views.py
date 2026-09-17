@@ -3,6 +3,8 @@ from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.views.generic.base import TemplateView
 from django.views.generic.edit import CreateView
+from django.views.generic.detail import DetailView
+from django.core.exceptions import PermissionDenied
 from tom_common.htmx_table import HTMXTableViewMixin
 from django_filters.views import FilterView
 
@@ -15,7 +17,7 @@ from .filters import (
     DavenportFlareCutfileFilterSet, PitkinFlareCutfileFilterSet,
     EventFilterSet
 )
-from .tables import RGESAlertTable, EventModelTable, EventTable
+from .tables import RGESAlertTable, EventModelTable, EventTable, TargetEventTable
 from .forms import (RGESAlertForm, PSPLModelForm, FSPLModelForm, WideBoundPlanetModelForm,
                     DavenportFlareModelForm, PitkinFlareModelForm)
 
@@ -60,7 +62,9 @@ class RGESAlertCreateView(LoginRequiredMixin, CreateView):
 
 class EventListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     """
-    View to list all Events associated with a Target.  Login required.
+    View to list all Events, across every target. Requires the user to be
+    logged in; anonymous users are redirected to login. See
+    TargetEventListView for the version scoped to one target's Events tab.
     """
     template_name = 'custom_code/events_list.html'
     paginate_by = 20
@@ -69,14 +73,10 @@ class EventListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     filterset_class = EventFilterSet
     table_class = EventTable
 
-    ordering = ['-created_at']
-
-    def get_queryset(self, *args, **kwargs):
-        queryset = super().get_queryset(*args, **kwargs)
-        target_id = self.request.GET.get('target')
-        if target_id:
-            queryset = queryset.filter(target_id=target_id)
-        return queryset
+    # Event has no created_at/timestamp field (unlike EventModel/RGESAlert),
+    # so -start_time (most recent event window first) is the closest
+    # available equivalent to this app's usual "newest first" default.
+    ordering = ['-start_time']
 
     def get_context_data(self, *args, **kwargs):
         """
@@ -90,6 +90,46 @@ class EventListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
         context['query_string'] = self.request.META['QUERY_STRING']
 
         return context
+
+class EventDetailView(LoginRequiredMixin,DetailView):
+    """
+    View that handles the display of the target details.
+    """
+    template_name = 'custom_code/event_detail.html'
+    model = Event
+
+    def get_queryset(self, *args, **kwargs):
+        qs = super().get_queryset(*args, **kwargs)
+        if not qs.exists() and Event.objects.filter(pk=self.kwargs.get("pk")).exists():
+            raise PermissionDenied('You do not have permission to view this event')
+        else:
+            return qs
+
+    def get_context_data(self, *args, **kwargs):
+        """
+        :returns: context object
+        :rtype: dict
+        """
+        context = super().get_context_data(*args, **kwargs)
+        context['event'] = self.object
+        context['target'] = self.object.target
+        return context
+
+class TargetEventListView(EventListView):
+    """
+    Events tab on TargetDetailView -- scopes EventListView to one target's
+    Events (?target=<pk>, baked into the tab's hx-get URL by target_events_tab.html)
+    and swaps in TargetEventTable, which drops the now-redundant target column.
+    """
+    table_class = TargetEventTable
+
+    def get_queryset(self, *args, **kwargs):
+        queryset = super().get_queryset(*args, **kwargs)
+        target_id = self.request.GET.get('target')
+        if target_id:
+            queryset = queryset.filter(target_id=target_id)
+        return queryset
+
 
 class EventModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     """

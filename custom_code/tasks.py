@@ -3,6 +3,7 @@ from .target_models import RogueTarget
 from custom_code.models import Event
 from .variable_stars import find_nearest_rges_variable_catalog
 from .solar_system import find_moving_objects_near_event
+from .event_functions import generate_event_lightcurves
 
 @task
 def check_target_for_variable_star(target_id):
@@ -13,3 +14,8 @@ def check_target_for_variable_star(target_id):
 def check_event_for_moving_objects(event_id):
     event = Event.objects.get(pk=event_id)
     find_moving_objects_near_event(event)
+
+@task
+def make_event_lightcurve(event_id):
+    event = Event.objects.get(pk=event_id)
+    generate_event_lightcurves(event)

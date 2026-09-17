@@ -36,6 +36,7 @@ class Event(models.Model):
     angular_separation_moving_object = models.FloatField(null=True, blank=True)
     max_peak_periodogram = models.FloatField(null=True, blank=True)
     period = models.FloatField(null=True, blank=True)
+    thumbnail = models.ImageField(upload_to='event_thumbnails/%Y/%m/%d/', null=True, blank=True)
 
 class RGESAlert(models.Model):
     """

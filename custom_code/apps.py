@@ -20,7 +20,7 @@ class CustomCodeConfig(AppConfig):
         """
         return [
             {'partial': 'custom_code/partials/navbar_item.html'},
-            {'partial': 'custom_code/partials/navbar_item_eventmodels.html'},
+            {'partial': 'custom_code/partials/navbar_item_events.html'},
             {'partial': 'custom_code/partials/navbar_item_cutfiles.html'},
         ]
 
