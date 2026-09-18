@@ -143,7 +143,7 @@ li {
 .source-banner {
     width: 100%;
     margin: -2rem 5rem 0rem 0rem;
-    padding: 1rem 0rem 0rem 0rem;
+    padding: 1rem 1rem 0rem 0rem;
     background-color: #191c17;
     border-color: var(--rges-purple-dark);
     color: white;
@@ -231,5 +231,28 @@ li {
   height: auto;
   overflow: visible;
   background-color: transparent;
+}
+
+/* HTMXTableFilterSet's general search field (tom_common/htmx_table.py, shared
+   by every search form across the app -- id="filter-form") wraps its "query"
+   input in a fixed col-md-3, sized against whatever column it happens to sit
+   in rather than the page. That's fine in a full-width layout, but inside a
+   narrower sidebar column (e.g. the targets page's col-md-4) it compounds
+   into a visibly compressed search box. Scoped via :has(#div_id_query) so
+   this only widens the general-search column, not the (deliberately
+   multi-column) advanced-filter fields, which share the same col-md-3 class. */
+#filter-form .col-md-3:has(#div_id_query) {
+  width: 100%;
+}
+
+/* tom_common/css/main.css's .content { padding: 3rem 1.5rem } stacks with
+   body's own padding-top: 5rem (clearance for the fixed navbar) to leave 8rem
+   of empty space above any page's content. The body padding is tied to the
+   fixed navbar's actual rendered height (its logo has no max-height set, so
+   that's not safe to shrink blindly), but .content's top padding is a
+   separate, purely decorative value -- trimmed here instead. Bottom padding
+   is left alone so there's still breathing room at the end of the page. */
+.content {
+  padding-top: 1rem;
 }
 

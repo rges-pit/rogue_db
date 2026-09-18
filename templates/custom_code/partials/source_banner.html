@@ -1,6 +1,6 @@
 {% load static tom_common_extras targets_extras %}
 <div class="row source-banner">
-  <div class="col-sm">
+  <div class="col-sm-3">
     {% for name in target.names %}
       {% if forloop.first %}
         <h3 style="color: var(--rges-purple-light)">{{ name }}</h3>
@@ -9,15 +9,23 @@
       {% endif %}
     {% endfor %}
   </div>
-  <div class="col-sm">
-    <h5>
+  <div class="col-sm-3">
       RA: {{ target.ra|deg_to_sexigesimal:"hms" }} = {{ target.ra|floatformat:5 }}&deg;<br/>
       Dec: {{ target.dec|deg_to_sexigesimal:"dms" }} = {{ target.dec|floatformat:5 }}&deg;<br/>
       l: {{ target.galactic_lng|floatformat:4 }}&deg; b: {{ target.galactic_lat|floatformat:4 }}&deg;<br/>
-    </h5>
   </div>
-  <div class="col-sm">
+  <div class="col-sm-3">
     <h5>{{ target.classification }}</h5>
+    {% if 'Microlensing' in target.classification %}
+      t<sub>0</sub>: {{ target.t0|floatformat:3 }}<br/>
+      u<sub>0</sub>: {{ target.u0|floatformat:4 }}<br/>
+      t<sub>E</sub>: {{ target.tE|floatformat:2 }}<br/>
+      {% endif %}
+      {% if 'Microlensing FSPL' in target.classification %}
+      &rho;: {{ target.rho }}
+      {% endif %}
+  </div>
+    <div class="col-sm-3">
     {% if target.nearest_flare_star|length > 0 %}
         <h6 style="color: var(--warning)">
         Nearby known flare star: {{ target.nearest_flare_star }}<br/>

@@ -1,17 +1,25 @@
 {% load static tom_common_extras targets_extras %}
 <div class="row source-banner">
-  <div class="col-sm">
+  <div class="col-sm-3">
       <h3 style="color: var(--rges-purple-light)">{{ event.event_id }}</h3>
   </div>
-  <div class="col-sm">
-      <h6>
-          Source: <a href="{% url 'targets:detail' pk=target.id %}">{{ target.name }}</a><br/>
+  <div class="col-sm-3">
+      <h6>Source: <a href="{% url 'targets:detail' pk=target.id %}">{{ target.name }}</a><br/></h6>
           RA: {{ target.ra|deg_to_sexigesimal:"hms" }} = {{ target.ra|floatformat:5 }}&deg;<br/>
           Dec: {{ target.dec|deg_to_sexigesimal:"dms" }} = {{ target.dec|floatformat:5 }}&deg;<br/>
-      </h6>
   </div>
-    <div class="col-sm">
+    <div class="col-sm-3">
     <h5>{{ event.target.classification }}</h5>
+    {% if 'Microlensing' in target.classification %}
+      t<sub>0</sub>: {{ target.t0|floatformat:3 }}<br/>
+      u<sub>0</sub>: {{ target.u0|floatformat:4 }}<br/>
+      t<sub>E</sub>: {{ target.tE|floatformat:2 }}<br/>
+      {% endif %}
+      {% if 'Microlensing FSPL' in target.classification %}
+      &rho;: {{ target.rho }}
+      {% endif %}
+        </div>
+    <div class="col-sm-3">
     {% if event.target.nearest_flare_star|length > 0 %}
         <h6 style="color: var(--warning)">Nearby known flare star: </h6>
         <p>{{ event.target.nearest_flare_star }}</p>

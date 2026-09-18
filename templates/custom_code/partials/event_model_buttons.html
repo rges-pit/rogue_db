@@ -6,5 +6,9 @@
            hx-target="#event-model-parameters-container" hx-swap="innerHTML"
            hx-indicator="#event-model-parameters-progress">{{model.model_type}}</a>
       </li>
-      {% endfor %}
+    {% empty %}
+    <li class="nav-item">
+        <a class="nav-link disabled" href="#">No models for this event yet</a>
+    </li>
+    {% endfor %}
 </ul>
