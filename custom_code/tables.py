@@ -5,6 +5,7 @@ from django.utils.html import format_html
 
 from tom_common.htmx_table import HTMXTable
 from .models import RGESAlert, EventModel, Event
+from tom_targets.models import Target
 
 
 class RGESAlertTable(HTMXTable):
@@ -161,3 +162,34 @@ class TargetEventTable(EventRenderMixin, HTMXTable):
         # EventTable.render_event_id.
         url = reverse('events:detail', kwargs={'pk': record.pk})
         return format_html('<a href="{}" hx-boost="false">Details</a>', url)
+
+class TargetTable(HTMXTable):
+
+    # Override selection column with Target-specific form binding
+    selection = tables.CheckBoxColumn(
+        accessor="pk",
+        orderable=False,
+        attrs={
+            "input": {
+                "name": "selected-target",
+                "form": "grouping-form"
+            },
+            "th__input": {
+                "class": "header-checkbox",
+                "form": "grouping-form",
+                "onclick": "event.stopPropagation();"
+            }
+        }
+    )
+
+    name = tables.Column(
+        linkify=True,
+        attrs={"a": {"hx-boost": "false"}}
+    )
+
+    class Meta(HTMXTable.Meta):
+        model = Target
+        fields = ['selection', 'name', 'ra', 'dec', 'classification']
+
+    # Override to use Target-specific partial
+    partial_template_name = "tom_targets/partials/target_table_partial.html"

@@ -144,7 +144,7 @@ def photometry_event(event):
     Generate an interactive plot using the lightcurve segment of a specific event
     """
 
-    event_end = event.start_time + event.duration
+    event_end = event.start_time + 2.0*event.duration
 
     # Filter to the event's time window in the DB query, not by fetching the
     # target's entire photometry history (which can be tens of thousands of

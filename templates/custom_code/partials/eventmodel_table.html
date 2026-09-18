@@ -16,12 +16,6 @@
 <div id="model-parameters-container" class="mt-3">
     <p class="text-muted">Click a model type above to see its fit parameters.</p>
 </div>
-{# htmx-indicator: hidden by default, shown automatically only while the
-   hx-indicator="#model-parameters-progress" request is in flight (htmx's
-   own injected CSS toggles this via the htmx-request class -- see
-   includeIndicatorStyles in htmx.min.js). Previously this used
-   class="progress" with a nested "indeterminate" div, neither of which is
-   real Bootstrap CSS, so it rendered as an empty, invisible shell. #}
 <div class="htmx-indicator text-center my-4" id="model-parameters-progress">
     <div class="spinner-border" role="status">
         <span class="visually-hidden">Loading...</span>
