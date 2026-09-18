@@ -1,9 +1,11 @@
 from django import template
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 from astropy.time import Time
+from django.utils import timezone
 from plotly import offline
 import plotly.graph_objs as go
 import numpy as np
+import datetime
 
 import logging
 
@@ -21,14 +23,20 @@ def photometry_mulens_model(mulens):
     # grouped by source into one Scatter trace per source, since Plotly's
     # error_y.array (and x/y) expects an array of values per trace, not a
     # single point per trace.
-    qs = PhotometryReducedDatum.objects.filter(target=mulens)
+    qs = list(PhotometryReducedDatum.objects.filter(target=mulens))
 
+    # Converting timestamps to JD one row at a time (Time(rd.timestamp).jd in
+    # a loop) took ~2s for ~50,000 rows -- astropy's Time constructor has real
+    # per-call overhead. A single vectorized Time() call over every timestamp
+    # up front is ~20x faster, then results are split back out per source.
     datasets = {}
-    for rd in qs:
-        dataset = datasets.setdefault(rd.source_name, {'x': [], 'y': [], 'error': []})
-        dataset['x'].append(Time(rd.timestamp).jd - 2460000.0)
-        dataset['y'].append(rd.brightness)
-        dataset['error'].append(rd.brightness_error)
+    if qs:
+        jds = Time([rd.timestamp for rd in qs]).jd - 2460000.0
+        for rd, jd in zip(qs, jds):
+            dataset = datasets.setdefault(rd.source_name, {'x': [], 'y': [], 'error': []})
+            dataset['x'].append(jd)
+            dataset['y'].append(rd.brightness)
+            dataset['error'].append(rd.brightness_error)
 
 
     ### Try to plot models if available
@@ -124,7 +132,11 @@ def plot_interactive_lightcurve(datasets, model_datums, height=600, width=700, s
         yaxis_title="Mag",
     )
 
-    return offline.plot(fig, output_type='div', show_link=False)
+    # include_plotlyjs=False: the library is loaded once globally in
+    # base.html instead of every plot embedding its own ~730KB copy --
+    # see the comment there for why that's also required for correctness
+    # when this output gets swapped in via htmx rather than a full page load.
+    return offline.plot(fig, output_type='div', show_link=False, include_plotlyjs=False)
 
 @register.inclusion_tag('tom_dataproducts/partials/photometry_mulens_model.html')
 def photometry_event(event):
@@ -132,17 +144,23 @@ def photometry_event(event):
     Generate an interactive plot using the lightcurve segment of a specific event
     """
 
-    # Select only datapoints during the event
-    qs = PhotometryReducedDatum.objects.filter(target=event.target)
-
     event_end = event.start_time + event.duration
 
+    # Filter to the event's time window in the DB query, not by fetching the
+    # target's entire photometry history (which can be tens of thousands of
+    # points for a single target) and checking each row's JD in Python.
+    start_dt = timezone.make_aware(Time(event.start_time, format='jd').datetime, datetime.timezone.utc)
+    end_dt = timezone.make_aware(Time(event_end, format='jd').datetime, datetime.timezone.utc)
+    qs = list(PhotometryReducedDatum.objects.filter(
+        target=event.target, timestamp__gte=start_dt, timestamp__lte=end_dt
+    ))
+
     datasets = {}
-    for rd in qs:
-        ts = Time(rd.timestamp).jd
-        if ts >= event.start_time and ts <= event_end:
+    if qs:
+        jds = Time([rd.timestamp for rd in qs]).jd - 2460000.0
+        for rd, jd in zip(qs, jds):
             dataset = datasets.setdefault(rd.source_name, {'x': [], 'y': [], 'error': []})
-            dataset['x'].append(ts - 2460000.0)
+            dataset['x'].append(jd)
             dataset['y'].append(rd.brightness)
             dataset['error'].append(rd.brightness_error)
 

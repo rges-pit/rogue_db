@@ -20,6 +20,19 @@
     <link rel="icon" type="image/x-icon" href="{% static 'tom_common/img/favicon-32.ico' %}" sizes="32x32" />
 
     {% bootstrap_javascript %}
+    <!-- plotly.min.js downloaded from the installed plotly package (package_data/plotly.min.js,
+         matching its Python-side version) and loaded once globally here, rather than each
+         lightcurve plot embedding its own copy via offline.plot(include_plotlyjs=True). That
+         per-plot embedding relies on the browser executing same-document <script> tags in order,
+         which doesn't hold once a plot is rendered inline into a full page: a plain page's own
+         Plotly.newPlot() script (e.g. EventDetailView's photometry_event) runs synchronously
+         during parsing, before any *deferred* script -- defer scripts only run after the whole
+         document has parsed, i.e. strictly later. So this can't use `defer` (that only happened
+         to work for the htmx-swapped case, where the fragment arrives well after the page's
+         initial parse). Loading it as a normal blocking script here guarantees Plotly is defined
+         before anything else on the page runs, in either context. See plotting_functions.py's
+         offline.plot(..., include_plotlyjs=False). -->
+    <script src="{% static 'tom_common/js/plotly.min.js' %}"></script>
     <!-- htmx.min.js was downloaded manually and added to the project. see https://htmx.org/docs/#download-a-copy -->
     <script src="{% static 'tom_common/js/htmx.min.js' %}" defer></script>
     <!-- Loading AlpineJS from a CDN For now, todo solution for 3rd party static assets. -->

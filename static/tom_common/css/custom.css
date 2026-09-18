@@ -221,3 +221,15 @@ li {
     margin-bottom: 10px;
   }
 
+/* Bootstrap's .progress is a thin (height:1rem), overflow:hidden bar meant to
+   contain a slim .progress-bar fill. Several loading placeholders keep the
+   "progress" class only so they still match existing hx-indicator=".progress"
+   selectors (the search form and every HTMXTable's sort/pagination controls),
+   while actually showing a much taller spinner-border -- without this, that
+   spinner gets clipped down to a 1rem sliver. */
+.progress.htmx-indicator {
+  height: auto;
+  overflow: visible;
+  background-color: transparent;
+}
+

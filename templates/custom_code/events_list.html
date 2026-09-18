@@ -25,9 +25,14 @@
         {% crispy filter.form %}
     </form>
 
-    {# Progress indicator #}
-    <div class="progress">
-        <div class="indeterminate"></div>
+    {# Progress indicator -- "progress" keeps matching the hx-indicator=".progress"
+       selector used by the search form above and by every HTMXTable's own sort/
+       pagination controls; "htmx-indicator" is what actually makes it show/hide
+       (via htmx's own injected CSS keyed on the htmx-request class it toggles). #}
+    <div class="progress htmx-indicator text-center my-4">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
     </div>
 
     {# The actual table #}
@@ -36,8 +41,11 @@
     </div>
 
     {# Populated on demand when an Event ID above is clicked (see EventTable.render_event_id) #}
-    <div class="progress mt-3" id="event-models-progress">
-        <div class="indeterminate"></div>
+    <div class="progress htmx-indicator text-center my-4" id="event-models-progress">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">Loading models&hellip;</p>
     </div>
     <div id="event-models-container" class="mt-3">
         <p class="text-muted">Click an Event ID above to see its models.</p>
