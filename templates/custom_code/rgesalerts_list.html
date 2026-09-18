@@ -26,9 +26,14 @@
         {% crispy filter.form %}
     </form>
 
-    {# Progress indicator #}
-    <div class="progress">
-        <div class="indeterminate"></div>
+    {# Progress indicator -- "progress" keeps matching the hx-indicator=".progress"
+       selector used by the search form above and by every HTMXTable's own sort/
+       pagination controls; "htmx-indicator" is what actually makes it show/hide
+       (via htmx's own injected CSS keyed on the htmx-request class it toggles). #}
+    <div class="progress htmx-indicator text-center my-4">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
     </div>
 
     {# The actual table #}

@@ -26,10 +26,7 @@ class LightCurvesSerializer(serializers.Serializer):
 
 class MSOSMetadataSerializer(serializers.Serializer):
     """
-    Only the metadata fields create() actually uses below -- the packet's
-    'metadata' dict has dozens of other simulation-parameter fields (piE,
-    thetaE, Lens_*, Source_*, extinction_*, ...), all preserved verbatim in
-    alert_contents via self.initial_data rather than through this serializer.
+    Serialize selected fields from the MSOS simulated data
     """
     t0lens1 = serializers.FloatField()
     u0lens1 = serializers.FloatField()
@@ -56,9 +53,6 @@ class MSOSAlertSerializer(serializers.Serializer):
         s = SkyCoord(validated_data['ra'], validated_data['dec'], frame='icrs', unit=(u.deg, u.deg))
         g = s.transform_to('galactic')
 
-        # name is the natural identity of a Target -- everything else lives in
-        # defaults, so a rerun on the same packet finds and reuses this
-        # Target instead of comparing every field as part of the lookup.
         t, created = Target.objects.get_or_create(
             name=validated_data['objname'],
             defaults=dict(
@@ -78,21 +72,12 @@ class MSOSAlertSerializer(serializers.Serializer):
 
         current_time = timezone.now()
 
-        # self.initial_data (the raw input dict), not validated_data: only
-        # the fields declared above survive into validated_data, so sourcing
-        # from initial_data keeps any other packet fields -- not otherwise
-        # used here -- intact in alert_contents instead of silently dropping
-        # them.
         alert_data = {key: value for key, value in self.initial_data.items() if 'light_curve' not in key}
 
         duration = 2.0*float(validated_data['metadata']['tE_ref'])
         tstart = float(validated_data['metadata']['t0lens1']) - duration
         event_id = str(int(validated_data['metadata']['EventID']))
 
-        # event_id alone is the lookup key, same reasoning as Target above --
-        # start_time/duration are recomputed from the packet every run, and
-        # target could in principle change, so none of those belong in the
-        # lookup either.
         event, created = Event.objects.get_or_create(
             event_id=event_id,
             defaults=dict(
@@ -102,16 +87,6 @@ class MSOSAlertSerializer(serializers.Serializer):
             ),
         )
 
-        # RGESAlert has no direct target field -- target is reached via
-        # event.target, so the Event above has to exist first.
-        #
-        # alert_id alone is the lookup key. Previously alert_timestamp=
-        # current_time (a fresh timezone.now() every run) was part of the
-        # lookup kwargs, which meant it could never match a prior run's row
-        # -- get_or_create always took the "create" branch, duplicating the
-        # alert on every rerun of the same file. Moving it (and everything
-        # else) into defaults means a rerun now finds and reuses the
-        # existing RGESAlert instead.
         alert, created = RGESAlert.objects.get_or_create(
             alert_id=event_id,
             defaults=dict(
@@ -142,7 +117,7 @@ class MSOSAlertSerializer(serializers.Serializer):
 
         for passband in ['F087', 'F146', 'F213']:
             lc = lightcurves[passband]
-            source_name = 'MSOS_alert_' + event_id  # Replace with classifier ID
+            source_name = 'Roman_' + passband  # Replace with classifier ID
 
             # Bulk create due to large number of datapoints
             reduced_datums = [
@@ -178,9 +153,6 @@ class MSOSAlertSerializer(serializers.Serializer):
 
         lightcurves = {}
         for passband in ['F087', 'F146', 'F213']:
-            # flux_to_mag does elementwise comparisons (flux > 0.0), which
-            # needs numpy arrays -- the serializer's ListField validation
-            # gives back plain Python lists.
             mag, mag_err, _, _ = utils.flux_to_mag(
                 np.array(validated_data['light_curves'][passband]['flux']),
                 np.array(validated_data['light_curves'][passband]['flux_err'])

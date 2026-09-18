@@ -5,7 +5,14 @@ from django.views.generic.base import TemplateView
 from django.views.generic.edit import CreateView
 from django.views.generic.detail import DetailView
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
+from django.conf import settings
+from django import forms
+from guardian.shortcuts import get_objects_for_user
 from tom_common.htmx_table import HTMXTableViewMixin
+from tom_targets.models import Target
+from tom_dataproducts.models import PhotometryReducedDatum
+from tom_dataproducts.forms import DataShareForm
 from django_filters.views import FilterView
 
 from .models import (RGESAlert, Event, EventModel, MODEL_TYPE_CLASSES,
@@ -322,4 +329,89 @@ class TargetCutfileView(HTMXTableViewMixin, FilterView):
         context['model_type'] = self.get_model_type()
         context['query_string'] = self.request.META['QUERY_STRING']
 
+        return context
+
+
+class TargetPhotometryTabView(LoginRequiredMixin, TemplateView):
+    """
+    Renders the Photometry tab's content for TargetDetailView, loaded via
+    HTMX (hx-trigger="load") rather than whenever the page loads
+    """
+    template_name = 'custom_code/partials/target_photometry_tab.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['target'] = get_object_or_404(Target, pk=self.request.GET.get('target'))
+        return context
+
+
+class TargetPhotometryPlotView(LoginRequiredMixin, TemplateView):
+    """
+    Render the lightcurve plot for a target as an HTMX fragment
+    independent from the raw data table to avoid blocking the page load
+    """
+    template_name = 'custom_code/partials/photometry_plot.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['target'] = get_object_or_404(Target, pk=self.request.GET.get('target'))
+        return context
+
+
+class TargetPhotometryDataView(LoginRequiredMixin, TemplateView):
+    """
+    Renders one page of a target's raw photometry data table.
+    """
+    template_name = 'custom_code/partials/photometry_datalist_page.html'
+    paginate_by = 10
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        target = get_object_or_404(Target, pk=self.request.GET.get('target'))
+
+        photometry = PhotometryReducedDatum.objects.filter(target=target).order_by('-timestamp')
+        if not settings.TARGET_PERMISSIONS_ONLY:
+            photometry = get_objects_for_user(
+                self.request.user, 'tom_dataproducts.view_photometryreduceddatum', klass=photometry,
+            )
+
+        paginator = Paginator(photometry, self.paginate_by)
+        page_obj = paginator.get_page(self.request.GET.get('phot_page'))
+
+        # Load the parameters to match the table columns
+        data = []
+        for reduced_datum in page_obj:
+            rd_data = {
+                'id': reduced_datum.pk,
+                'timestamp': reduced_datum.timestamp,
+                'source': reduced_datum.source_name,
+                'filter': reduced_datum.bandpass,
+                'telescope': reduced_datum.telescope,
+            }
+            if reduced_datum.limit is not None:
+                rd_data['magnitude'] = reduced_datum.limit
+                rd_data['limit'] = True
+                rd_data['error'] = reduced_datum.brightness_error or ''
+            else:
+                rd_data['magnitude'] = reduced_datum.brightness
+                rd_data['limit'] = False
+                rd_data['error'] = reduced_datum.brightness_error or ''
+            data.append(rd_data)
+
+        initial = {
+            'submitter': self.request.user,
+            'target': target,
+            'data_type': 'photometry',
+            'share_title': f"Updated data for {target.name} from {getattr(settings, 'TOM_NAME', 'TOM Toolkit')}.",
+        }
+        form = DataShareForm(initial=initial)
+        form.fields['data_type'].widget = forms.HiddenInput()
+
+        context.update({
+            'data': data,
+            'target': target,
+            'page_obj': page_obj,
+            'target_data_share_form': form,
+            'sharing_destinations': form.fields['share_destination'].choices,
+        })
         return context

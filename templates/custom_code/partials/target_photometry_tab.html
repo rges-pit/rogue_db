@@ -1,0 +1,28 @@
+{% comment %}
+The plot and the data table are independent HTMX fragments, both firing
+hx-trigger="load" as soon as this shell arrives, so they load in parallel --
+the plot (building/embedding a Plotly figure over the target's full
+photometry history) is the slow part, and it shouldn't block the data
+table (fast, one page at a time) from appearing.
+{% endcomment %}
+<div id="photometry-plot-container"
+     hx-get="{% url 'target-photometry:plot' %}?target={{ target.pk }}"
+     hx-trigger="load" hx-swap="innerHTML">
+  <div class="text-center my-4" id="photometry-plot-progress">
+    <div class="spinner-border" role="status">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-2">Loading photometry plot&hellip;</p>
+  </div>
+</div>
+
+<div id="photometry-datalist-container"
+     hx-get="{% url 'target-photometry:data' %}?target={{ target.pk }}&phot_page=1"
+     hx-trigger="load" hx-swap="innerHTML">
+  <div class="text-center my-4" id="photometry-datalist-progress">
+    <div class="spinner-border" role="status">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-2">Loading photometry data&hellip;</p>
+  </div>
+</div>

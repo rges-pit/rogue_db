@@ -224,4 +224,4 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Data
-.data/
+data/*

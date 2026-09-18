@@ -99,9 +99,11 @@
       </div>
       <div class="row">
         <div class="col-md dashboard-panel">
-          {# Populated on demand when a model button above is clicked (see partials/event_model_buttons.html) #}
-          <div class="progress mt-3" id="event-model-parameters-progress">
-            <div class="indeterminate"></div>
+          <div class="htmx-indicator text-center my-4" id="event-model-parameters-progress">
+            <div class="spinner-border" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading model parameters&hellip;</p>
           </div>
           <div id="event-model-parameters-container" class="mt-3">
             <p>Click a model type to see its fit parameters.</p>

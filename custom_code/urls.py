@@ -6,6 +6,7 @@ from .views import (
     PSPLModelCreateView, FSPLModelCreateView, WideBoundPlanetModelCreateView,
     DavenportFlareModelCreateView, PitkinFlareModelCreateView,
     TargetCutfileView, EventListView, TargetEventListView, EventDetailView,
+    TargetPhotometryTabView, TargetPhotometryPlotView, TargetPhotometryDataView,
 )
 
 candidates_urlpatterns = [
@@ -33,9 +34,16 @@ events_urlpatterns = [
     path('<int:pk>/', EventDetailView.as_view(), name='detail'),
 ]
 
+target_photometry_urlpatterns = [
+    path('tab/', TargetPhotometryTabView.as_view(), name='tab'),
+    path('plot/', TargetPhotometryPlotView.as_view(), name='plot'),
+    path('data/', TargetPhotometryDataView.as_view(), name='data'),
+]
+
 urlpatterns = [
     path('candidates/', include((candidates_urlpatterns, 'candidates'), namespace='candidates')),
     path('event-models/', include((eventmodels_urlpatterns, 'eventmodels'), namespace='eventmodels')),
     path('cutfiles/', include((cutfiles_urlpatterns, 'cutfiles'), namespace='cutfiles')),
     path('events/', include((events_urlpatterns, 'events'), namespace='events')),
+    path('target-photometry/', include((target_photometry_urlpatterns, 'target-photometry'), namespace='target-photometry')),
 ]
