@@ -1,7 +1,8 @@
 from django.core.management.base import BaseCommand
 from custom_code.models import Event
 from tom_targets.models import Target
-from custom_code.management.commands import pylima_fit_functions, data_utils
+from custom_code.management.commands import data_utils
+from custom_code import pylima_fit_functions
 import logging
 
 logger = logging.getLogger(__name__)

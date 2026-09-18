@@ -68,6 +68,7 @@ def run_fit(lcevent, verbose=False):
                                 + ' u0: ' + repr(pspl_model_fit.fit_parameters["u0"][1]))
 
     pspl_model_fit.fit()
+
     pspl_model_params = gather_model_parameters(current_event, pspl_model_fit, verbose)
     if verbose: logger.info('PSPL fitted parameters ' + repr(pspl_model_params))
 
