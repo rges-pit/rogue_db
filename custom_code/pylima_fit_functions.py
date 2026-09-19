@@ -14,7 +14,7 @@ from astropy import units as unit
 
 logger = logging.getLogger(__name__)
 
-def run_fit(lcevent, verbose=False):
+def run_fit(lcevent, bandpass=None, verbose=False):
     """
     Function to perform a microlensing model fit to timeseries photometry.
 
@@ -25,7 +25,7 @@ def run_fit(lcevent, verbose=False):
     logger.info('Starting to model most recent event for source ' + lcevent.target.name)
 
     # Retrieve timeseries photometry from the DB
-    datasets = data_utils.get_reduced_data(lcevent)
+    datasets = data_utils.get_reduced_data(lcevent, bandpass=bandpass)
 
     # Fit configuration
     use_boundaries = True
@@ -55,12 +55,22 @@ def run_fit(lcevent, verbose=False):
     pspl.define_model_parameters()
     pspl_model_fit = TRF_fit.TRFfit(pspl, loss_function='soft_l1')
 
+    if lcevent.target.t0:
+        pspl_model_fit.model_parameters_guess = [
+            lcevent.target.t0,
+            lcevent.target.u0,
+            lcevent.target.tE
+        ]
+
     if use_boundaries:
-        delta_t0 = 10.
-        default_t0_lower = pspl_model_fit.fit_parameters["t0"][1][0]
-        default_t0_upper = pspl_model_fit.fit_parameters["t0"][1][1]
-        pspl_model_fit.fit_parameters["t0"][1] = [default_t0_lower, default_t0_upper + delta_t0]
-        pspl_model_fit.fit_parameters["tE"][1] = [1., 1000.]
+        if lcevent.target.t0:
+            pspl_model_fit.fit_parameters["t0"][1] = [
+                lcevent.target.t0 - 2.0*lcevent.target.tE,
+                lcevent.target.t0 + 2.0*lcevent.target.tE,
+            ]
+        else:
+            pspl_model_fit.fit_parameters["t0"][1] = [0.0, 10.0]
+        pspl_model_fit.fit_parameters["tE"][1] = [0.0, 100.]
         pspl_model_fit.fit_parameters["u0"][1] = [0.0, 2.0]
         if verbose: logger.info('PSPL fit boundaries: t0: '
                                 + repr(pspl_model_fit.fit_parameters["t0"][1])
@@ -84,9 +94,22 @@ def run_fit(lcevent, verbose=False):
     fspl.define_model_parameters()
     fspl_model_fit = TRF_fit.TRFfit(fspl, loss_function='soft_l1')
 
+    if lcevent.target.t0:
+        fspl_model_fit.model_guess_parameters = [
+            lcevent.target.t0,
+            lcevent.target.u0,
+            lcevent.target.tE,
+            0.0
+        ]
     if use_boundaries:
-        fspl_model_fit.fit_parameters["t0"][1] = [default_t0_lower, default_t0_upper + delta_t0]
-        fspl_model_fit.fit_parameters["tE"][1] = [1., 1000.]
+        if lcevent.target.t0:
+            fspl_model_fit.fit_parameters["t0"][1] = [
+                lcevent.target.t0 - 2.0*lcevent.target.tE,
+                lcevent.target.t0 + 2.0*lcevent.target.tE,
+            ]
+        else:
+            fspl_model_fit.fit_parameters["t0"][1] = [0.0, 10.0]
+        fspl_model_fit.fit_parameters["tE"][1] = [0.0, 100.]
         fspl_model_fit.fit_parameters["u0"][1] = [0.0, 2.0]
         fspl_model_fit.fit_parameters["rho"][1] = [0.0, 0.5]
         if verbose: logger.info('FSPL model fit boundaries: t0: '
@@ -112,9 +135,9 @@ def run_fit(lcevent, verbose=False):
     # (no blending or parallax) is more reliable.
     # This delta_chi2 will be positive if model 1 is a better fit than model 2.
     # The threshold is calculated assuming a 3-sigma distribution.
-    delta_chi2 = fspl_model_params['chi2'] - pspl_model_params['chi2']
-    if verbose: logger.info('FITTOOLS: Model 1 chi2 = ' + str(pspl_model_params['chi2']) \
-                            + ', model 2 chi2 = ' + str(fspl_model_params['chi2']) \
+    delta_chi2 = fspl_model_params['red_chi2'] - pspl_model_params['red_chi2']
+    if verbose: logger.info('FITTOOLS: Model 1 red chi2 = ' + str(pspl_model_params['red_chi2']) \
+                            + ', model 2 red chi2 = ' + str(fspl_model_params['red_chi2']) \
                             + ', delta_chi2 = ' + str(delta_chi2))
     if delta_chi2 > 0.0:
         best_model = pspl_model_params
@@ -124,18 +147,26 @@ def run_fit(lcevent, verbose=False):
         if verbose: logger.info('Using FSPL as best-fit model')
 
     # Generate the model lightcurve timeseries with the fitted parameters
-    if not np.isnan(best_model['tE']):
-        model_telescope = generate_model_lightcurve(current_event, best_model, verbose)
-        if verbose: logger.info('Generated model lightcurve')
+    if not np.isnan(pspl_model_params['tE']):
+        model_telescope_pspl = generate_model_lightcurve(current_event, pspl_model_params, verbose)
+        if verbose: logger.info('Generated PSPL model lightcurves')
     else:
-        model_telescope = None
-        if verbose: logger.info('Cannot generate model lightcurve')
+        model_telescope_pspl = None
+        if verbose: logger.info('Cannot generate PSPL model lightcurves')
+
+    if not np.isnan(fspl_model_params['tE']):
+        model_telescope_fspl = generate_model_lightcurve(current_event, fspl_model_params, verbose)
+        if verbose: logger.info('Generated FSPL model lightcurves')
+    else:
+        model_telescope_fspl = None
+        if verbose: logger.info('Cannot generate FSPL model lightcurves')
 
     return {
         'best_model': best_model,
         'pspl': pspl_model_params,
         'fspl': fspl_model_params,
-        'model_telescope': model_telescope
+        'model_telescope_pspl': model_telescope_pspl,
+        'model_telescope_fspl': model_telescope_fspl
     }
 
 def pylima_telescopes_from_datasets(datasets, emag_limit=None):

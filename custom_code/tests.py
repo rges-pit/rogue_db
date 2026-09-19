@@ -235,5 +235,7 @@ class TestPyLIMAUtils(TestCase):
             test_event, model_params, True
         )
 
+        print(model_lc)
+
         assert(type(model_lc), type(np.zeros((2,2))))
         assert(len(model_lc.lightcurve) >= len(test_event.telescopes[0].lightcurve))

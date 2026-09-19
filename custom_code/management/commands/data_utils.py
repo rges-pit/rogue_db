@@ -3,15 +3,14 @@ import numpy as np
 import logging
 from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, Event,
                                 DavenportFlareModel, PitkinFlareModel)
-from datetime import datetime
-import pytz
+from datetime import datetime, UTC
 from astropy.time import Time
 import json
 
 logger = logging.getLogger(__name__)
 
 
-def get_reduced_data(event):
+def get_reduced_data(event, bandpass=None):
     """Function to extract the timeseries data from a QuerySet of PhotometryReducedDatums, and
     creates the necessary arrays.
     Also accepts a QuerySet of generic ReducedDatums (lc_model, tabular, etc.) for the same
@@ -19,8 +18,14 @@ def get_reduced_data(event):
     Note that the querysets must be provided separately and not derived directly from a query
     """
 
-    photometry_qs = PhotometryReducedDatum.objects.filter(target__name=event.target.name).order_by("timestamp")
-
+    if bandpass:
+        photometry_qs = PhotometryReducedDatum.objects.filter(
+            target__name=event.target.name, source_name=bandpass
+        ).order_by("timestamp")
+    else:
+        photometry_qs = PhotometryReducedDatum.objects.filter(
+            target__name=event.target.name
+        ).order_by("timestamp")
     datasets = {}
 
     # Select only those datapoints from the lightcurves that lie within the event window
@@ -147,34 +152,42 @@ def extract_photometry_from_dataset(datasets, dataset_id, emag_limit=None):
 
     return photometry[mask].astype(float)
 
-def store_model_lightcurve(mulens, model):
+def store_model_lightcurve(event, pyLIMA_results, model_type):
     """Function to store in the TOM the timeseries lightcurve corresponding to a fitted model.
     The input is a model fit object from PyLIMA.
 
     Note that this function has to be separate from the MicrolensingTarget class because it uses the
-    ReducedDatum objects.  Circular imports result if you try to import ReducedDatums from the Target object"""
+    ReducedDatum objects.  Circular imports result if you try to import ReducedDatums from the Target object
+    """
 
-    tz = pytz.timezone('utc')
-    model_time = datetime.utcnow().replace(tzinfo=tz)
+    model_time = datetime.now(UTC)
+
+    # Map array -> database keywords
+    model_types_list = {
+        'pspl': 'PSPL Microlensing',
+        'fspl': 'FSPL Microlensing'
+    }
 
     # Extract the model lightcurve timeseries from the PyLIMA fit object
+    model_tel = pyLIMA_results['model_telescope_' + model_type]
     data = {
-        'lc_model_time': model.lightcurve['time'].value.tolist(),
-        'lc_model_magnitude': model.lightcurve['mag'].value.tolist()
+        'lc_model_time': model_tel.lightcurve['time'].value.tolist(),
+        'lc_model_magnitude': model_tel.lightcurve['mag'].value.tolist()
     }
 
     # If there is no existing model for this target, create one
-    qs = ReducedDatum.objects.filter(target=mulens, data_type='lc_model')
+    data_type = 'lc_model_' + str(event.event_id) + '_' + model_types_list[model_type]
+    qs = ReducedDatum.objects.filter(target=event.target, data_type=data_type)
     if qs.count() == 0:
         rd = ReducedDatum.objects.create(
             timestamp=model_time,
             value=data,
             source_name='RogueDB',
-            source_location=mulens.name,
-            data_type='lc_model',
-            target=mulens
+            source_location=event.target.name,
+            data_type=data_type,
+            target=event.target
         )
-        logger.info('Created lightcurve model datum for ' + mulens.name)
+        logger.info('Created lightcurve model datum for ' + event.target.name)
 
     # If there is a pre-existing model, update it
     else:
@@ -182,13 +195,13 @@ def store_model_lightcurve(mulens, model):
         rd.timestamp = model_time
         rd.value = data
         rd.source_name = 'RogueDB'
-        rd.source_location = mulens.name
+        rd.source_location = event.target.name
         rd.data_type = 'lc_model'
-        rd.target = mulens
+        rd.target = event.target
         rd.save()
-        logger.info('Updated existing lightcurve model datum for ' + mulens.name)
+        logger.info('Updated existing lightcurve model datum for ' + event.target.name)
 
-    return mulens
+    return event
 
 def store_microlensing_model_parameters(event, pylima_results):
     """Function to store the fitted model parameters in the TOM"""
