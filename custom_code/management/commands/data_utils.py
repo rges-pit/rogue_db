@@ -3,15 +3,14 @@ import numpy as np
 import logging
 from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, Event,
                                 DavenportFlareModel, PitkinFlareModel)
-from datetime import datetime
-import pytz
+from datetime import datetime, UTC
 from astropy.time import Time
 import json
 
 logger = logging.getLogger(__name__)
 
 
-def get_reduced_data(event):
+def get_reduced_data(event, bandpass=None):
     """Function to extract the timeseries data from a QuerySet of PhotometryReducedDatums, and
     creates the necessary arrays.
     Also accepts a QuerySet of generic ReducedDatums (lc_model, tabular, etc.) for the same
@@ -19,8 +18,14 @@ def get_reduced_data(event):
     Note that the querysets must be provided separately and not derived directly from a query
     """
 
-    photometry_qs = PhotometryReducedDatum.objects.filter(target__name=event.target.name).order_by("timestamp")
-
+    if bandpass:
+        photometry_qs = PhotometryReducedDatum.objects.filter(
+            target__name=event.target.name, source_name=bandpass
+        ).order_by("timestamp")
+    else:
+        photometry_qs = PhotometryReducedDatum.objects.filter(
+            target__name=event.target.name
+        ).order_by("timestamp")
     datasets = {}
 
     # Select only those datapoints from the lightcurves that lie within the event window
@@ -147,83 +152,103 @@ def extract_photometry_from_dataset(datasets, dataset_id, emag_limit=None):
 
     return photometry[mask].astype(float)
 
-def store_model_lightcurve(mulens, model):
+def get_model_types_list():
+    return {
+        'pspl': 'PSPL microlensing',
+        'fspl': 'FSPL microlensing'
+    }
+
+def store_model_lightcurve(event, pyLIMA_results, model_type):
     """Function to store in the TOM the timeseries lightcurve corresponding to a fitted model.
     The input is a model fit object from PyLIMA.
 
     Note that this function has to be separate from the MicrolensingTarget class because it uses the
-    ReducedDatum objects.  Circular imports result if you try to import ReducedDatums from the Target object"""
+    ReducedDatum objects.  Circular imports result if you try to import ReducedDatums from the Target object
+    """
 
-    tz = pytz.timezone('utc')
-    model_time = datetime.utcnow().replace(tzinfo=tz)
+    model_time = datetime.now(UTC)
+
+    # Map array -> database keywords
+    model_types_list = get_model_types_list()
 
     # Extract the model lightcurve timeseries from the PyLIMA fit object
-    data = {
-        'lc_model_time': model.lightcurve['time'].value.tolist(),
-        'lc_model_magnitude': model.lightcurve['mag'].value.tolist()
-    }
+    model_tel = pyLIMA_results['model_telescope_' + model_type]
+    if len(model_tel.lightcurve) > 0:
+        data = {
+            'lc_model_time': model_tel.lightcurve['time'].value.tolist(),
+            'lc_model_magnitude': model_tel.lightcurve['mag'].value.tolist()
+        }
 
-    # If there is no existing model for this target, create one
-    qs = ReducedDatum.objects.filter(target=mulens, data_type='lc_model')
-    if qs.count() == 0:
-        rd = ReducedDatum.objects.create(
-            timestamp=model_time,
-            value=data,
-            source_name='RogueDB',
-            source_location=mulens.name,
-            data_type='lc_model',
-            target=mulens
-        )
-        logger.info('Created lightcurve model datum for ' + mulens.name)
+        # If there is no existing model for this target, create one
+        data_type = 'lc_model_' + str(event.event_id) + '_' + model_types_list[model_type]
+        qs = ReducedDatum.objects.filter(target=event.target, data_type=data_type)
+        if qs.count() == 0:
+            rd = ReducedDatum.objects.create(
+                timestamp=model_time,
+                value=data,
+                source_name='RogueDB',
+                source_location=event.target.name,
+                data_type=data_type,
+                target=event.target
+            )
+            logger.info('Created lightcurve model datum for ' + event.target.name)
 
-    # If there is a pre-existing model, update it
+        # If there is a pre-existing model, update it
+        else:
+            rd = qs[0]
+            rd.timestamp = model_time
+            rd.value = data
+            rd.source_name = 'RogueDB'
+            rd.source_location = event.target.name
+            rd.data_type = data_type
+            rd.target = event.target
+            rd.save()
+            logger.info('Updated existing lightcurve model datum for ' + event.target.name)
+
     else:
-        rd = qs[0]
-        rd.timestamp = model_time
-        rd.value = data
-        rd.source_name = 'RogueDB'
-        rd.source_location = mulens.name
-        rd.data_type = 'lc_model'
-        rd.target = mulens
-        rd.save()
-        logger.info('Updated existing lightcurve model datum for ' + mulens.name)
+        logger.info('No model ' + model_type + ' lightcurve to store for ' + event.target.name)
 
-    return mulens
+    return event
 
 def store_microlensing_model_parameters(event, pylima_results):
     """Function to store the fitted model parameters in the TOM"""
 
-    # Store the best-fit model parameters on the Target object
-    parameters = ['t0', 't0_error', 'u0', 'u0_error', 'tE', 'tE_error',
-                  'piEN', 'piEN_error', 'piEE', 'piEE_error',
-                  'source_magnitude', 'source_mag_error',
-                  'blend_magnitude', 'blend_mag_error',
-                  'baseline_magnitude', 'baseline_mag_error',
-                  'fit_covariance', 'chi2', 'red_chi2',
-                  'ks_test', 'ad_test', 'sw_test']
+    if 'best_model' in pylima_results.keys():
 
-    for key in parameters:
-        if key in pylima_results['best_model'].keys():
-            if key == 'fit_covariance':
-                payload = json.dumps(pylima_results['best_model']['fit_covariance'].tolist())
-                data = {'covariance': payload}
-            else:
-                # Intercept NaN values as these are not well supported by Django FloatFields
-                if np.isnan(pylima_results['best_model'][key]):
-                    data = 0.0
-                else:
-                    data = pylima_results['best_model'][key]
-            setattr(event.target, key, data)
-    event.target.save()
+        # Store the best-fit model parameters on the Target object
+        parameters = ['t0', 't0_error', 'u0', 'u0_error', 'tE', 'tE_error',
+                      'piEN', 'piEN_error', 'piEE', 'piEE_error',
+                      'source_magnitude', 'source_mag_error',
+                      'blend_magnitude', 'blend_mag_error',
+                      'baseline_magnitude', 'baseline_mag_error',
+                      'fit_covariance', 'chi2', 'red_chi2',
+                      'ks_test', 'ad_test', 'sw_test']
 
-    # Fetch existing PSPL and FSPL models for this event, or create them,
-    # and update them with the fitted parameters
-    pspl_model = fetch_microlensing_model(event, 'PSPL microlensing')
-    update_microlensing_model(pspl_model, pylima_results['pspl'])
-    fspl_model = fetch_microlensing_model(event, 'FSPL microlensing')
-    update_microlensing_model(fspl_model, pylima_results['fspl'])
+        update_source = False
+        if update_source:
+            for key in parameters:
+                if key in pylima_results['best_model'].keys():
+                    if key == 'fit_covariance':
+                        payload = json.dumps(pylima_results['best_model']['fit_covariance'].tolist())
+                        data = {'covariance': payload}
+                    else:
+                        # Intercept NaN values as these are not well supported by Django FloatFields
+                        if np.isnan(pylima_results['best_model'][key]):
+                            data = 0.0
+                        else:
+                            data = pylima_results['best_model'][key]
+                    setattr(event.target, key, data)
+            event.target.save()
 
-    logger.info('Stored model parameters for event ' + event.target.name)
+        # Fetch existing PSPL and FSPL models for this event, or create them,
+        # and update them with the fitted parameters
+        update_microlensing_model(event, pylima_results, 'pspl')
+        update_microlensing_model(event, pylima_results, 'fspl')
+
+        logger.info('Stored model parameters for event ' + event.target.name)
+
+    else:
+        logger.error('No best fit model results from pyLIMA; no model stored')
 
 def fetch_microlensing_model(event, model_type):
     """
@@ -241,24 +266,27 @@ def fetch_microlensing_model(event, model_type):
 
     mulens_model = None
 
-    if model_type == 'PSPL microlensing':
+    model_types_list = get_model_types_list()
+    db_model_type = model_types_list[model_type]
+
+    if db_model_type == 'PSPL microlensing':
         qs = PSPLModel.objects.filter(
             event=event,
             model_type='PSPL microlensing'
         )
-    elif model_type == 'FSPL microlensing':
+    elif db_model_type == 'FSPL microlensing':
         qs = FSPLModel.objects.filter(
             event=event,
             model_type='FSPL microlensing'
         )
 
     if qs.count() == 0:
-        if model_type == 'PSPL microlensing':
+        if db_model_type == 'PSPL microlensing':
             mulens_model = PSPLModel.objects.create(
                 event=event,
                 model_type='PSPL microlensing'
             )
-        elif model_type == 'FSPL microlensing':
+        elif db_model_type == 'FSPL microlensing':
             mulens_model = FSPLModel.objects.create(
                 event=event,
                 model_type='FSPL microlensing'
@@ -272,33 +300,45 @@ def fetch_microlensing_model(event, model_type):
     return mulens_model
 
 
-def update_microlensing_model(mulens_model, fit_results):
+def update_microlensing_model(event, fit_results, model_type):
     """
     Update the provided microlensing Model object, which may be of any type, with
     the dictionary of fitted results.  Note that the type of the Model and results must match.
     If an unknown type of model is requested, mulens_model = None and no action will be taken.
     """
 
-    if mulens_model:
-        mulens_model.t0 = fit_results['t0']
-        mulens_model.t0_error = fit_results['t0_error']
-        mulens_model.u0 = fit_results['u0']
-        mulens_model.u0_error = fit_results['u0_error']
-        mulens_model.tE = fit_results['tE']
-        mulens_model.tE_error = fit_results['tE_error']
-        mulens_model.piEN = fit_results['piEN']
-        mulens_model.piEN_error = fit_results['piEN_error']
-        mulens_model.piEE = fit_results['piEE']
-        mulens_model.piEE_error = fit_results['piEE_error']
-        if mulens_model.model_type == 'FSPL microlensing':
-            mulens_model.rho = fit_results['rho']
-            mulens_model.rho_error = fit_results['rho_error']
-        mulens_model.chisq = fit_results['chi2']
-        mulens_model.BIC = fit_results['BIC']
-        mulens_model.save()
+    if len(fit_results[model_type]) > 0:
+        mulens_model = fetch_microlensing_model(event, model_type)
 
-        logger.info('Stored ' + mulens_model.model_type
-                    + ' model parameters for event ' + mulens_model.event.target.name)
+        if mulens_model and len(fit_results[model_type]) > 0:
+            mulens_model.t0 = fit_results[model_type]['t0']
+            mulens_model.t0_error = fit_results[model_type]['t0_error']
+            mulens_model.u0 = fit_results[model_type]['u0']
+            mulens_model.u0_error = fit_results[model_type]['u0_error']
+            mulens_model.tE = fit_results[model_type]['tE']
+            mulens_model.tE_error = fit_results[model_type]['tE_error']
+            mulens_model.piEN = fit_results[model_type]['piEN']
+            mulens_model.piEN_error = fit_results[model_type]['piEN_error']
+            mulens_model.piEE = fit_results[model_type]['piEE']
+            mulens_model.piEE_error = fit_results[model_type]['piEE_error']
+            if mulens_model.model_type == 'FSPL microlensing':
+                mulens_model.rho = fit_results[model_type]['rho']
+                mulens_model.rho_error = fit_results[model_type]['rho_error']
+            mulens_model.chisq = fit_results[model_type]['chi2']
+            mulens_model.red_chisq = fit_results[model_type]['red_chi2']
+            mulens_model.BIC = fit_results[model_type]['BIC']
+            mulens_model.A = fit_results[model_type]['A0']
+            mulens_model.A_error = fit_results[model_type]['A0_error']
+            mulens_model.blend_parameters = {
+                'source_magnitude': fit_results[model_type]['source_magnitude'],
+                'source_mag_error': fit_results[model_type]['source_mag_error'],
+                'blend_magnitude': fit_results[model_type]['blend_magnitude'],
+                'blend_mag_error': fit_results[model_type]['blend_mag_error']
+            }
+            mulens_model.save()
+
+            logger.info('Stored ' + mulens_model.model_type
+                        + ' model parameters for event ' + mulens_model.event.target.name)
 
 def store_event_straightline_model_parameters(event, results):
 

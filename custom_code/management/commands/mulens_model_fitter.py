@@ -40,7 +40,8 @@ def fit_target(target_pk):
     :returns: (target_pk, target_name_or_None, success, error_message_or_None)
     """
     from tom_targets.models import Target
-    from custom_code.management.commands import data_utils, pylima_fit_functions
+    from custom_code.management.commands import data_utils
+    from custom_code import pylima_fit_functions
 
     try:
         mulens = Target.objects.get(pk=target_pk)

@@ -4,10 +4,97 @@ from custom_code.management.commands import data_utils
 from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum
 from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
-from django.utils import text, timezone
-from datetime import datetime, timedelta, tzinfo
+from custom_code import pylima_fit_functions
+import datetime
 from astropy.time import Time
-import pytz
+from django.utils import timezone
+from pyLIMA import telescopes
+from pyLIMA.models import PSPL_model, FSPL_model
+from pyLIMA.fits import TRF_fit
+from pyLIMA import event as mulens_event
+from pyLIMA.simulations import simulator
+import numpy as np
+
+def create_test_target_with_photometry():
+    """
+    Function to create a test target with photometry and an event
+    that occurs within the lightcurve
+    """
+    t = Target.objects.create(
+        name='TestObject',
+        classification='Microlensing PSPL',
+        category='Microlensing stellar/planet',
+        ra = 265.5,
+        dec = 17.5
+    )
+    nlc = 1
+    ndata = 100
+    mean_mag = 17.0
+    start_time = datetime.datetime.strptime('2026-09-01T00:00:00.0', '%Y-%m-%dT%H:%M:%S.%f')
+    jd_start_time = Time(start_time).jd
+    interval = 15.0 # Minutes between exposures
+    datums = [PhotometryReducedDatum(**{
+        'target': t,
+        'timestamp': timezone.make_aware((start_time + i * datetime.timedelta(minutes=interval)), datetime.timezone.utc),
+        'brightness': mean_mag,
+        'brightness_error': 0.001,
+        'bandpass': 'W213'
+    }) for i in range(0, ndata, 1)]
+    PhotometryReducedDatum.objects.bulk_create(datums)
+    e = Event.objects.create(
+        target=t,
+        event_id='test_event',
+        start_time=jd_start_time + ((20*interval) / (24.0 * 60.0)),
+        duration=60 / (24.0 * 60.0)  # Units of days
+    )
+
+    return t, e, ndata, nlc, datums
+
+def create_test_pylima_event():
+    """
+    Funcion to simulate a PyLIMA event
+    """
+    test_event = mulens_event.Event(ra=265.5, dec=17.5)
+    test_event.name = 'Test Target'
+
+    ndata = 100
+    data = np.zeros((ndata, 3))
+    data[:, 0] = np.linspace(2460000.0, 2460000.0 + float(ndata), ndata)
+    data[:, 1].fill(16.0)
+    data[:, 2].fill(0.001)
+
+    tel1 = telescopes.Telescope(name='Tel_0',
+                                camera_filter='I',
+                                lightcurve=data.astype(float),
+                                lightcurve_names=['time', 'mag', 'err_mag'],
+                                lightcurve_units=['JD', 'mag', 'mag'])
+    tel1.ld_gamma = 0.5
+
+    test_event.telescopes.append(tel1)
+
+    test_event.find_survey('Tel_0')
+    test_event.check_event()
+
+    pspl = PSPL_model.PSPLmodel(test_event, parallax=['None', 0.],
+                                blend_flux_parameter='ftotal')
+    pspl.define_model_parameters()
+
+    # t0, u0, tE
+    pspl_parameters = [2460050.0, 0.001, 4.0]
+    pyLIMA_parameters = pspl.compute_pyLIMA_parameters(pspl_parameters)
+    simulator.simulate_lightcurve(pspl, pyLIMA_parameters)
+
+    return test_event, pspl
+
+def create_test_model_fit(test_event, pspl_model):
+    """
+    Function to generate simulated PyLIMA model_fit output
+    """
+
+    model_fit = TRF_fit.TRFfit(pspl_model, loss_function='soft_l1')
+    model_fit.fit()
+
+    return model_fit
 
 class TestSolarSystemFunctions(TestCase):
     def setUp(self):
@@ -58,31 +145,97 @@ class TestSolarSystemFunctions(TestCase):
 
 class TestDataUtils(TestCase):
     def setUp(self):
-        self.target = Target.objects.create(
-            name='TestObject',
-            classification='Microlensing PSPL',
-            category='Microlensing stellar/planet',
-        )
-        self.ndata = 100
-        self.mean_mag = 17.0
-        self.start_time = datetime.strptime('2026-09-01T00:00:00.0', '%Y-%m-%dT%H:%M:%S.%f')
-        self.jd_start_time = Time(self.start_time)
-        self.datums = [PhotometryReducedDatum(**{
-            'target': self.target,
-            'timestamp': self.start_time + i*timedelta(minutes=15.0),
-            'brightness': self.mean_mag,
-            'brightness_error': 0.001,
-            'bandpass': 'W213'
-        }) for i in range(0,self.ndata,1)]
-        PhotometryReducedDatum.objects.bulk_create(self.datums)
-        self.event = Event.objects.create(
-            target=self.target,
-            event_id='test_event',
-            start_time=self.jd_start_time.jd + 20*(15.0/24.0*60.0),
-            duration=60/(24.0*60.0) # Units of days
-        )
+        self.target, self.event, self.ndata, self.ndatasets, self.datums = create_test_target_with_photometry()
 
     def test_get_baseline_data(self):
+        """
+        Function to test whether data during an event is removed from
+        the lightcurve
+        """
 
         datasets = data_utils.get_baseline_data(self.target)
 
+        self.assertEqual(len(datasets), self.ndatasets)
+
+        for dname, data in datasets.items():
+            assert(len(data) < self.ndata)
+
+    def test_get_reduced_data(self):
+        """
+        Function to test whether just datapoints acquired during
+        an event are returned
+        """
+
+        datasets = data_utils.get_reduced_data(self.event)
+
+        self.assertEqual(len(datasets), self.ndatasets)
+
+        for dname, data in datasets.items():
+            assert(data[0,0] >= self.event.start_time)
+            assert(data[0,-1] <= self.event.start_time + self.event.duration)
+
+class TestPyLIMAUtils(TestCase):
+
+    def setUp(self):
+        self.target, self.event, self.ndata, self.ndatasets, self.datums = create_test_target_with_photometry()
+
+    def test_pylima_telescopes_from_datasets(self):
+        """
+        Test that the PyLIMA telescope objects created for an event have
+        that event's lightcurve data
+        """
+        datasets = data_utils.get_reduced_data(self.event)
+
+        test_tel = telescopes.Telescope()
+
+        tel_list = pylima_fit_functions.pylima_telescopes_from_datasets(datasets)
+
+        for tel in tel_list:
+            self.assertEqual(type(test_tel), type(tel))
+            assert(len(tel.lightcurve) > 0)
+            assert(len(tel.lightcurve) < self.ndata)
+
+    def test_gather_model_parameters(self):
+        """
+        Test the extraction of parameters from a fitted model
+        """
+
+        test_event, pspl_model = create_test_pylima_event()
+
+        model_fit = create_test_model_fit(test_event, pspl_model)
+
+
+        test_param_keys = list(model_fit.fit_parameters.keys())
+        test_param_keys += [
+            'chi2', 'red_chi2', 'BIC', 'source_magnitude',
+            'source_mag_error', 'blend_magnitude', 'blend_mag_error'
+        ]
+
+        model_params = pylima_fit_functions.gather_model_parameters(
+            test_event, model_fit, True
+        )
+
+        for key in test_param_keys:
+            assert(key in model_params.keys())
+
+    def test_generate_model_lightcurve(self):
+        """
+        Test generation of model lightcurves
+        """
+
+        test_event, pspl_model = create_test_pylima_event()
+
+        model_fit = create_test_model_fit(test_event, pspl_model)
+
+        model_params = pylima_fit_functions.gather_model_parameters(
+            test_event, model_fit, True
+        )
+
+        model_lc = pylima_fit_functions.generate_model_lightcurve(
+            test_event, model_params, True
+        )
+
+        print(model_lc)
+
+        assert(type(model_lc), type(np.zeros((2,2))))
+        assert(len(model_lc.lightcurve) >= len(test_event.telescopes[0].lightcurve))

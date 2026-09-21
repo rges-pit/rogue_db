@@ -3,10 +3,21 @@
 <table class="table table-sm table-striped">
     <tbody>
         {% for label, value in parameters %}
-        <tr>
-            <th>{{ label }}</th>
-            <td>{{ value }}</td>
-        </tr>
+            {% if label == 'blend parameters' %}
+            <tr>
+                <th>{{ label }}</th>
+                <td>
+                    {% for key, data in value.items %}
+                        {{ key }} : {{ data }} <br/>
+                    {% endfor %}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <th>{{ label }}</th>
+                <td>{{ value }}</td>
+            </tr>
+            {% endif %}
         {% endfor %}
     </tbody>
 </table>
