@@ -233,6 +233,24 @@ li {
   background-color: transparent;
 }
 
+/* event-model-parameters-progress / model-parameters-progress show a full
+   spinner-border + explanatory text, not a small inline icon. htmx's own
+   injected .htmx-indicator{opacity:0} rule hides them while idle, but
+   opacity doesn't remove an element from layout -- its full box (spinner
+   circle + text + my-4 margins) was still reserved and pushed the sibling
+   parameter table/container down even while invisible. display:none actually
+   takes it out of flow. Scoped by id (not the shared .htmx-indicator class)
+   so this reliably wins regardless of load order against htmx's own
+   injected style. */
+#event-model-parameters-progress,
+#model-parameters-progress {
+  display: none;
+}
+#event-model-parameters-progress.htmx-request,
+#model-parameters-progress.htmx-request {
+  display: block;
+}
+
 /* HTMXTableFilterSet's general search field (tom_common/htmx_table.py, shared
    by every search form across the app -- id="filter-form") wraps its "query"
    input in a fixed col-md-3, sized against whatever column it happens to sit

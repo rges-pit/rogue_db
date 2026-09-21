@@ -184,6 +184,23 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
     """
     template_name = 'custom_code/partials/event_model_parameters.html'
 
+    PARAMETER_DECIMAL_PLACES = {
+        't0': 5, 't0_error': 5,
+        'u0': 4, 'u0_error': 4,
+        'tE': 3, 'tE_error': 3,
+        'piEN': 4, 'piEN_error': 4,
+        'piEE': 4, 'piEE_error': 4,
+        'rho': 5, 'rho_error': 5,
+        'chisq': 3, 'BIC': 3,
+    }
+    DEFAULT_PARAMETER_DECIMAL_PLACES = 3
+
+    def _format_value(self, field_name, value):
+        if isinstance(value, float):
+            places = self.PARAMETER_DECIMAL_PLACES.get(field_name, self.DEFAULT_PARAMETER_DECIMAL_PLACES)
+            return f'{value:.{places}f}'
+        return value
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         base = get_object_or_404(EventModel, pk=self.request.GET.get('model'))
@@ -193,11 +210,42 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
         if model_class:
             instance = get_object_or_404(model_class, pk=base.pk)
 
-            parameters = [
-                (field.verbose_name, getattr(instance, field.attname))
-                for field in type(instance)._meta.local_fields
-                if not getattr(field.remote_field, 'parent_link', False)
-            ]
+            # (field_name, verbose_name, raw_value), in declaration order.
+            # Exclude the parallax parameters since we don't fit for these.
+            fields = []
+            for field in type(instance)._meta.local_fields:
+                if getattr(field.remote_field, 'parent_link', False):
+                    continue
+                if field.verbose_name in ['piEE', 'piEE error', 'piEN', 'piEN error']:
+                    continue
+                fields.append((field.name, field.verbose_name, getattr(instance, field.attname)))
+
+            # chisq/BIC are on the parent EventModel, not the concrete
+            # subclass, so they're not among local_fields above.
+            for field_name in ('chisq', 'BIC'):
+                field = EventModel._meta.get_field(field_name)
+                fields.append((field_name, field.verbose_name, getattr(base, field_name)))
+
+            raw_values = {name: value for name, _, value in fields}
+            # A "<name>_error" field gets folded into its base field's row
+            # (as "value ± error") rather than shown as its own row below it.
+            consumed_as_error = {
+                name for name in raw_values
+                if name.endswith('_error') and name[:-len('_error')] in raw_values
+            }
+
+            for field_name, verbose_name, value in fields:
+                if field_name in consumed_as_error:
+                    continue
+                error_name = field_name + '_error'
+                if error_name in raw_values:
+                    display = (
+                        f'{self._format_value(field_name, value)} ± '
+                        f'{self._format_value(error_name, raw_values[error_name])}'
+                    )
+                else:
+                    display = self._format_value(field_name, value)
+                parameters.append((verbose_name, display))
 
         context['model_type'] = base.model_type
         context['parameters'] = parameters

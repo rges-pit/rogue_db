@@ -101,13 +101,13 @@ def plot_interactive_lightcurve(datasets, model_datums, height=600, width=700, s
     ### Try to plot model if exist
     if model_datums.count() > 0:
         for rd in model_datums:
+            key_name = ''.join(rd.data_type.split('_')[3:])
             fig.add_trace(go.Scatter(x=np.array(rd.value['lc_model_time']) - 2460000,
                                  y=np.array(rd.value['lc_model_magnitude']),
                                  mode='lines',
-                                 name=rd.data_type,
+                                 name=key_name,
                                  opacity=0.5,
-                                 line=dict(color='rgb(227,227,227)',
-                                           width=5, ),
+                                 line=dict(width=5),
                                  )
                       )
 
@@ -130,6 +130,16 @@ def plot_interactive_lightcurve(datasets, model_datums, height=600, width=700, s
         annotations=annotations,
         xaxis_title="HJD-2460000",
         yaxis_title="Mag",
+        # Horizontal legend above the plot instead of Plotly's default
+        # vertical legend down the right side, which was eating into the
+        # plot area -- most noticeable on the narrower event-detail plot.
+        legend=dict(
+            orientation='h',
+            yanchor='bottom',
+            y=1.02,
+            xanchor='right',
+            x=1,
+        ),
     )
 
     # include_plotlyjs=False: the library is loaded once globally in
