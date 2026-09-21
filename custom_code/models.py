@@ -224,6 +224,7 @@ class EventModel(models.Model):
 
     # Goodness of fit parameters
     chisq = models.FloatField(default=0, null=True, blank=True)
+    red_chisq = models.FloatField(default=0, null=True, blank=True)
     BIC = models.FloatField(default=0, null=True, blank=True)
     fit_covariance = models.JSONField(default=dict, null=True, blank=True)
 

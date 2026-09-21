@@ -222,7 +222,7 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
 
             # chisq/BIC are on the parent EventModel, not the concrete
             # subclass, so they're not among local_fields above.
-            for field_name in ('chisq', 'BIC'):
+            for field_name in ('chisq', 'red_chisq', 'BIC'):
                 field = EventModel._meta.get_field(field_name)
                 fields.append((field_name, field.verbose_name, getattr(base, field_name)))
 

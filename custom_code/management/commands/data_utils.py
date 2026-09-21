@@ -325,6 +325,7 @@ def update_microlensing_model(event, fit_results, model_type):
                 mulens_model.rho = fit_results[model_type]['rho']
                 mulens_model.rho_error = fit_results[model_type]['rho_error']
             mulens_model.chisq = fit_results[model_type]['chi2']
+            mulens_model.red_chisq = fit_results[model_type]['red_chi2']
             mulens_model.BIC = fit_results[model_type]['BIC']
             mulens_model.A = fit_results[model_type]['A0']
             mulens_model.A_error = fit_results[model_type]['A0_error']
