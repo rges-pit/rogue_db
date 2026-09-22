@@ -23,7 +23,7 @@ class Command(BaseCommand):
             pylima_results = pylima_fit_functions.run_fit(event, bandpass='Roman_F146', verbose=True)
 
             # Store model lightcurves
-            data_utils.store_model_lightcurves(event, pylima_results)
+            data_utils.store_pylima_model_lightcurves(event, pylima_results)
 
             # Store model parameters
             pspl_model, fspl_model = data_utils.store_microlensing_model_parameters(

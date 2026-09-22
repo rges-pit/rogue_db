@@ -1,9 +1,8 @@
 from django.core.management.base import BaseCommand
 from custom_code.models import Event
 from tom_targets.models import Target
-from custom_code.management.commands import flare_fit_functions
 from custom_code.management.commands import data_utils
-from custom_code import diagnostics
+from custom_code import flare_fit_functions
 
 import logging
 
@@ -26,10 +25,14 @@ class Command(BaseCommand):
 
             # Davenport flare model fit
             davenport_results = flare_fit_functions.run_davenport_flare_fit(event)
-            if len(davenport_results) > 0:
-                data_utils.store_davenportflare_model_parameters(event, davenport_results)
+            davenport_flare = data_utils.store_davenportflare_model_parameters(
+                event, davenport_results
+            )
+            data_utils.store_model_lightcurve(event, davenport_results, 'davenport_flare')
 
             # Pitkin flare model fit
             pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(event)
-            if len(pitkin_results) > 0:
-                data_utils.store_pitkinflare_model_parameters(event, pitkin_results)
+            pitkin_flare = data_utils.store_pitkinflare_model_parameters(
+                event, pitkin_results
+            )
+            data_utils.store_model_lightcurve(event, pitkin_results, 'pitkin_flare')
