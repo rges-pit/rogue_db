@@ -25,13 +25,13 @@ def run_event_straightline_fit(lcevent):
 
     # Set a cap of a minimum of ten points for a sensible fit
     if len(lightcurve) > 10:
-        # Fit a straight line (f(x) = p[0] + p[1]*x) to the lightcurve segment
+        # Fit a straight line (f(x) = p[0]*x + p[1]) to the lightcurve segment
         # and generate fitted lightcurve
         coeffs, covar = np.polyfit(
             lightcurve[:,0], lightcurve[:,1], deg=1, w=1.0/lightcurve[:,2],
             full=False, cov=True
         )
-        model_mag = coeffs[0] + coeffs[1] * lightcurve[:,0]
+        model_mag =  coeffs[0] * lightcurve[:,0] + coeffs[1]
 
         # Calculate the chi2 and BIC = chi2 + k ln(n) of this model to the lightcurve
         chi2 = np.sum(((lightcurve[:,1] - model_mag) / lightcurve[:,2]) ** 2)
@@ -45,7 +45,7 @@ def run_event_straightline_fit(lcevent):
         }
 
     else:
-        logger.info('No valid data found')
+        logger.info('Insufficient valid data during event')
         return {
             'coeffs': np.zeros(0), 'chisq': None, 'BIC': None,
             'covar': np.zeros(0)

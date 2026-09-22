@@ -5,7 +5,7 @@ import numpy as np
 from pyLIMA import event
 from pyLIMA import telescopes
 from pyLIMA import toolbox
-from pyLIMA.fits import TRF_fit
+from pyLIMA.fits import TRF_fit, DE_fit
 from pyLIMA.fits import stats
 from pyLIMA.models import PSPL_model, FSPL_model
 from pyLIMA.outputs import pyLIMA_plots
@@ -54,31 +54,7 @@ def run_fit(lcevent, bandpass=None, verbose=False):
                                 blend_flux_parameter='ftotal')
     pspl.define_model_parameters()
     pspl_model_fit = TRF_fit.TRFfit(pspl, loss_function='soft_l1')
-
-    if lcevent.target.t0:
-        pspl_model_fit.model_parameters_guess = [
-            lcevent.target.t0,
-            lcevent.target.u0,
-            lcevent.target.tE
-        ]
-        if verbose: logger.info('PSPL fit initial guess: ' + repr(pspl_model_fit.model_parameters_guess))
-
-    if use_boundaries:
-        if lcevent.target.t0:
-            trange = max(2.0 * lcevent.target.tE, 2.0)
-            pspl_model_fit.fit_parameters["t0"][1] = [
-                lcevent.target.t0 - trange/2.0,
-                lcevent.target.t0 + trange/2.0,
-            ]
-        else:
-            pspl_model_fit.fit_parameters["t0"][1] = [0.0, 10.0]
-        pspl_model_fit.fit_parameters["tE"][1] = [0.0, 100.]
-        pspl_model_fit.fit_parameters["u0"][1] = [0.0, 2.0]
-        if verbose: logger.info('PSPL fit boundaries: t0: '
-                                + repr(pspl_model_fit.fit_parameters["t0"][1])
-                                + ' tE: ' + repr(pspl_model_fit.fit_parameters["tE"][1])
-                                + ' u0: ' + repr(pspl_model_fit.fit_parameters["u0"][1]))
-
+    set_parameter_boundaries(lcevent, pspl_model_fit, verbose=True)
     pspl_model_fit.fit()
 
     pspl_model_params = gather_model_parameters(current_event, pspl_model_fit, verbose)
@@ -95,34 +71,10 @@ def run_fit(lcevent, bandpass=None, verbose=False):
                                  blend_flux_parameter='ftotal')
     fspl.define_model_parameters()
     fspl_model_fit = TRF_fit.TRFfit(fspl, loss_function='soft_l1')
-
-    if lcevent.target.t0:
-        fspl_model_fit.model_parameters_guess = [
-            pspl_model_params['t0'],
-            pspl_model_params['u0'],
-            pspl_model_params['tE'],
-            0.0
-        ]
-        if verbose: logger.info('FSPL fit initial guess: ' + str(fspl_model_fit.model_parameters_guess))
-
-    if use_boundaries:
-        if lcevent.target.t0:
-            trange = max(2.0 * lcevent.target.tE, 2.0)
-            fspl_model_fit.fit_parameters["t0"][1] = [
-                lcevent.target.t0 - trange / 2.0,
-                lcevent.target.t0 + trange / 2.0,
-            ]
-        else:
-            fspl_model_fit.fit_parameters["t0"][1] = [0.0, 10.0]
-        fspl_model_fit.fit_parameters["tE"][1] = [0.0, 100.]
-        fspl_model_fit.fit_parameters["u0"][1] = [0.0, 2.0]
-        fspl_model_fit.fit_parameters["rho"][1] = [0.0, 0.5]
-        if verbose: logger.info('FSPL model fit boundaries: t0: '
-                                + repr(fspl_model_fit.fit_parameters["t0"][1])
-                                + ' tE: ' + repr(fspl_model_fit.fit_parameters["tE"][1])
-                                + ' u0: ' + repr(fspl_model_fit.fit_parameters["u0"][1])
-                                + ' rho: ' + repr(fspl_model_fit.fit_parameters["rho"][1])
-                                )
+    set_parameter_boundaries(
+        lcevent, fspl_model_fit,
+        prior_model_params=pspl_model_params, verbose=True
+    )
     fspl_model_fit.fit()
 
     fspl_model_params = gather_model_parameters(current_event, fspl_model_fit, verbose)
@@ -177,6 +129,74 @@ def run_fit(lcevent, bandpass=None, verbose=False):
         'model_telescope_fspl': model_telescope_fspl
     }
 
+def set_parameter_boundaries(lcevent, mulens_model_fit, verbose=False,
+                             use_boundaries=True, prior_model_params={}):
+    """
+    Function to establish the initial guess and parameter boundaries appropriate to an event
+
+    Parameters:
+        lcevent             Event object
+        mulens_model_fit    pyLIMA model fit object
+
+    Returns:
+        mulens_model_fit    pyLIMA model fit object
+    """
+
+    # Estimate initial-guess parameters based on the Target's parameters,
+    # which are set from the alert information
+    if len(prior_model_params) == 0 and lcevent.target.t0:
+        mulens_model_fit.model_parameters_guess = [
+            lcevent.target.t0,
+            lcevent.target.u0,
+            lcevent.target.tE
+        ]
+    elif len(prior_model_params) > 0:
+        mulens_model_fit.model_parameters_guess = [
+            prior_model_params['t0'],
+            prior_model_params['u0'],
+            prior_model_params['tE']
+        ]
+    else:
+        mulens_model_fit.model_parameters_guess = [ 0.0, 0.0, 0.0 ]
+
+    if mulens_model_fit.model.model_type() == 'FSPL':
+        mulens_model_fit.model_parameters_guess.append(0.0)
+
+    if verbose: logger.info(mulens_model_fit.model.model_type() + ' fit initial guess: '
+                            + repr(mulens_model_fit.model_parameters_guess))
+
+    # Establish boundaries for the optimization process
+    if use_boundaries:
+        if lcevent.target.t0:
+            trange = max(2.0 * lcevent.target.tE, 2.0)
+            mulens_model_fit.fit_parameters["t0"][1] = [
+                lcevent.target.t0 - trange/2.0,
+                lcevent.target.t0 + trange/2.0,
+            ]
+        else:
+            mulens_model_fit.fit_parameters["t0"][1] = [0.0, 10.0]
+        mulens_model_fit.fit_parameters["tE"][1] = [0.0, 100.]
+        mulens_model_fit.fit_parameters["u0"][1] = [-2.0, 2.0]
+
+        if mulens_model_fit.model.model_type() == 'FSPL':
+            mulens_model_fit.fit_parameters["rho"][1] = [0.0, 0.5]
+
+        if verbose:
+            if mulens_model_fit.model.model_type() == 'PSPL':
+                logger.info(mulens_model_fit.model.model_type() + ' fit boundaries: t0: '
+                                + repr(mulens_model_fit.fit_parameters["t0"][1])
+                                + ' tE: ' + repr(mulens_model_fit.fit_parameters["tE"][1])
+                                + ' u0: ' + repr(mulens_model_fit.fit_parameters["u0"][1]))
+            elif mulens_model_fit.model.model_type() == 'FSPL':
+                logger.info(mulens_model_fit.model.model_type() + ' fit boundaries: t0: '
+                            + repr(mulens_model_fit.fit_parameters["t0"][1])
+                            + ' tE: ' + repr(mulens_model_fit.fit_parameters["tE"][1])
+                            + ' u0: ' + repr(mulens_model_fit.fit_parameters["u0"][1])
+                            + ' rho: ' + repr(mulens_model_fit.fit_parameters["rho"][1])
+                            )
+
+    return mulens_model_fit
+
 def pylima_telescopes_from_datasets(datasets, emag_limit=None):
     """Function to convert the dictionary of datasets retrieved from MOP of the lightcurves for this object,
     and convert them into PyLIMA Telescope objects.
@@ -230,7 +250,10 @@ def gather_model_parameters(pevent, model_fit, verbose):
     Function to gather the parameters of a PyLIMA fitted model into a dictionary for easier handling.
     """
     def calc_A(u0):
-        return (u0 * u0 + 2) / (u0 * np.sqrt(u0 * u0 + 4))
+        A = (u0 * u0 + 2) / (u0 * np.sqrt(u0 * u0 + 4))
+        if np.isinf(A):
+            A = 10000.0
+        return A
 
     if 'best_model' in model_fit.fit_results.keys():
         # PyLIMA model objects store the fitted values of the model parameters in the fit_results attribute,
@@ -253,6 +276,8 @@ def gather_model_parameters(pevent, model_fit, verbose):
         A_max = calc_A(model_params['u0'] - model_params['u0_error'])
         A_min = calc_A(model_params['u0'] + model_params['u0_error'])
         model_params['A0_error'] = (A_max - A_min)/2.0
+        if np.isinf(model_params['A0_error']):
+            model_params['A0_error'] = 10000.0
 
         # model_params['chi2'] = np.around(model_fit.fit_results["best_model"][-1], 3)
         # Reporting actual chi2 instead value of the loss function
@@ -337,6 +362,7 @@ def gather_model_parameters(pevent, model_fit, verbose):
             )
             model_params['baseline_magnitude'] = np.around(flux_to_mag(baseline_flux), 3)
             model_params['baseline_mag_error'] = np.around(fluxerror_to_magerror(baseline_flux, baseline_flux_error), 3)
+
         else:
             model_params['baseline_magnitude'] = model_params['source_magnitude']
             model_params['baseline_mag_error'] = model_params['source_mag_error']
@@ -461,9 +487,6 @@ def generate_model_lightcurve(pevent, model_params, verbose):
 
         model_telescope = pyLIMA_plots.create_telescopes_to_plot_model(pspl, pyLIMA_parameters)[0]
 
-        print(pevent.telescopes[0].lightcurve['time'].min(), pevent.telescopes[0].lightcurve['time'].max())
-        print(model_telescope.lightcurve['time'].min(), model_telescope.lightcurve['time'].max())
-
         flux_model = pspl.compute_the_microlensing_model(model_telescope, pyLIMA_parameters)['photometry']
 
         magnitude = toolbox.brightness_transformation.flux_to_magnitude(flux_model)
@@ -500,8 +523,11 @@ def flux_to_mag(flux):
     return magnitude
 
 def fluxerror_to_magerror(flux, flux_error):
-
+    """Magnitude uncertainties are capped at 10mag to avoid inf or NaN"""
     mag_err = (2.5 / np.log(10.0)) * flux_error / flux
+    if np.isinf(mag_err):
+        mag_err = 10.0
+
     return mag_err
 
 def mag_to_flux(mag):

@@ -4,7 +4,7 @@ from custom_code.management.commands import data_utils
 from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum
 from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
-from custom_code import pylima_fit_functions
+from custom_code import pylima_fit_functions, general_fit_functions
 import datetime
 from astropy.time import Time
 from django.utils import timezone
@@ -38,14 +38,14 @@ def create_test_target_with_photometry():
         'timestamp': timezone.make_aware((start_time + i * datetime.timedelta(minutes=interval)), datetime.timezone.utc),
         'brightness': mean_mag,
         'brightness_error': 0.001,
-        'bandpass': 'W213'
+        'bandpass': 'F146'
     }) for i in range(0, ndata, 1)]
     PhotometryReducedDatum.objects.bulk_create(datums)
     e = Event.objects.create(
         target=t,
         event_id='test_event',
         start_time=jd_start_time + ((20*interval) / (24.0 * 60.0)),
-        duration=60 / (24.0 * 60.0)  # Units of days
+        duration=240 / (24.0 * 60.0)  # Units of days
     )
 
     return t, e, ndata, nlc, datums
@@ -235,7 +235,19 @@ class TestPyLIMAUtils(TestCase):
             test_event, model_params, True
         )
 
-        print(model_lc)
-
         assert(type(model_lc), type(np.zeros((2,2))))
         assert(len(model_lc.lightcurve) >= len(test_event.telescopes[0].lightcurve))
+
+class TestGeneralFitFunctions(TestCase):
+
+    def setUp(self):
+        self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
+
+    def test_run_event_straightline_fit(self):
+
+        test_mean_mag = np.array([datum.brightness for datum in self.datums]).mean()
+
+        results = general_fit_functions.run_event_straightline_fit(self.test_event)
+
+        self.assertAlmostEqual(results['coeffs'][0], 0.0, 2)
+        self.assertAlmostEqual(results['coeffs'][1], test_mean_mag, 0)

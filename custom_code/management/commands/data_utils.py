@@ -125,7 +125,7 @@ def fetch_lightcurve(datasets):
     # If not, extract the first lightcurve found from the following
     # passbands in order of priority
     lightcurve = np.zeros(1)
-    priority_order = ['W146', 'F184', 'F213', 'I', 'OGLE-I', 'ip', 'G', 'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp']
+    priority_order = ['F146', 'F184', 'F213', 'I', 'OGLE-I', 'ip', 'G', 'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp']
 
     dataset_order = [passband for passband in priority_order if passband in datasets.keys()]
 
@@ -158,8 +158,9 @@ def get_model_types_list():
         'fspl': 'FSPL microlensing'
     }
 
-def store_model_lightcurve(event, pyLIMA_results, model_type):
-    """Function to store in the TOM the timeseries lightcurve corresponding to a fitted model.
+def store_model_lightcurves(event, pyLIMA_results):
+    """Function to store in the TOM the timeseries lightcurves corresponding to fitted
+    PSPL and FSPL models.
     The input is a model fit object from PyLIMA.
 
     Note that this function has to be separate from the MicrolensingTarget class because it uses the
@@ -171,42 +172,45 @@ def store_model_lightcurve(event, pyLIMA_results, model_type):
     # Map array -> database keywords
     model_types_list = get_model_types_list()
 
-    # Extract the model lightcurve timeseries from the PyLIMA fit object
-    model_tel = pyLIMA_results['model_telescope_' + model_type]
-    if len(model_tel.lightcurve) > 0:
-        data = {
-            'lc_model_time': model_tel.lightcurve['time'].value.tolist(),
-            'lc_model_magnitude': model_tel.lightcurve['mag'].value.tolist()
-        }
+    for model_type in ['pspl', 'fspl']:
+        if 'model_telescope_' + model_type in pyLIMA_results.keys():
 
-        # If there is no existing model for this target, create one
-        data_type = 'lc_model_' + str(event.event_id) + '_' + model_types_list[model_type]
-        qs = ReducedDatum.objects.filter(target=event.target, data_type=data_type)
-        if qs.count() == 0:
-            rd = ReducedDatum.objects.create(
-                timestamp=model_time,
-                value=data,
-                source_name='RogueDB',
-                source_location=event.target.name,
-                data_type=data_type,
-                target=event.target
-            )
-            logger.info('Created lightcurve model datum for ' + event.target.name)
+            # Extract the model lightcurve timeseries from the PyLIMA fit object
+            model_tel = pyLIMA_results['model_telescope_' + model_type]
+            if model_tel and len(model_tel.lightcurve) > 0:
+                data = {
+                    'lc_model_time': model_tel.lightcurve['time'].value.tolist(),
+                    'lc_model_magnitude': model_tel.lightcurve['mag'].value.tolist()
+                }
 
-        # If there is a pre-existing model, update it
-        else:
-            rd = qs[0]
-            rd.timestamp = model_time
-            rd.value = data
-            rd.source_name = 'RogueDB'
-            rd.source_location = event.target.name
-            rd.data_type = data_type
-            rd.target = event.target
-            rd.save()
-            logger.info('Updated existing lightcurve model datum for ' + event.target.name)
+                # If there is no existing model for this target, create one
+                data_type = 'lc_model_' + str(event.event_id) + '_' + model_types_list[model_type]
+                qs = ReducedDatum.objects.filter(target=event.target, data_type=data_type)
+                if qs.count() == 0:
+                    rd = ReducedDatum.objects.create(
+                        timestamp=model_time,
+                        value=data,
+                        source_name='RogueDB',
+                        source_location=event.target.name,
+                        data_type=data_type,
+                        target=event.target
+                    )
+                    logger.info('Created ' + model_type + ' lightcurve model datum for ' + event.target.name)
 
-    else:
-        logger.info('No model ' + model_type + ' lightcurve to store for ' + event.target.name)
+                # If there is a pre-existing model, update it
+                else:
+                    rd = qs[0]
+                    rd.timestamp = model_time
+                    rd.value = data
+                    rd.source_name = 'RogueDB'
+                    rd.source_location = event.target.name
+                    rd.data_type = data_type
+                    rd.target = event.target
+                    rd.save()
+                    logger.info('Updated existing ' + model_type + ' lightcurve model datum for ' + event.target.name)
+
+            else:
+                logger.info('No model ' + model_type + ' lightcurve to store for ' + event.target.name)
 
     return event
 
@@ -242,13 +246,15 @@ def store_microlensing_model_parameters(event, pylima_results):
 
         # Fetch existing PSPL and FSPL models for this event, or create them,
         # and update them with the fitted parameters
-        update_microlensing_model(event, pylima_results, 'pspl')
-        update_microlensing_model(event, pylima_results, 'fspl')
+        pspl_model = update_microlensing_model(event, pylima_results, 'pspl')
+        fspl_model = update_microlensing_model(event, pylima_results, 'fspl')
 
         logger.info('Stored model parameters for event ' + event.target.name)
+        return pspl_model, fspl_model
 
     else:
         logger.error('No best fit model results from pyLIMA; no model stored')
+        return None, None
 
 def fetch_microlensing_model(event, model_type):
     """
@@ -340,36 +346,47 @@ def update_microlensing_model(event, fit_results, model_type):
             logger.info('Stored ' + mulens_model.model_type
                         + ' model parameters for event ' + mulens_model.event.target.name)
 
-def store_event_straightline_model_parameters(event, results):
-
-    # If there is an existing straight line fit in the database for this event,
-    # update it; otherwise create a new entry
-    qs = StraightLineModel.objects.filter(
-        event=event,
-        model_type='Straight line'
-    )
-
-    if qs.count() == 0:
-        StraightLineModel.objects.create(
-            event = event,
-            model_type = 'Straight line',
-            chisq = results['chisq'],
-            BIC = results['BIC'],
-            fit_covariance = json.dumps(results['covar'].tolist()),
-            intercept = results['coeffs'][0],
-            gradient = results['coeffs'][1]
-        )
+        return mulens_model
 
     else:
-        slmodel = qs[0]
-        slmodel.chisq = results['chisq']
-        slmodel.BIC = results['BIC']
-        slmodel.fit_covariance = json.dumps(results['covar'].tolist())
-        slmodel.intercept = results['coeffs'][0]
-        slmodel.gradient = results['coeffs'][1]
-        slmodel.save()
+        return None
 
-    logger.info('Stored straight line model parameters and diagnostics for event ' + event.target.name)
+def store_event_straightline_model_parameters(event, results):
+
+    if len(results['coeffs']) > 0:
+        # If there is an existing straight line fit in the database for this event,
+        # update it; otherwise create a new entry
+        qs = StraightLineModel.objects.filter(
+            event=event,
+            model_type='Straight line'
+        )
+
+        if qs.count() == 0:
+            slmodel = StraightLineModel.objects.create(
+                event = event,
+                model_type = 'Straight line',
+                chisq = results['chisq'],
+                BIC = results['BIC'],
+                fit_covariance = json.dumps(results['covar'].tolist()),
+                intercept = results['coeffs'][0],
+                gradient = results['coeffs'][1]
+            )
+
+        else:
+            slmodel = qs[0]
+            slmodel.chisq = results['chisq']
+            slmodel.BIC = results['BIC']
+            slmodel.fit_covariance = json.dumps(results['covar'].tolist())
+            slmodel.intercept = results['coeffs'][0]
+            slmodel.gradient = results['coeffs'][1]
+            slmodel.save()
+
+        logger.info('Stored straight line model parameters and diagnostics for event ' + event.target.name)
+
+        return slmodel
+
+    else:
+        return None
 
 def store_davenportflare_model_parameters(event, results):
     """
@@ -454,3 +471,13 @@ def store_pitkinflare_model_parameters(event, results):
         flare.save()
 
     logger.info('Stored Pitkin flare model parameters for event ' + event.target.name)
+
+def store_target_diagnostics(target, results):
+    """Function to store the results of analysing the target's baseline data"""
+
+    if results['frac_below_baseline']:
+        target.frac_below_baseline = results['frac_below_baseline']
+        target.max_excursion_below_baseline = results['max_excursion_below_baseline']
+        target.save()
+
+        logger.info('Stored diagostics from baseline lightcurve fit for ' + target.name)

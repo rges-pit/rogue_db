@@ -23,20 +23,12 @@ class Command(BaseCommand):
             pylima_results = pylima_fit_functions.run_fit(event, bandpass='Roman_F146', verbose=True)
 
             # Store model lightcurves
-            if pylima_results['model_telescope_pspl']:
-                data_utils.store_model_lightcurve(event, pylima_results, 'pspl')
-                logger.info('Stored PSPL model lightcurve for event ' + event.target.name)
-            else:
-                logger.warning('No valid PSPL produced so no model lightcurve for event ' + event.target.name)
-
-            if pylima_results['model_telescope_fspl']:
-                data_utils.store_model_lightcurve(event, pylima_results, 'fspl')
-                logger.info('Stored FSPL model lightcurve for event ' + event.target.name)
-            else:
-                logger.warning('No valid FSPL produced so no model lightcurve for event ' + event.target.name)
+            data_utils.store_model_lightcurves(event, pylima_results)
 
             # Store model parameters
-            data_utils.store_microlensing_model_parameters(event, pylima_results)
+            pspl_model, fspl_model = data_utils.store_microlensing_model_parameters(
+                event, pylima_results
+            )
 
         else:
             logger.warning('Found no database entry for ' + options['target_name'])

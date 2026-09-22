@@ -1,3 +1,13 @@
+def calc_mulens_diagnostics(event, pspl_model, fspl_model, straightline_model):
+    """
+    Function to compare the results of PyLIMA model fits for PSPL and FSPL
+    for a single event
+    """
+    if pspl_model and straightline_model:
+        compare_model_goodness_of_fit(event, pspl_model, straightline_model)
+
+    if fspl_model and straightline_model:
+        compare_model_goodness_of_fit(event, fspl_model, straightline_model)
 
 def compare_model_goodness_of_fit(event, model1, model2):
     """
@@ -8,8 +18,6 @@ def compare_model_goodness_of_fit(event, model1, model2):
     # Calculate the difference between the chi2 values and the BIC
     delta_chisq = model1.chisq - model2.chisq
     delta_bic = model1.BIC - model2.BIC
-
-    # If model2 is a
 
     # Store these parameters on the Event
     if model1.model_type == 'PSPL microlensing' and model2.model_type == 'Straight line':
