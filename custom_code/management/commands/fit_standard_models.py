@@ -1,7 +1,8 @@
 from django.core.management.base import BaseCommand
 from custom_code.models import Event
 from tom_targets.models import Target
-from custom_code.management.commands import general_fit_functions, data_utils
+from custom_code.management.commands import data_utils
+from custom_code import general_fit_functions
 
 import logging
 
@@ -31,7 +32,7 @@ class Command(BaseCommand):
             # Straight line model fit
             results = general_fit_functions.run_event_straightline_fit(event)
             if len(results['coeffs']) > 0:
-                data_utils.store_event_straightline_model_parameters(event, results)
+                straightline_model = data_utils.store_event_straightline_model_parameters(event, results)
 
             # TO DO: Skew normal model fit
 

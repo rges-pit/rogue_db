@@ -40,29 +40,45 @@ def fit_target(target_pk):
     :returns: (target_pk, target_name_or_None, success, error_message_or_None)
     """
     from tom_targets.models import Target
+    from custom_code.models import Event
     from custom_code.management.commands import data_utils
-    from custom_code import pylima_fit_functions
+    from custom_code import pylima_fit_functions, general_fit_functions, diagnostics
 
     try:
-        mulens = Target.objects.get(pk=target_pk)
+        target = Target.objects.get(pk=target_pk)
+        events = Event.objects.filter(target=target).order_by('-start_time')
     except Target.DoesNotExist:
         return target_pk, None, False, 'Target no longer exists'
 
-    try:
-        pylima_results = pylima_fit_functions.run_fit(mulens, verbose=False)
+    # Straight line model fit to baseline excluding event
+    baseline_results = general_fit_functions.run_baseline_fit(target)
+    data_utils.store_target_diagnostics(target, baseline_results)
 
-        if pylima_results['model_telescope']:
-            data_utils.store_model_lightcurve(mulens, pylima_results['model_telescope'])
-            logger.info('Stored model lightcurve for event ' + mulens.name)
-        else:
-            logger.warning('No valid model fit produced so no model lightcurve for event ' + mulens.name)
+    if events.count() > 0:
+        try:
+            # Straight line model fit
+            straightline_results = general_fit_functions.run_event_straightline_fit(events[0])
+            straightline_model = data_utils.store_event_straightline_model_parameters(events[0], straightline_results)
 
-        data_utils.store_microlensing_model_parameters(mulens, pylima_results)
-        return target_pk, mulens.name, True, None
+            # Fit microlensing models and calculate diagnostics
+            pylima_results = pylima_fit_functions.run_fit(events[0], verbose=False)
+            data_utils.store_model_lightcurves(events[0], pylima_results)
+            pspl_model, fspl_model = data_utils.store_microlensing_model_parameters(
+                events[0], pylima_results
+            )
+            diagnostics.calc_mulens_diagnostics(
+                events[0], pspl_model, fspl_model, straightline_model
+            )
 
-    except Exception as e:
-        logger.exception('Fit failed for event ' + mulens.name)
-        return target_pk, mulens.name, False, str(e)
+            # Fit flare models and calculate diagnostics
+
+            return target_pk, target.name, True, None
+
+        except Exception as e:
+            logger.exception('Fit failed for event ' + target.name)
+            return target_pk, target.name, False, str(e)
+
+    return target_pk, target.name, False, 'No events found for this target'
 
 
 class Command(BaseCommand):
