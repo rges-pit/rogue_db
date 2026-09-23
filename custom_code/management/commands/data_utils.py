@@ -462,6 +462,7 @@ def store_davenportflare_model_parameters(event, results):
                 peak_amplitude_error=results['peak_amplitude_error'],
                 t_FWHM=results['t_FWHM'],
                 t_FWHM_error=results['t_FWHM_error'],
+                red_chisq=results['red_chisq'],
                 chisq=results['chisq'],
                 BIC=results['BIC']
             )
@@ -474,6 +475,7 @@ def store_davenportflare_model_parameters(event, results):
             flare.peak_amplitude_error = results['peak_amplitude_error']
             flare.t_FWHM = results['t_FWHM']
             flare.t_FWHM_error = results['t_FWHM_error']
+            flare.red_chisq = results['red_chisq']
             flare.chisq = results['chisq']
             flare.BIC = results['BIC']
             flare.save()
@@ -511,6 +513,7 @@ def store_pitkinflare_model_parameters(event, results):
                 tau_exponential_decay=results['tau_exponential_decay'],
                 tau_exponential_decay_error=results['tau_exponential_decay_error'],
                 chisq=results['chisq'],
+                red_chisq=results['red_chisq'],
                 BIC=results['BIC']
             )
 
@@ -525,6 +528,7 @@ def store_pitkinflare_model_parameters(event, results):
             flare.tau_exponential_decay = results['tau_exponential_decay']
             flare.tau_exponential_decay_error = results['tau_exponential_decay_error']
             flare.chisq = results['chisq']
+            flare.red_chisq = results['red_chisq']
             flare.BIC = results['BIC']
             flare.save()
 

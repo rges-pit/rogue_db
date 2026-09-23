@@ -2,7 +2,7 @@ from custom_code.management.commands import data_utils
 import logging
 from altaipony.fit_flares import fit_flares, make_flare_table, build_baseline
 from altaipony.fakeflares import flare_model_davenport2014
-from custom_code import utils, pylima_fit_functions
+from custom_code import utils
 import numpy as np
 import emcee
 
@@ -47,10 +47,10 @@ def run_davenport_flare_fit(lcevent):
         flux_lc = baseline + flare_model
         model_lightcurve = np.zeros((len(fit_list[0]['time']),2))
         model_lightcurve[:,0] = fit_list[0]['time']
-        model_lightcurve[:,1] = pylima_fit_functions.flux_to_mag(flux_lc)
+        model_lightcurve[:,1], _, _, _ = utils.flux_to_mag(flux_lc, np.ones(len(flux_lc)))
 
         chi2, red_chi2, bic = calc_goodness_of_flare_fit(
-            flux, flux_err, flux_lc, 3
+            lightcurve, model_lightcurve, 3
         )
 
         # For the sake of compatibility with the rest of the codebase, distill the results
@@ -68,7 +68,7 @@ def run_davenport_flare_fit(lcevent):
 
     return results
 
-def calc_goodness_of_flare_fit(flux, flux_err, flux_lc, nparam):
+def calc_goodness_of_flare_fit(lightcurve, model_lightcurve, nparam):
     """
     Function to calculate the goodness-of-fit parameters chisq, BIC from the
     results of an Altaipony fit
@@ -85,14 +85,10 @@ def calc_goodness_of_flare_fit(flux, flux_err, flux_lc, nparam):
         bic         float   Bayesian Information Criteria
     """
 
-    # Generate the model lightcurve, following Altaipony's method, and convert to magnitudes
-    model_mag, _, _, _ = utils.flux_to_mag(flux_lc, np.ones(len(flux_lc)))
-    data_mag, data_mag_err, _, _ = utils.flux_to_mag(flux, flux_err)
-
-    # Calculate diagnostics
-    chi2 = np.sum((data_mag - model_mag)**2 / (float(len(data_mag)) - float(nparam)))
-    red_chi2 = chi2 / (float(len(data_mag)) - float(nparam))
-    bic = chi2 + float(nparam) * np.log(len(data_mag))
+    ndf = float(len(lightcurve)) - float(nparam)
+    chi2 = np.sum((lightcurve[:,1] - model_lightcurve[:,1])**2 / lightcurve[:,2]**2)
+    red_chi2 = chi2 / ndf
+    bic = chi2 + float(nparam) * np.log(len(lightcurve))
 
     return chi2, red_chi2, bic
 
@@ -134,18 +130,16 @@ def run_pitkin_flare_model_fit(lcevent, nwalkers=50, n_steps=3000, discard=500, 
     sampler.run_mcmc(start_position, n_steps, progress=True)
     samples = sampler.get_chain(discard=discard, thin=thinning_factor, flat=True)
     best_fit = np.median(samples, axis=0)
+    logger.info('Pitkin best fit parameters: ' + repr(best_fit))
 
     # Generate a model lightcurve with these parameters and
     # calculate the chisq, red_chisq and BIC
     flare_model = model_pitkin_flare_lightcurve(lightcurve[:,0], best_fit)
-    baseline = np.zeros(len(lightcurve[:,0]))
-    baseline.fill(best_fit[0])
-    flux_lc = baseline + flare_model
-    model_lightcurve = np.zeros((len(flux_lc),2))
+    model_lightcurve = np.zeros((len(flare_model),2))
     model_lightcurve[:,0] = lightcurve[:,0]
-    model_lightcurve[:,1] = pylima_fit_functions.flux_to_mag(flux_lc)
+    model_lightcurve[:,1], _, _, _ = utils.flux_to_mag(flare_model, np.ones(len(flare_model)))
 
-    chi2, red_chi2, bic = calc_goodness_of_flare_fit(flux, flux_err, flux_lc, 4)
+    chi2, red_chi2, bic = calc_goodness_of_flare_fit(lightcurve, model_lightcurve, 4)
 
     # Build results dictionary for consistency
     # [baseline_flux, t, flux, peak, tau_gaussian_rise, tau_exponential_decay]
@@ -353,5 +347,10 @@ def model_pitkin_flare_lightcurve(time, params):
     # Set declining lightcurve
     if params[5] > 0:
         model_lc[time > params[1]] = params[3] * np.exp(-(time[time > params[1]] - params[1]) / float(params[5]))
+
+    # Add baseline
+    baseline = np.zeros(len(time))
+    baseline.fill(params[0])
+    model_lc += baseline
 
     return model_lc

@@ -257,7 +257,7 @@ class TestFlareFitFunctions(TestCase):
         self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
         self.pitkin_test_params = np.array([
             400, (self.test_event.start_time + self.test_event.duration/2.0),
-            400, 0.003, 0.5, 0.5
+            400, 400, 0.5, 0.5
         ])
 
     def test_fit_flares(self):
@@ -355,6 +355,8 @@ class TestFlareFitFunctions(TestCase):
         flare_model = flare_fit_functions.model_pitkin_flare_lightcurve(
             lightcurve[:, 0], self.pitkin_test_params
         )
+        mag_flare_model, _, _, _ = utils.flux_to_mag(flare_model, np.ones(len(flare_model)))
+        print('MAGS: ', mag_flare_model)
 
         assert(type(flare_model) == type(np.zeros(2)))
         assert(len(flare_model) == len(lightcurve[:, 0]))
