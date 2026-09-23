@@ -70,6 +70,7 @@ def fit_target(target_pk):
             diagnostics.calc_mulens_diagnostics(
                 events[0], pspl_model, fspl_model, straightline_model
             )
+            best_mulens = diagnostics.get_best_mulens_model(pspl_model, fspl_model)
 
             # Fit flare models and calculate diagnostics
             davenport_results = flare_fit_functions.run_davenport_flare_fit(events[0])
@@ -79,9 +80,10 @@ def fit_target(target_pk):
             )
             pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(events[0])
             pitkin_flare = data_utils.store_pitkinflare_model_parameters(
-                event, pitkin_results
+                events[0], pitkin_results
             )
             data_utils.store_model_lightcurve(events[0], pitkin_results, 'pitkin_flare')
+            diagnostics.calc_flare_diagnostics(events[0], best_mulens, davenport_flare, pitkin_flare)
 
             return target_pk, target.name, True, None
 

@@ -30,6 +30,8 @@ class Command(BaseCommand):
             davenport_flare = DavenportFlareModel.objects.filter(event=event)
             pitkin_flare = PitkinFlareModel.objects.filter(event=event)
 
+            if pspl.count() > 0 and fspl.count() > 0:
+                best_mulens = diagnostics.get_best_mulens_model(pspl[0], fspl[0])
             if straight_line.count() > 0 and pspl.count() > 0:
                 diagnostics.compare_model_goodness_of_fit(event, pspl[0], straight_line[0])
             if straight_line.count() > 0 and fspl.count() > 0:
@@ -39,4 +41,6 @@ class Command(BaseCommand):
                 diagnostics.compare_flare_models(event, pspl[0], davenport_flare[0], pitkin_flare[0])
             if fspl.count() > 0 and davenport_flare.count() > 0 and pitkin_flare.count() > 0:
                 diagnostics.compare_flare_models(event, fspl[0], davenport_flare[0], pitkin_flare[0])
+            if best_mulens and davenport_flare.count() > 0 and pitkin_flare.count() > 0:
+                diagnostics.calc_flare_diagnostics(event, best_mulens, davenport_flare[0], pitkin_flare[0])
             logger.info('Stored goodness-of-fit diagnostics for ' + target.name)

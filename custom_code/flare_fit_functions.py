@@ -155,8 +155,38 @@ def run_pitkin_flare_model_fit(lcevent, nwalkers=50, n_steps=3000, discard=500, 
         'red_chisq': red_chi2,
         'chisq': chi2,
         'BIC': bic,
-       'model_lc': model_lightcurve
+        'model_lc': model_lightcurve,
+        'samples': samples
     }
+
+    # Calculate parameter uncertainties
+    results = estimate_pitkin_parameter_uncertainties(results)
+
+    return results
+
+def estimate_pitkin_parameter_uncertainties(results):
+    """
+    Function to estimate the uncertainties on Pitkin flare parameters from the MCMC
+    chain sample.
+
+    Parameters:
+        results  dict   Best fit parameter values
+        samples   array MCMC chains
+
+    Returned:
+        best_fit
+    Each row entry in the MCMC samples corresponds to columns:
+    baseline_flux, t, peak, tau_gaussian_rise, tau_exponential_decay
+    """
+
+    results['t_peak_error'] = 0.5 * (np.percentile(results['samples'][:,1], 84)
+                                      - np.percentile(results['samples'][:,1], 16))
+    results['peak_amplitude_error'] = 0.5 * (np.percentile(results['samples'][:,2], 84)
+                                              - np.percentile(results['samples'][:,2], 16))
+    results['tau_gaussian_rise_error'] = 0.5 * (np.percentile(results['samples'][:,3], 84)
+                                                 - np.percentile(results['samples'][:,3], 16))
+    results['tau_exponential_decay_error'] = 0.5 * (np.percentile(results['samples'][:,4], 84)
+                                                     - np.percentile(results['samples'][:,4], 16))
 
     return results
 
@@ -190,8 +220,8 @@ def pitkin_set_conditions_boundaries(lcevent, flux, nwalkers):
     boundaries = {
         't_bounds': [lcevent.start_time, lcevent.start_time + lcevent.duration],
         'peak_bounds': [0.0001, 100000.0],
-        'tau_gaussian_rise_bounds': [0.0000001, 1.5],
-        'tau_exponential_decay_bounds': [0.0000001, 3.0]
+        'tau_gaussian_rise_bounds': [0.01, 1.5],
+        'tau_exponential_decay_bounds': [0.01, 3.0]
     }
 
     return ndim, start_position, boundaries
@@ -247,6 +277,8 @@ def calc_log_prior(params, t_bounds, peak_bounds,
     """
     The prior function requires that the flare parameter values remain within the
     boundaries set by the user.
+    Follows the approach used by BayesFlare package in requiring tau_gaussian_rise
+    to be less than tau_exponential_decay
 
     Parameters
         params      array           Model parameters (baseline flux parameters + flare parameters)
@@ -284,7 +316,37 @@ def calc_log_prior(params, t_bounds, peak_bounds,
     if not (tau_exponential_decay_bounds[0] < params[5] < tau_exponential_decay_bounds[1]):
         return -np.inf
 
-    return 0.0
+    # Disallow tau_gaussian_rise to exceed tau_exponential_decay
+    if params[4] > params[5]:
+        return -np.inf
+
+    t0prior = -np.log(t_bounds[1] - t_bounds[0])
+
+    ampprior = -np.log(peak_bounds[1] - peak_bounds[0])
+
+    tau_rise_min = tau_gaussian_rise_bounds[0]
+    tau_rise_max = tau_gaussian_rise_bounds[1]
+    tau_drop_min = tau_exponential_decay_bounds[0]
+    tau_drop_max = tau_exponential_decay_bounds[1]
+
+    delta_tau_rise = tau_rise_max - tau_rise_min
+    delta_tau_drop = tau_drop_max - tau_drop_min
+
+    if tau_rise_min <= tau_drop_min and tau_rise_max <= tau_drop_max:
+        parea = delta_tau_drop * delta_tau_rise - 0.5 * (tau_rise_max - tau_drop_min) ** 2
+
+    elif tau_rise_min > tau_drop_min and tau_rise_max > tau_rise_min:
+        parea = 0.5 * (tau_drop_max - tau_rise_min) ** 2
+
+    elif tau_rise_min > tau_drop_min and tau_rise_max < tau_drop_max:
+        parea = 0.5 * delta_tau_rise * ((tau_drop_max - tau_rise_min) + (tau_drop_max - tau_rise_max))
+
+    elif tau_rise_min < tau_drop_min and tau_rise_max > tau_drop_max:
+        parea = 0.5 * delta_tau_drop * ((tau_drop_min - tau_rise_min) + (tau_drop_max - tau_rise_min))
+
+    tauprior = -np.log(parea)
+
+    return (ampprior + t0prior + tauprior)
 
 def calc_log_likelihood(params, time, flux, flux_err):
     """
