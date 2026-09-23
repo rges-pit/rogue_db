@@ -42,7 +42,8 @@ def fit_target(target_pk):
     from tom_targets.models import Target
     from custom_code.models import Event
     from custom_code.management.commands import data_utils
-    from custom_code import pylima_fit_functions, general_fit_functions, diagnostics
+    from custom_code import (pylima_fit_functions, general_fit_functions,
+            diagnostics, flare_fit_functions)
 
     try:
         target = Target.objects.get(pk=target_pk)
@@ -62,15 +63,27 @@ def fit_target(target_pk):
 
             # Fit microlensing models and calculate diagnostics
             pylima_results = pylima_fit_functions.run_fit(events[0], verbose=False)
-            data_utils.store_model_lightcurves(events[0], pylima_results)
+            data_utils.store_pylima_model_lightcurves(events[0], pylima_results)
             pspl_model, fspl_model = data_utils.store_microlensing_model_parameters(
                 events[0], pylima_results
             )
             diagnostics.calc_mulens_diagnostics(
                 events[0], pspl_model, fspl_model, straightline_model
             )
+            best_mulens = diagnostics.get_best_mulens_model(pspl_model, fspl_model)
 
             # Fit flare models and calculate diagnostics
+            davenport_results = flare_fit_functions.run_davenport_flare_fit(events[0])
+            davenport_flare = data_utils.store_davenportflare_model_parameters(events[0], davenport_results)
+            data_utils.store_model_lightcurve(
+                events[0], davenport_results, 'davenport_flare'
+            )
+            pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(events[0])
+            pitkin_flare = data_utils.store_pitkinflare_model_parameters(
+                events[0], pitkin_results
+            )
+            data_utils.store_model_lightcurve(events[0], pitkin_results, 'pitkin_flare')
+            diagnostics.calc_flare_diagnostics(events[0], best_mulens, davenport_flare, pitkin_flare)
 
             return target_pk, target.name, True, None
 

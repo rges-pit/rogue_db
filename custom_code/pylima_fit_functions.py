@@ -27,9 +27,6 @@ def run_fit(lcevent, bandpass=None, verbose=False):
     # Retrieve timeseries photometry from the DB
     datasets = data_utils.get_reduced_data(lcevent, bandpass=bandpass)
 
-    # Fit configuration
-    use_boundaries = True
-
     # Initialize the new event to be fitted:
     current_event = event.Event(ra=lcevent.target.ra, dec=lcevent.target.dec)
     current_event.name = lcevent.target.name

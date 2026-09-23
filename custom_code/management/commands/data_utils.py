@@ -155,10 +155,12 @@ def extract_photometry_from_dataset(datasets, dataset_id, emag_limit=None):
 def get_model_types_list():
     return {
         'pspl': 'PSPL microlensing',
-        'fspl': 'FSPL microlensing'
+        'fspl': 'FSPL microlensing',
+        'davenport_flare': 'Davenport flare',
+        'pitkin_flare': 'Pitkin flare'
     }
 
-def store_model_lightcurves(event, pyLIMA_results):
+def store_pylima_model_lightcurves(event, pyLIMA_results):
     """Function to store in the TOM the timeseries lightcurves corresponding to fitted
     PSPL and FSPL models.
     The input is a model fit object from PyLIMA.
@@ -213,6 +215,54 @@ def store_model_lightcurves(event, pyLIMA_results):
                 logger.info('No model ' + model_type + ' lightcurve to store for ' + event.target.name)
 
     return event
+
+def store_model_lightcurve(event, results, model_type):
+    """
+    Function to store a generic model lightcurve as a ReducedDatum
+
+    Parameters:
+        event   Event
+        results dict    Must have item 'model_lc': np.array with columns time, mag
+        model_type  str  key word to select the correct model type
+    """
+
+    model_time = datetime.now(UTC)
+
+    # Map array -> database keywords
+    model_types_list = get_model_types_list()
+
+    data = {
+        'lc_model_time': results['model_lc'][:,0].tolist(),
+        'lc_model_magnitude': results['model_lc'][:,1].tolist()
+    }
+
+    # If there is no existing model for this target, create one
+    data_type = 'lc_model_' + str(event.event_id) + '_' + model_types_list[model_type]
+    qs = ReducedDatum.objects.filter(target=event.target, data_type=data_type)
+
+    if qs.count() == 0:
+        rd = ReducedDatum.objects.create(
+            timestamp=model_time,
+            value=data,
+            source_name='RogueDB',
+            source_location=event.target.name,
+            data_type=data_type,
+            target=event.target
+        )
+        logger.info('Created ' + model_type + ' lightcurve model datum for ' + event.target.name)
+
+    # If there is a pre-existing model, update it
+    else:
+        rd = qs[0]
+        rd.timestamp = model_time
+        rd.value = data
+        rd.source_name = 'RogueDB'
+        rd.source_location = event.target.name
+        rd.data_type = data_type
+        rd.target = event.target
+        rd.save()
+        logger.info('Updated existing ' + model_type + ' lightcurve model datum for ' + event.target.name)
+
 
 def store_microlensing_model_parameters(event, pylima_results):
     """Function to store the fitted model parameters in the TOM"""
@@ -395,38 +445,47 @@ def store_davenportflare_model_parameters(event, results):
     This function stores the first entry in the list of fitted flares
     """
 
-    qs = DavenportFlareModel.objects.filter(
-        event=event,
-        model_type='Davenport flare'
-    )
+    if len(results) > 0:
 
-    if qs.count() == 0:
-        DavenportFlareModel.objects.create(
+        qs = DavenportFlareModel.objects.filter(
             event=event,
-            model_type='Davenport flare',
-            t_peak=results['t_peak'],
-            t_peak_error=results['t_peak_error'],
-            peak_amplitude=results['peak_amplitude'],
-            peak_amplitude_error=results['peak_amplitude_error'],
-            t_FWHM=results['t_FWHM'],
-            t_FWHM_error=results['t_FWHM_error'],
-            chisq=results['chisq'],
-            BIC=results['BIC']
+            model_type='Davenport flare'
         )
 
-    else:
-        flare = qs[0]
-        flare.t_peak = results['t_peak']
-        flare.t_peak_error = results['t_peak_error']
-        flare.peak_amplitude = results['peak_amplitude']
-        flare.peak_amplitude_error = results['peak_amplitude_error']
-        flare.t_FWHM = results['t_FWHM']
-        flare.t_FWHM_error = results['t_FWHM_error']
-        flare.chisq = results['chisq']
-        flare.BIC = results['BIC']
-        flare.save()
+        if qs.count() == 0:
+            flare = DavenportFlareModel.objects.create(
+                event=event,
+                model_type='Davenport flare',
+                t_peak=results['t_peak'],
+                t_peak_error=results['t_peak_error'],
+                peak_amplitude=results['peak_amplitude'],
+                peak_amplitude_error=results['peak_amplitude_error'],
+                t_FWHM=results['t_FWHM'],
+                t_FWHM_error=results['t_FWHM_error'],
+                red_chisq=results['red_chisq'],
+                chisq=results['chisq'],
+                BIC=results['BIC']
+            )
 
-    logger.info('Stored Davenport flare model parameters for event ' + event.target.name)
+        else:
+            flare = qs[0]
+            flare.t_peak = results['t_peak']
+            flare.t_peak_error = results['t_peak_error']
+            flare.peak_amplitude = results['peak_amplitude']
+            flare.peak_amplitude_error = results['peak_amplitude_error']
+            flare.t_FWHM = results['t_FWHM']
+            flare.t_FWHM_error = results['t_FWHM_error']
+            flare.red_chisq = results['red_chisq']
+            flare.chisq = results['chisq']
+            flare.BIC = results['BIC']
+            flare.save()
+
+        logger.info('Stored Davenport flare model parameters for event ' + event.target.name)
+
+    else:
+        flare = None
+
+    return flare
 
 def store_pitkinflare_model_parameters(event, results):
     """
@@ -435,42 +494,50 @@ def store_pitkinflare_model_parameters(event, results):
     This function stores the first entry in the list of fitted flares
     """
 
-    qs = PitkinFlareModel.objects.filter(
-        event=event,
-        model_type='Pitkin flare'
-    )
-
-    if qs.count() == 0:
-        PitkinFlareModel.objects.create(
+    if len(results) > 0:
+        qs = PitkinFlareModel.objects.filter(
             event=event,
-            model_type='Pitkin flare',
-            t_peak=results['t_peak'],
-            t_peak_error=results['t_peak_error'],
-            peak_amplitude=results['peak_amplitude'],
-            peak_amplitude_error=results['peak_amplitude_error'],
-            tau_gaussian_rise=results['tau_gaussian_rise'],
-            tau_gaussian_rise_error=results['tau_gaussian_rise_error'],
-            tau_exponential_decay=results['tau_exponential_decay'],
-            tau_exponential_decay_error=results['tau_exponential_decay_error'],
-            chisq=results['chisq'],
-            BIC=results['BIC']
+            model_type='Pitkin flare'
         )
 
-    else:
-        flare = qs[0]
-        flare.t_peak = results['t_peak']
-        flare.t_peak_error = results['t_peak_error']
-        flare.peak_amplitude = results['amplitude']
-        flare.peak_amplitude_error = results['amplitude_error']
-        flare.tau_gaussian_rise = results['tau_gaussian_rise']
-        flare.tau_gaussian_rise_error = results['tau_gaussian_rise_error']
-        flare.tau_exponential_decay = results['tau_exponential_decay']
-        flare.tau_exponential_decay_error = results['tau_exponential_decay_error']
-        flare.chisq = results['chisq']
-        flare.BIC = results['BIC']
-        flare.save()
+        if qs.count() == 0:
+            flare = PitkinFlareModel.objects.create(
+                event=event,
+                model_type='Pitkin flare',
+                t_peak=results['t_peak'],
+                t_peak_error=results['t_peak_error'],
+                peak_amplitude=results['peak_amplitude'],
+                peak_amplitude_error=results['peak_amplitude_error'],
+                tau_gaussian_rise=results['tau_gaussian_rise'],
+                tau_gaussian_rise_error=results['tau_gaussian_rise_error'],
+                tau_exponential_decay=results['tau_exponential_decay'],
+                tau_exponential_decay_error=results['tau_exponential_decay_error'],
+                chisq=results['chisq'],
+                red_chisq=results['red_chisq'],
+                BIC=results['BIC']
+            )
 
-    logger.info('Stored Pitkin flare model parameters for event ' + event.target.name)
+        else:
+            flare = qs[0]
+            flare.t_peak = results['t_peak']
+            flare.t_peak_error = results['t_peak_error']
+            flare.peak_amplitude = results['peak_amplitude']
+            flare.peak_amplitude_error = results['peak_amplitude_error']
+            flare.tau_gaussian_rise = results['tau_gaussian_rise']
+            flare.tau_gaussian_rise_error = results['tau_gaussian_rise_error']
+            flare.tau_exponential_decay = results['tau_exponential_decay']
+            flare.tau_exponential_decay_error = results['tau_exponential_decay_error']
+            flare.chisq = results['chisq']
+            flare.red_chisq = results['red_chisq']
+            flare.BIC = results['BIC']
+            flare.save()
+
+        logger.info('Stored Pitkin flare model parameters for event ' + event.target.name)
+
+    else:
+        flare = None
+
+    return flare
 
 def store_target_diagnostics(target, results):
     """Function to store the results of analysing the target's baseline data"""

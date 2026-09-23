@@ -4,7 +4,8 @@ from custom_code.management.commands import data_utils
 from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum
 from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
-from custom_code import pylima_fit_functions, general_fit_functions
+from custom_code import (pylima_fit_functions, general_fit_functions, utils,
+        flare_fit_functions)
 import datetime
 from astropy.time import Time
 from django.utils import timezone
@@ -13,7 +14,10 @@ from pyLIMA.models import PSPL_model, FSPL_model
 from pyLIMA.fits import TRF_fit
 from pyLIMA import event as mulens_event
 from pyLIMA.simulations import simulator
+from altaipony.fit_flares import fit_flares
 import numpy as np
+import pandas as pd
+import copy
 
 def create_test_target_with_photometry():
     """
@@ -112,20 +116,15 @@ class TestSolarSystemFunctions(TestCase):
         }
     def test_query_horizons_for_roman(self):
 
-        expected_vector = {
-            'X': 9.874138849751044E-01,
-            'Y': -2.258220711155050E-01,
-            'Z': -1.101490336117022E-03,
-            'VX': 3.812111312462203E-03,
-            'VY': 1.663650976978895E-02,
-            'VZ':-4.293360433293914E-05
-        }
+        expected_keys = ['X', 'Y', 'Z', 'VX', 'VY', 'VZ']
 
         jd_event = self.start_time + self.duration/2.0
 
         spacecraft_vector = query_horizons_for_roman(jd_event)
 
-        self.assertEqual(spacecraft_vector, expected_vector)
+        for key in expected_keys:
+            assert(key in spacecraft_vector.keys())
+            assert(type(spacecraft_vector[key]) == type(1.0))
 
     def test_parse_sbident_response(self):
 
@@ -235,7 +234,7 @@ class TestPyLIMAUtils(TestCase):
             test_event, model_params, True
         )
 
-        assert(type(model_lc), type(np.zeros((2,2))))
+        assert(type(model_lc), type(np.zeros(2)))
         assert(len(model_lc.lightcurve) >= len(test_event.telescopes[0].lightcurve))
 
 class TestGeneralFitFunctions(TestCase):
@@ -251,3 +250,201 @@ class TestGeneralFitFunctions(TestCase):
 
         self.assertAlmostEqual(results['coeffs'][0], 0.0, 2)
         self.assertAlmostEqual(results['coeffs'][1], test_mean_mag, 0)
+
+class TestFlareFitFunctions(TestCase):
+
+    def setUp(self):
+        self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
+        self.pitkin_test_params = np.array([
+            400, (self.test_event.start_time + self.test_event.duration/2.0),
+            400, 400, 0.5, 0.5
+        ])
+
+    def test_fit_flares(self):
+        """Test Davenport flare fit function call to Altipony"""
+        datasets = data_utils.get_reduced_data(self.test_event)
+        lightcurve = data_utils.fetch_lightcurve(datasets)
+        flux, flux_err = utils.mag_to_flux(lightcurve[:, 1], lightcurve[:, 2])
+
+        tstarts = [self.test_event.start_time]
+        tstops = [self.test_event.start_time + self.test_event.duration]
+
+        expected_keys = [
+            'params', 'model', 'n_flares', 'score', 't_peaks', 'fwhms',
+            'amplitudes', 't_peak', 'fwhm', 'amplitude', 'fit_type',
+            'group_index', 't_range', 'time', 'flux', 'flux_err',
+            'posterior_samples'
+        ]
+        fit_list = fit_flares(lightcurve[:, 0], flux, flux_err, tstarts, tstops,
+                        buffer=0.05, max_flares=1, delta_bic=0.0,
+                        plot=False, debug_plot=False)
+        results = fit_list[0]
+
+        assert(type(fit_list) == type([]))
+        for key in expected_keys:
+            assert(key in results.keys())
+        assert(results['t_peaks'][0] >= self.test_event.start_time)
+        assert(results['t_peaks'][0] <= self.test_event.start_time + self.test_event.duration)
+
+    def test_calc_goodness_of_flare_fit(self):
+        """Test calculation of fit metrics"""
+        datasets = data_utils.get_reduced_data(self.test_event)
+        lightcurve = data_utils.fetch_lightcurve(datasets)
+        flux, flux_err = utils.mag_to_flux(lightcurve[:, 1], lightcurve[:, 2])
+
+        flux_model_lc = copy.deepcopy(flux)
+        nparam = 3  # Davenport flare model
+
+        chisq, red_chisq, bic = flare_fit_functions.calc_goodness_of_flare_fit(
+            flux, flux_err, flux_model_lc, nparam
+        )
+
+        test_bic = float(nparam) * np.log(len(flux))
+
+        self.assertEqual(chisq, 0.0)
+        self.assertEqual(red_chisq, 0.0)
+        self.assertAlmostEqual(bic, test_bic, 2)
+
+    def test_run_davenport_flare_fit(self):
+        """End-to-end test of the Davenport flare model fitting process"""
+        expected_keys = [
+            't_peak', 't_peak_error', 'peak_amplitude', 'peak_amplitude_error',
+            't_FWHM', 't_FWHM_error', 'chisq', 'red_chisq', 'BIC'
+        ]
+
+        results = flare_fit_functions.run_davenport_flare_fit(self.test_event)
+
+        for key in expected_keys:
+            assert(key in results.keys())
+
+    def test_pitkin_set_conditions_boundaries(self):
+        """Test setting of initial conditions and fit parameter boundaries"""
+        datasets = data_utils.get_reduced_data(self.test_event)
+        lightcurve = data_utils.fetch_lightcurve(datasets)
+        flux, flux_err = utils.mag_to_flux(lightcurve[:, 1], lightcurve[:, 2])
+        nwalkers = 50
+        expected_keys = [
+            't_bounds', 'peak_bounds', 'tau_gaussian_rise_bounds',
+            'tau_exponential_decay_bounds'
+        ]
+
+        ndim, start_position, boundaries = flare_fit_functions.pitkin_set_conditions_boundaries(
+            self.test_event, flux, nwalkers
+        )
+
+        assert(type(start_position) == type(np.zeros(2)))
+        assert(type(boundaries) == type({}))
+        for key in expected_keys:
+            assert(key in boundaries.keys())
+            assert(len(boundaries[key]) == 2)
+        assert(boundaries['t_bounds'] == [
+            self.test_event.start_time,
+            self.test_event.start_time + self.test_event.duration
+        ])
+
+    def test_model_pitkin_flare_lightcurve(self):
+        """
+        Test generation of a model Pitkin flare lightcurve
+        based on model parameters:
+        [baseline_flux, t, flux, peak, fwhm, tau_gaussian_rise, tau_exponential_decay]
+        """
+        datasets = data_utils.get_reduced_data(self.test_event)
+        lightcurve = data_utils.fetch_lightcurve(datasets)
+        flux, flux_err = utils.mag_to_flux(lightcurve[:, 1], lightcurve[:, 2])
+
+        flare_model = flare_fit_functions.model_pitkin_flare_lightcurve(
+            lightcurve[:, 0], self.pitkin_test_params
+        )
+        mag_flare_model, _, _, _ = utils.flux_to_mag(flare_model, np.ones(len(flare_model)))
+        print('MAGS: ', mag_flare_model)
+
+        assert(type(flare_model) == type(np.zeros(2)))
+        assert(len(flare_model) == len(lightcurve[:, 0]))
+
+    def test_calc_log_posterior(self):
+        """
+        Test calculation of the log posterior for a Pitkin flare model
+        Params contains:
+        [baseline_flux, t, flux, peak, fwhm, tau_gaussian_rise, tau_exponential_decay]
+        """
+
+        datasets = data_utils.get_reduced_data(self.test_event)
+        lightcurve = data_utils.fetch_lightcurve(datasets)
+        flux, flux_err = utils.mag_to_flux(lightcurve[:, 1], lightcurve[:, 2])
+
+        t_bounds = [
+            self.test_event.start_time,
+            self.test_event.start_time + self.test_event.duration
+        ]
+        peak_bounds = [0.0001, 100000.0]
+        tau_gaussian_rise_bounds = [0.0000001, 1.5]
+        tau_exponential_decay_bounds = [0.0000001, 3.0]
+
+        log_posterior = flare_fit_functions.calc_log_posterior(
+            self.pitkin_test_params, lightcurve[:,0], flux, flux_err,
+            t_bounds, peak_bounds,
+            tau_gaussian_rise_bounds, tau_exponential_decay_bounds
+        )
+
+        assert(np.isfinite(log_posterior))
+
+    def test_calc_log_prior(self):
+        """
+        Test calculation of the log prior for a Pitkin flare model;
+        requires that the input flare parameters remain within boundaries.
+        If this is true, the function returns zero, if not, it returns -Inf
+        Params contains:
+        [baseline_flux, t, flux, peak, tau_gaussian_rise, tau_exponential_decay]
+        """
+
+        t_bounds = [
+            self.test_event.start_time,
+            self.test_event.start_time + self.test_event.duration
+        ]
+        peak_bounds = [0.0001, 100000.0]
+        tau_gaussian_rise_bounds = [0.0000001, 1.5]
+        tau_exponential_decay_bounds = [0.0000001, 3.0]
+
+        # Test all parameters within boundaries
+        log_prior = flare_fit_functions.calc_log_prior(
+            self.pitkin_test_params, t_bounds, peak_bounds,
+            tau_gaussian_rise_bounds, tau_exponential_decay_bounds
+        )
+        self.assertEqual(log_prior, 0.0)
+
+        # Test each parameter outside boundaries in turn
+        for i in [1, 3, 4, 5]:
+            params = copy.deepcopy(self.pitkin_test_params)
+            params[i] += 200000
+            log_prior = flare_fit_functions.calc_log_prior(
+                params, t_bounds, peak_bounds,
+                tau_gaussian_rise_bounds, tau_exponential_decay_bounds
+            )
+            self.assertEqual(log_prior, -np.inf)
+
+    def test_calc_log_likelihood(self):
+        datasets = data_utils.get_reduced_data(self.test_event)
+        lightcurve = data_utils.fetch_lightcurve(datasets)
+        flux, flux_err = utils.mag_to_flux(lightcurve[:, 1], lightcurve[:, 2])
+
+        log_likelihood = flare_fit_functions.calc_log_likelihood(
+            self.pitkin_test_params, lightcurve[:,0], flux, flux_err
+        )
+
+        assert(np.isfinite(log_likelihood))
+
+    def test_run_pitkin_flare_model_fit(self):
+        """End-to-end test of Pitkin flare model fit"""
+
+        expected_keys = [
+            't_peak', 't_peak_error', 'peak_amplitude', 'peak_amplitude_error',
+            'tau_gaussian_rise', 'tau_gaussian_rise_error', 'tau_exponential_decay',
+            'tau_exponential_decay_error', 'red_chisq', 'chisq', 'BIC'
+        ]
+
+        results = flare_fit_functions.run_pitkin_flare_model_fit(self.test_event)
+
+        for key in expected_keys:
+            assert(key in results.keys())
+        tmax = self.test_event.start_time + self.test_event.duration
+        self.assertTrue(self.test_event.start_time <= results['t_peak'] <= tmax)

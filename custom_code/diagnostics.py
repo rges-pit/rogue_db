@@ -9,6 +9,32 @@ def calc_mulens_diagnostics(event, pspl_model, fspl_model, straightline_model):
     if fspl_model and straightline_model:
         compare_model_goodness_of_fit(event, fspl_model, straightline_model)
 
+def get_best_mulens_model(pspl_model, fspl_model):
+    """
+    Function returns the microlensing model with the lowest reduced chisq.
+    """
+
+    if pspl_model and fspl_model:
+        if pspl_model.red_chisq <= fspl_model.red_chisq:
+            best_model = pspl_model
+        else:
+            best_model = fspl_model
+    else:
+        best_model = None
+
+    return best_model
+
+def calc_flare_diagnostics(event, best_mulens, davenport_model, pitkin_model):
+    """
+    Function to compare the flare model fits with the best fitting microlensing model
+    """
+
+    if best_mulens and davenport_model:
+        compare_model_goodness_of_fit(event, best_mulens, davenport_model)
+
+    if best_mulens and pitkin_model:
+        compare_model_goodness_of_fit(event, best_mulens, pitkin_model)
+
 def compare_model_goodness_of_fit(event, model1, model2):
     """
     Function to compare the goodness-of-fit parameters for the two models given.
