@@ -34,6 +34,7 @@ def generate_event_lightcurves(event):
         )
         ax.set_xlabel('JD-' + str(dt) + ' [days]')
         ax.set_ylabel('Mag [' + bandpass + ']')
+        ax.set_yinverted(True)
 
         # Render to an in-memory buffer rather than a literal path, so the
         # write goes through Event.thumbnail's storage backend (local disk
