@@ -17,7 +17,6 @@
 
     {% block alert_table_content %}
     <hr>
-    {# Search form (we refer to this id="filter-form" in the RGESAlertTable.Meta.attrs) #}
     <form id="filter-form" class="mb-3"
       hx-get="{% url 'candidates:list' %}"
       hx-target="div.table-container"
@@ -26,10 +25,7 @@
         {% crispy filter.form %}
     </form>
 
-    {# Progress indicator -- "progress" keeps matching the hx-indicator=".progress"
-       selector used by the search form above and by every HTMXTable's own sort/
-       pagination controls; "htmx-indicator" is what actually makes it show/hide
-       (via htmx's own injected CSS keyed on the htmx-request class it toggles). #}
+    {# Progress indicator #}
     <div class="progress htmx-indicator text-center my-4">
         <div class="spinner-border" role="status">
             <span class="visually-hidden">Loading...</span>
