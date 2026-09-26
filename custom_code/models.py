@@ -36,6 +36,8 @@ class Event(models.Model):
     angular_separation_moving_object = models.FloatField(null=True, blank=True)
     max_peak_periodogram = models.FloatField(null=True, blank=True)
     period = models.FloatField(null=True, blank=True)
+    frac_below_baseline = models.FloatField(null=True, blank=True)
+    max_excursion_below_baseline = models.FloatField(null=True, blank=True)
     thumbnail = models.ImageField(upload_to='event_thumbnails/%Y/%m/%d/', null=True, blank=True)
 
 class RGESAlert(models.Model):
@@ -203,6 +205,7 @@ class EventModel(models.Model):
         davenport_flare = 'Davenport flare', 'Davenport flare'
         pitkin_flare = 'Pitkin flare', 'Pitkin flare'
         straightline = 'Straight line', 'Straight line'
+        baseline = 'Baseline', 'Baseline'
         unknown = 'Unknown', 'Unknown'
 
     event = models.ForeignKey(
@@ -346,6 +349,7 @@ MODEL_TYPE_CLASSES = {
     EventModel.ModelTypes.davenport_flare: DavenportFlareModel,
     EventModel.ModelTypes.pitkin_flare: PitkinFlareModel,
     EventModel.ModelTypes.straightline: StraightLineModel,
+    EventModel.ModelTypes.baseline: StraightLineModel,
 }
 
 class VariableStar(models.Model):

@@ -1,10 +1,17 @@
 
 <ul class="nav nav-pills flex-column mt-3" role="tablist" id="tabs">
+    <li class="nav-item">
+      <a class="nav-link" href="#" hx-get="{% url 'events:alerts' %}?event={{event.pk}}"
+         hx-target="#event-model-parameters-container" hx-swap="innerHTML"
+         hx-indicator="#event-model-parameters-progress"
+         onclick="showEventAlerts()">Alerts</a>
+    </li>
 {% for model in models %}
       <li class="nav-item">
         <a class="nav-link" href="#" hx-get="{% url 'eventmodels:parameters' %}?model={{model.pk}}"
            hx-target="#event-model-parameters-container" hx-swap="innerHTML"
-           hx-indicator="#event-model-parameters-progress">{{model.model_type}}</a>
+           hx-indicator="#event-model-parameters-progress"
+           onclick="showEventModelParameters()">{{model.model_type}}</a>
       </li>
     {% empty %}
     <li class="nav-item">

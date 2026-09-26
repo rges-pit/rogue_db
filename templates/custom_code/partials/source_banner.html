@@ -30,6 +30,8 @@
         <h6 style="color: var(--warning)">
         Nearby known flare star: {{ target.nearest_flare_star }}<br/>
         Separation: {{ flare_separation_arcsec|floatformat:4 }} arcsec
+        {% else %}
+        <h6 style="color: var(--warning)">No known flare star nearby</h6>
         </h6>
     {% endif %}
     {% if target.nearest_variable_star|length > 0 %}
@@ -38,6 +40,8 @@
         Separation: {{ variable_separation_arcsec|floatformat:4 }} arcsec<br/>
         Type: {{ target.nearest_variable_type }}
         </h6>
+        {% else %}
+        <h6 style="color: var(--warning)">No known variable star nearby</h6>
     {% endif %}
   </div>
 </div>

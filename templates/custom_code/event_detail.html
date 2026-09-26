@@ -19,102 +19,147 @@
   <div class="col-lg">
     <div class="row">
       <div class="col-lg dashboard-panel">
-        <div class="event-table-container">
-          <table class="event-table">
-              <thead>
-              <tr>
-                <th>Start time [JD]</th>
-                <th>Duration [d]</th>
-                <th>Coverage fraction</th>
-                <th>Symmetry</th>
-                <th>Time to second peak [d]</th>
-                <th>Second peak mag</th>
-                <th>N points above 3&sigma;</th>
-              </tr>
-              </thead>
-            <tbody>
-            <tr>
-              <td>{{event.start_time|floatformat:3}}</td>
-              <td>{{event.duration|floatformat:5}}</td>
-              <td>{{event.coverage_fraction|floatformat:2}}</td>
-              <td>{{event.symmetry|floatformat:2}}</td>
-              <td>{{event.time_to_second_peak|floatformat:2}}</td>
-              <td>{{event.second_peak_mag|floatformat:2}}</td>
-              <td>{{event.Npoint_above_3sigma|floatformat:2}}</td>
-            </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="event-table-container">
-          <table class="event-table">
-            <thead>
-            <tr>
-              <th>Nearest moving object</th>
-              <th>Separation moving object [arcsec]</th>
-              <th>N linked events</th>
-              <th>Max peak periodogram</th>
-              <th>Period [d]</th>
-              <th>DIA centroid shift</th>
-              <th>PSF centroid shift</th>
-            </tr>
-            </thead>
-            <tbody>
-            <tr>
-              <td>{{event.nearest_moving_object}}</td>
-              <td>{{event.angular_separation_moving_object|floatformat:2}}</td>
-              <td>{{event.Nlinked_events}}</td>
-              <td>{{event.max_peak_periodogram|floatformat:2}}</td>
-              <td>{{event.period|floatformat:3}}</td>
-              <td>{{event.DIA_centroid_shift|floatformat:3}}</td>
-              <td>{{event.PSF_centroid_shift|floatformat:3}}</td>
-            </tr>
-            </tbody>
-          </table>
-          </div>
-          <div class="event-table-container">
-            <table class="event-table">
-            <thead>
-            <tr>
-              <th>&Delta; &chi;<sup>2</sup> PSPL</th>
-              <th>&Delta; BIC<sup>2</sup> PSPL</th>
-              <th>&Delta; &chi;<sup>2</sup> FSPL</th>
-              <th>&Delta; BIC<sup>2</sup> FSPL</th>
-              <th>&Delta; &chi;<sup>2</sup> PSPL best flare</th>
-              <th>&Delta; &chi;<sup>2</sup> FSPL best flare</th>
-            </tr>
-            </thead>
-              <tbody>
-              <tr>
-                <td>{{event.delta_chi2_PSPL|floatformat:3}}</td>
-                <td>{{event.delta_BIC_PSPL|floatformat:3}}</td>
-                <td>{{event.delta_chi2_FSPL|floatformat:3}}</td>
-                <td>{{event.delta_BIC_FSPL|floatformat:3}}</td>
-                <td>{{event.delta_chi2_PSPL_bestflare|floatformat:3}}</td>
-                <td>{{event.delta_BIC_PSPL_bestflare|floatformat:3}}</td>
-              </tr>
-              </tbody>
-          </table>
+        <div class="event-params-panel">
+          <div class="event-params-group">
+            <div class="event-params-label">Event Parameters</div>
+            <div class="event-params-grid">
+              <div class="event-params-cell">
+                <div class="event-params-key">Start time [JD]</div>
+                <div class="event-params-value">{{event.start_time|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Duration [d]</div>
+                <div class="event-params-value">{{event.duration|floatformat:5}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Coverage fraction</div>
+                <div class="event-params-value">{{event.coverage_fraction|floatformat:2}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Symmetry</div>
+                <div class="event-params-value">{{event.symmetry|floatformat:2}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Time to 2nd peak [d]</div>
+                <div class="event-params-value">{{event.time_to_second_peak|floatformat:2}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">2nd peak mag</div>
+                <div class="event-params-value">{{event.second_peak_mag|floatformat:2}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">N &gt; 3&sigma;</div>
+                <div class="event-params-value">{{event.Npoint_above_3sigma|floatformat:2}}</div>
+              </div>
             </div>
+          </div>
+
+          <div class="event-params-group">
+            <div class="event-params-grid">
+              <div class="event-params-cell">
+                <div class="event-params-key">Nearest moving obj.</div>
+                <div class="event-params-value">{{event.nearest_moving_object}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Sep. moving obj. [&Prime;]</div>
+                <div class="event-params-value">{{event.angular_separation_moving_object|floatformat:2}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">N linked events</div>
+                <div class="event-params-value">{{event.Nlinked_events}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Max peak periodogram</div>
+                <div class="event-params-value">{{event.max_peak_periodogram|floatformat:2}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Period [d]</div>
+                <div class="event-params-value">{{event.period|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">DIA centroid shift</div>
+                <div class="event-params-value">{{event.DIA_centroid_shift|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">PSF centroid shift</div>
+                <div class="event-params-value">{{event.PSF_centroid_shift|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Frac below baseline</div>
+                <div class="event-params-value">{{event.frac_below_baseline|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Max below baseline</div>
+                <div class="event-params-value">{{event.max_excursion_below_baseline|floatformat:3}}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="event-params-group">
+            <div class="event-params-grid">
+              <div class="event-params-cell">
+                <div class="event-params-key">&Delta;&chi;&sup2; PSPL</div>
+                <div class="event-params-value">{{event.delta_chi2_PSPL|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">&Delta;BIC PSPL</div>
+                <div class="event-params-value">{{event.delta_BIC_PSPL|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">&Delta;&chi;&sup2; FSPL</div>
+                <div class="event-params-value">{{event.delta_chi2_FSPL|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">&Delta;BIC FSPL</div>
+                <div class="event-params-value">{{event.delta_BIC_FSPL|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">&Delta;&chi;&sup2; PSPL best flare</div>
+                <div class="event-params-value">{{event.delta_chi2_PSPL_bestflare|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">&Delta;&chi;&sup2; FSPL best flare</div>
+                <div class="event-params-value">{{event.delta_chi2_FSPL_bestflare|floatformat:3}}</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="row">
-        <div class="col-md dashboard-panel">
+        <div class="col-md dashboard-panel" id="event-model-parameters-col">
           <div class="htmx-indicator text-center my-4" id="event-model-parameters-progress">
             <div class="spinner-border" role="status">
               <span class="visually-hidden">Loading...</span>
             </div>
-            <p class="mt-2">Loading model parameters&hellip;</p>
+            <p class="mt-2">Loading&hellip;</p>
           </div>
           <div id="event-model-parameters-container" class="mt-3">
-            <p>Click a model type to see its fit parameters.</p>
+            <p>Click Alerts or a model type to see its details.</p>
           </div>
         </div>
 
-        <div class="col-md dashboard-panel">
+        <div class="col-md dashboard-panel" id="event-lightcurve-col">
           {% photometry_event event %}
         </div>
       </div>
     </div>
 </div>
+
+<script>
+  // Alerts have too many columns to share the row with the lightcurve plot,
+  // so its button expands #event-model-parameters-col to the full row width
+  // and hides the plot column; every other (model) button restores the
+  // normal side-by-side layout.
+  function showEventAlerts() {
+    document.getElementById('event-lightcurve-col').classList.add('d-none');
+    document.getElementById('event-model-parameters-col').classList.remove('col-md');
+    document.getElementById('event-model-parameters-col').classList.add('col-12');
+  }
+  function showEventModelParameters() {
+    document.getElementById('event-lightcurve-col').classList.remove('d-none');
+    document.getElementById('event-model-parameters-col').classList.remove('col-12');
+    document.getElementById('event-model-parameters-col').classList.add('col-md');
+  }
+</script>
 
 {% endblock %}

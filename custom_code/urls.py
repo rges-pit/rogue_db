@@ -5,7 +5,7 @@ from .views import (
     EventModelListView, EventModelParametersView,
     PSPLModelCreateView, FSPLModelCreateView, WideBoundPlanetModelCreateView,
     DavenportFlareModelCreateView, PitkinFlareModelCreateView,
-    TargetCutfileView, EventListView, TargetEventListView, EventDetailView,
+    TargetCutfileView, EventListView, TargetEventListView, EventDetailView, EventAlertsView,
     TargetPhotometryTabView, TargetPhotometryPlotView, TargetPhotometryDataView,
 )
 
@@ -31,6 +31,7 @@ cutfiles_urlpatterns = [
 events_urlpatterns = [
     path('', EventListView.as_view(), name='list'),
     path('for-target/', TargetEventListView.as_view(), name='for-target'),
+    path('alerts/', EventAlertsView.as_view(), name='alerts'),
     path('<int:pk>/', EventDetailView.as_view(), name='detail'),
 ]
 

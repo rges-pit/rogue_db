@@ -170,6 +170,82 @@ li {
   background-color: var(--panel-dark);
 }
 
+/* Bootstrap flex columns default to min-width:auto, so a child wider than
+   the column (e.g. the wide alerts table swapped into
+   #event-model-parameters-container) grows the column itself instead of
+   scrolling within it -- pushing/squeezing the sibling column (the
+   lightcurve plot) sideways. min-width:0 lets .table-responsive's own
+   overflow-x:auto contain the wide content instead. Scoped to this specific
+   column (not the shared .dashboard-panel class) -- applied broadly it also
+   stripped the *other* dashboard panels' protective min-width:auto, letting
+   the compact event-parameters panel collapse to zero width whenever its
+   sibling row (model params + lightcurve) wanted more space than was
+   available, since it has flex-basis:0% and flex-shrink:0 (Bootstrap's
+   .col-lg) with nothing left to floor it at. */
+#event-model-parameters-col {
+  min-width: 0;
+}
+
+/* Compact label/value grid for the event parameter tables at the top of
+   EventDetailView -- replaces three separate bordered <table>s (one row of
+   many columns each) with grouped stat cells, so the same parameter count
+   fits in roughly the same vertical space without the repeated table chrome. */
+.event-params-panel {
+  padding: 16px 20px;
+}
+
+.event-params-group + .event-params-group {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.event-params-label {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--rges-purple-light);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.event-params-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  column-gap: 12px;
+  row-gap: 6px;
+}
+
+.event-params-cell {
+  min-width: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 4px;
+}
+
+/* Spans the full grid width so the cell sits alone on its own row --
+   used for blend parameters, which can hold several sub-values and reads
+   better as one wide line at the end of the table than sharing a column. */
+.event-params-cell--full {
+  grid-column: 1 / -1;
+}
+
+.event-params-key {
+  font-size: 12px;
+  color: #adadad;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.event-params-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  margin-top: 1px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .table {
   border-radius: var(--bs-border-radius);
   overflow: hidden;
