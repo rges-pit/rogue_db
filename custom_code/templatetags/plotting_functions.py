@@ -4,6 +4,7 @@ from astropy.time import Time
 from django.utils import timezone
 from plotly import offline
 import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 import numpy as np
 import datetime
 
@@ -50,32 +51,79 @@ def photometry_mulens_model(mulens):
         'plot': plot_code
     }
 
-def plot_interactive_lightcurve(datasets, model_datums, height=600, width=700, show_current_time=True):
+def calc_residuals(model_lc, dataset):
+    """
+    Function to calculate photometric residuals of a single dataset - model magnitudes.
+    Does not assume both arrays have the same timestamps
+    """
+
+    model_mags = []
+    for i in range(0, len(dataset['y']), 1):
+        idx = np.where(model_lc[:, 0] == dataset['x'][i])[0]
+        if len(idx) > 0:
+            model_mags.append([dataset['x'][i], float((dataset['y'][i]-model_lc[idx,1])[0]), dataset['error'][i]])
+
+    return np.array(model_mags)
+
+def plot_interactive_lightcurve(
+        datasets, model_datums,
+        height=600, width=700,
+        show_current_time=True,
+        show_residuals=False
+):
     """
     Function to produce an interactive lightcurve
     """
-    plot_data = [
-        go.Scatter(
-            x=dataset['x'],
-            y=dataset['y'],
-            mode='markers',
-            name=source_name,
-            error_y=dict(
-                type='data',
-                array=dataset['error'],
-                visible=True
-            )
-        ) for source_name, dataset in datasets.items()]
 
-    layout = go.Layout(
-        yaxis=dict(autorange='reversed'),
-        xaxis=dict(autorange=True),
-        height=height,
-        width=width,
+    # Layout with or without residuals
+    plot_cols = 1
+    plot_rows = 1
+    if show_residuals:
+        plot_rows = 2
+        height *= 1.2
 
-    )
+        fig = make_subplots(
+            rows=plot_rows, cols=plot_cols,
+            shared_xaxes=True,  # panels pan/zoom together on x
+            vertical_spacing=0.06,  # gap between the two panels
+            row_heights=[0.7, 0.3],  # top panel gets 70% of the height, bottom 30%
+        )
+    else:
+        fig = make_subplots(
+            rows=plot_rows, cols=plot_cols,
+            shared_xaxes=True,  # panels pan/zoom together on x
+            vertical_spacing=0.06,  # gap between the two panels
+            row_heights=[1.0],  # top panel gets 70% of the height, bottom 30%
+        )
 
-    fig = go.Figure(data=plot_data, layout=layout)
+    # Plot the main lightcurve
+    for source_name, dataset in datasets.items():
+        fig.add_trace(
+            go.Scatter(
+                x=dataset['x'], y=dataset['y'], mode='markers', name=source_name,
+                error_y=dict(type='data', array=dataset['error'], visible=True),
+            ),
+            row=1, col=1,
+        )
+
+    # Optionally, plot residuals
+    if show_residuals:
+        for rd in model_datums:
+            if 'PSPL' in rd.data_type:
+                model_lc = np.zeros((len(rd.value['lc_model_time']),2))
+                model_lc[:,0] = np.array(rd.value['lc_model_time']) - 2460000.0
+                model_lc[:,1] = np.array(rd.value['lc_model_magnitude'])
+
+                for source_name, dataset in datasets.items():
+                    residuals = calc_residuals(model_lc, dataset)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=residuals[:,0], y=residuals[:,1], mode='markers', name='Data-PSPL',
+                            error_y=dict(type='data', array=residuals[:,2], visible=True),
+                        ),
+                        row=2, col=1,
+                    )
+
     current_time = Time.now().jd - 2460000
     if show_current_time:
 
@@ -140,6 +188,10 @@ def plot_interactive_lightcurve(datasets, model_datums, height=600, width=700, s
             xanchor='right',
             x=1,
         ),
+        yaxis=dict(autorange='reversed'),
+        xaxis=dict(autorange=True),
+        height=height,
+        width=width,
     )
 
     # include_plotlyjs=False: the library is loaded once globally in
@@ -154,7 +206,7 @@ def photometry_event(event):
     Generate an interactive plot using the lightcurve segment of a specific event
     """
 
-    event_end = event.start_time + 2.0*event.duration
+    event_end = event.start_time + event.duration
 
     # Filter to the event's time window in the DB query, not by fetching the
     # target's entire photometry history (which can be tens of thousands of
@@ -169,10 +221,11 @@ def photometry_event(event):
     if qs:
         jds = Time([rd.timestamp for rd in qs]).jd - 2460000.0
         for rd, jd in zip(qs, jds):
-            dataset = datasets.setdefault(rd.source_name, {'x': [], 'y': [], 'error': []})
-            dataset['x'].append(jd)
-            dataset['y'].append(rd.brightness)
-            dataset['error'].append(rd.brightness_error)
+            if rd.source_name == 'Roman_F146':
+                dataset = datasets.setdefault(rd.source_name, {'x': [], 'y': [], 'error': []})
+                dataset['x'].append(jd)
+                dataset['y'].append(rd.brightness)
+                dataset['error'].append(rd.brightness_error)
 
 
     model_datums = ReducedDatum.objects.filter(
@@ -180,7 +233,8 @@ def photometry_event(event):
     )
 
     plot_code = plot_interactive_lightcurve(
-        datasets, model_datums, height=400, width=500, show_current_time=False
+        datasets, model_datums, height=400, width=500, show_current_time=False,
+        show_residuals=True
     )
 
     return {

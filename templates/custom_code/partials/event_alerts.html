@@ -1,0 +1,46 @@
+{% load static %}
+<div class="event-table-container table-responsive">
+  Alert parameters
+  <table class="event-table">
+    <thead>
+    <tr>
+      <th>Origin</th>
+      <th>Classification</th>
+      <th>Confidence [%]</th>
+      <th>&Delta; &chi;<sup>2</sup></th>
+      <th>t0 [JD]</th>
+      <th>tE [d]</th>
+      <th>u0</th>
+      <th>&rho;</th>
+      <th>Peak mag</th>
+      <th>Baseline mag</th>
+      <th>Passband</th>
+      <th>FFP candidate</th>
+      <th>Timestamp</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for alert in alerts %}
+    <tr>
+      <td>{{alert.alert_origin}}</td>
+      <td>{{alert.alert_classification}}</td>
+      <td>{{alert.alert_neural_network_confidence|floatformat:1}}</td>
+      <td>{{alert.alert_delta_chi2|floatformat:3}}</td>
+      <td>{{alert.alert_t0|floatformat:5}}</td>
+      <td>{{alert.alert_tE|floatformat:3}}</td>
+      <td>{{alert.alert_u0|floatformat:4}}</td>
+      <td>{{alert.alert_rho|floatformat:4}}</td>
+      <td>{{alert.alert_peak_mag|floatformat:3}}</td>
+      <td>{{alert.alert_baseline_mag|floatformat:3}}</td>
+      <td>{{alert.alert_mag_passband}}</td>
+      <td>{{alert.ffp_candidate}}</td>
+      <td>{{alert.alert_timestamp}}</td>
+    </tr>
+    {% empty %}
+    <tr>
+      <td colspan="13">No alerts for this event yet</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

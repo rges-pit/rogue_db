@@ -12,8 +12,13 @@ class Migration(migrations.Migration):
     columns on Event while the live database no longer had them, causing
     "column custom_code_event.frac_below_baseline does not exist" on any query
     that touched Event. SeparateDatabaseAndState updates Django's tracked state
-    to match the database that already exists, without attempting to DROP
-    COLUMNs that are already gone (which would itself error).
+    to match the database that already exists. The DROP COLUMN IF EXISTS is a
+    no-op against that hand-patched live database, but is required for a
+    from-scratch migration replay (e.g. the test database, or a fresh clone) --
+    there, 0017 really added these columns and nothing else ever drops them,
+    so without this they collide with the AddField in
+    0032_remove_roguetarget_frac_below_baseline_and_more when it re-adds them
+    to Event.
     """
 
     dependencies = [
@@ -32,6 +37,15 @@ class Migration(migrations.Migration):
                     name='max_excursion_below_baseline',
                 ),
             ],
-            database_operations=[],
+            database_operations=[
+                migrations.RunSQL(
+                    sql=(
+                        'ALTER TABLE custom_code_event '
+                        'DROP COLUMN IF EXISTS frac_below_baseline, '
+                        'DROP COLUMN IF EXISTS max_excursion_below_baseline;'
+                    ),
+                    reverse_sql=migrations.RunSQL.noop,
+                ),
+            ],
         ),
     ]

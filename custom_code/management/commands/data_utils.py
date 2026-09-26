@@ -60,58 +60,39 @@ def get_reduced_data(event, bandpass=None):
 
     return datasets
 
-def get_baseline_data(source):
+def get_baseline_data(event, bandpass=None):
     """
     Function to retrieve the full lightcurve of the source, removing those sections of it
     which are flagged as events
 
     Parameters:
-        source  Target  RogueTarget object
+        event  Event object
+        bandpass str [optional] Filter of lightcurve to select
 
     Returns:
         datasets dict   Dictionary of lightcurve arrays
     """
 
-    # Extract the full available photometry
-    photometry_qs = PhotometryReducedDatum.objects.filter(target__name=source.name).order_by("timestamp")
+    # Extract the lightcurve segment for this event
+    datasets = get_reduced_data(event, bandpass=bandpass)
 
-    # Extract the known set of events for this source
-    events_qs = Event.objects.filter(target=source)
+    # Filter the lightcurves to select points at the baseline.
+    # Since the event lightcurve segment has already been cropped to include
+    # only data within the event window, we assume the baseline points are most numerous
+    # and select those points within +/-1 sigma of the median
+    filtered_datasets = {}
+    sigma = 3.0
+    for passband, lightcurve in datasets.items():
+        median_mag = np.median(lightcurve[:,1])
+        stddev = np.median(lightcurve[:,2])*2
+        idx1 = np.where(lightcurve[:,1] <= median_mag + sigma*stddev)[0]
+        idx2 = np.where(lightcurve[:,1] >= median_mag - sigma*stddev)[0]
+        idx = list(set(idx1).intersection(set(idx2)))
+        filtered_datasets[passband] = lightcurve[idx,:]
 
-    datasets = {}
+    logger.info('Found ' + str(len(filtered_datasets)) + ' filtered datasets')
 
-    # Select only those datapoints from the lightcurves that lie outside the event windows
-    for rd in photometry_qs:
-        ts = Time(rd.timestamp).jd
-        for event in events_qs:
-            if ts < event.start_time or ts > event.start_time + event.duration:
-                # Identify different lightcurves from the filter label given
-                passband = rd.bandpass
-                if passband in datasets.keys():
-                    lc = datasets[passband]
-                else:
-                    lc = []
-
-                # Append the datapoint to the corresponding dataset
-                try:
-                    lc.append([ts, rd.brightness, rd.brightness_error])
-                except:
-                    # Necessary to handle the datapoints where only a limit is available.
-                    # Skipping these for now
-                    try:
-                        lc.append([ts, rd.brightness, 1.0])
-                    except KeyError:
-                        pass
-
-                datasets[passband] = lc
-
-    # Convert the accumulated lightcurves into numpy arrays:
-    for passband, lc in datasets.items():
-        datasets[passband] = np.array(lc)
-
-    logger.info('Found ' + str(len(datasets)) + ' datasets')
-
-    return datasets
+    return filtered_datasets
 
 
 def fetch_lightcurve(datasets):
@@ -157,7 +138,9 @@ def get_model_types_list():
         'pspl': 'PSPL microlensing',
         'fspl': 'FSPL microlensing',
         'davenport_flare': 'Davenport flare',
-        'pitkin_flare': 'Pitkin flare'
+        'pitkin_flare': 'Pitkin flare',
+        'straight_line': 'Straight line',
+        'baseline': 'Baseline'
     }
 
 def store_pylima_model_lightcurves(event, pyLIMA_results):
@@ -401,34 +384,36 @@ def update_microlensing_model(event, fit_results, model_type):
     else:
         return None
 
-def store_event_straightline_model_parameters(event, results):
+def store_straightline_model_parameters(event, results, model_type):
 
     if len(results['coeffs']) > 0:
         # If there is an existing straight line fit in the database for this event,
         # update it; otherwise create a new entry
         qs = StraightLineModel.objects.filter(
             event=event,
-            model_type='Straight line'
+            model_type=model_type
         )
 
         if qs.count() == 0:
             slmodel = StraightLineModel.objects.create(
                 event = event,
-                model_type = 'Straight line',
+                model_type = model_type,
                 chisq = results['chisq'],
+                red_chisq = results['red_chisq'],
                 BIC = results['BIC'],
                 fit_covariance = json.dumps(results['covar'].tolist()),
-                intercept = results['coeffs'][0],
-                gradient = results['coeffs'][1]
+                intercept = results['coeffs'][1],
+                gradient = results['coeffs'][0]
             )
 
         else:
             slmodel = qs[0]
             slmodel.chisq = results['chisq']
+            slmodel.red_chisq = results['red_chisq']
             slmodel.BIC = results['BIC']
             slmodel.fit_covariance = json.dumps(results['covar'].tolist())
-            slmodel.intercept = results['coeffs'][0]
-            slmodel.gradient = results['coeffs'][1]
+            slmodel.intercept = results['coeffs'][1]
+            slmodel.gradient = results['coeffs'][0]
             slmodel.save()
 
         logger.info('Stored straight line model parameters and diagnostics for event ' + event.target.name)
@@ -539,12 +524,12 @@ def store_pitkinflare_model_parameters(event, results):
 
     return flare
 
-def store_target_diagnostics(target, results):
+def store_baseline_diagnostics(lcevent, results):
     """Function to store the results of analysing the target's baseline data"""
 
     if results['frac_below_baseline']:
-        target.frac_below_baseline = results['frac_below_baseline']
-        target.max_excursion_below_baseline = results['max_excursion_below_baseline']
-        target.save()
+        lcevent.frac_below_baseline = results['frac_below_baseline']
+        lcevent.max_excursion_below_baseline = results['max_excursion_below_baseline']
+        lcevent.save()
 
-        logger.info('Stored diagostics from baseline lightcurve fit for ' + target.name)
+        logger.info('Stored diagostics from baseline lightcurve fit for ' + lcevent.target.name)

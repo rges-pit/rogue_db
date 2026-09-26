@@ -33,7 +33,8 @@ def event_banner_data(event):
 @register.inclusion_tag('custom_code/partials/event_model_buttons.html')
 def event_model_buttons(event):
     """
-    Function to create a button for each EventModel for the given Event
+    Function to create a button for each EventModel for the given Event, plus
+    an Alerts button that loads the event's RGESAlerts into the same panel.
     """
     models = EventModel.objects.filter(event=event)
-    return {'models': models}
+    return {'models': models, 'event': event}

@@ -1,28 +1,29 @@
 {% if parameters %}
-{{ model_type }} model parameters
-<table class="table table-sm table-striped">
-    <tbody>
-        {% for label, value in parameters %}
-            {% if label == 'blend parameters' %}
-            <tr>
-                <th>{{ label }}</th>
-                <td>
-                    {% for key, data in value.items %}
-                        {{ key }} : {{ data }} <br/>
-                    {% endfor %}
-                </td>
-            </tr>
-            {% else %}
-            <tr>
-                <th>{{ label }}</th>
-                <td>{{ value }}</td>
-            </tr>
-            {% endif %}
-        {% endfor %}
-    </tbody>
-</table>
+<div class="event-params-panel">
+  <div class="event-params-group">
+    <div class="event-params-label">{{ model_type }} model parameters</div>
+    <div class="event-params-grid">
+      {% for label, value in parameters %}
+        <div class="event-params-cell">
+          <div class="event-params-key">{{ label }}</div>
+          <div class="event-params-value">{{ value }}</div>
+        </div>
+      {% endfor %}
+      {% if blend_parameters %}
+        <div class="event-params-cell event-params-cell--full">
+          <div class="event-params-key">blend parameters</div>
+          <div class="event-params-value">
+            {% for key, data in blend_parameters.items %}
+              {{ key }}: {{ data }}{% if not forloop.last %}<br>{% endif %}
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% else %}
-<div class="alert alert-info">
-    No fit parameters are available for model type "{{ model_type }}".
+<div class="event-params-panel">
+  No fit parameters are available for model type "{{ model_type }}".
 </div>
 {% endif %}

@@ -152,7 +152,7 @@ class TestDataUtils(TestCase):
         the lightcurve
         """
 
-        datasets = data_utils.get_baseline_data(self.target)
+        datasets = data_utils.get_baseline_data(self.event)
 
         self.assertEqual(len(datasets), self.ndatasets)
 

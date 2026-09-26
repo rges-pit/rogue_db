@@ -122,6 +122,24 @@ class EventDetailView(LoginRequiredMixin,DetailView):
         context['target'] = self.object.target
         return context
 
+
+class EventAlertsView(LoginRequiredMixin, TemplateView):
+    """
+    Renders the RGESAlerts associated with one Event (?event=<pk>) into the
+    same panel used for EventModel fit parameters. A single Event can have
+    multiple alerts, since different detection pipelines (Aethra, neural
+    network, MSOS) can each raise their own alert for it.
+    """
+    template_name = 'custom_code/partials/event_alerts.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        event = get_object_or_404(Event, pk=self.request.GET.get('event'))
+        context['event'] = event
+        context['alerts'] = event.alerts.all()
+        return context
+
+
 class TargetEventListView(EventListView):
     """
     Events tab on TargetDetailView -- scopes EventListView to one target's
@@ -207,6 +225,7 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
         model_class = MODEL_TYPE_CLASSES.get(base.model_type)
 
         parameters = []
+        blend_parameters = None
         if model_class:
             instance = get_object_or_404(model_class, pk=base.pk)
 
@@ -217,6 +236,12 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
                 if getattr(field.remote_field, 'parent_link', False):
                     continue
                 if field.verbose_name in ['piEE', 'piEE error', 'piEN', 'piEN error']:
+                    continue
+                # blend_parameters (a JSONField, where present) isn't a plain
+                # scalar like the other fit parameters, and is shown as its
+                # own row spanning the full width of the table
+                if field.name == 'blend_parameters':
+                    blend_parameters = getattr(instance, field.attname)
                     continue
                 fields.append((field.name, field.verbose_name, getattr(instance, field.attname)))
 
@@ -249,6 +274,7 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
 
         context['model_type'] = base.model_type
         context['parameters'] = parameters
+        context['blend_parameters'] = blend_parameters
         return context
 
 

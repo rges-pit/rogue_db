@@ -51,15 +51,21 @@ def fit_target(target_pk):
     except Target.DoesNotExist:
         return target_pk, None, False, 'Target no longer exists'
 
-    # Straight line model fit to baseline excluding event
-    baseline_results = general_fit_functions.run_baseline_fit(target)
-    data_utils.store_target_diagnostics(target, baseline_results)
-
     if events.count() > 0:
         try:
             # Straight line model fit
             straightline_results = general_fit_functions.run_event_straightline_fit(events[0])
-            straightline_model = data_utils.store_event_straightline_model_parameters(events[0], straightline_results)
+            straightline_model = data_utils.store_straightline_model_parameters(
+                events[0], straightline_results, 'Straight line'
+            )
+            data_utils.store_model_lightcurve(events[0], straightline_results, 'straight_line')
+
+            # Baseline model fit
+            baseline_results = general_fit_functions.run_baseline_fit(events[0])
+            baseline_model = data_utils.store_straightline_model_parameters(
+                events[0], baseline_results, 'Baseline'
+            )
+            data_utils.store_baseline_diagnostics(events[0], baseline_results)
 
             # Fit microlensing models and calculate diagnostics
             pylima_results = pylima_fit_functions.run_fit(events[0], verbose=False)
