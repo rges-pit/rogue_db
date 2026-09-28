@@ -255,9 +255,10 @@ class TestFlareFitFunctions(TestCase):
 
     def setUp(self):
         self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
+        # [baseline_flux, t_peak, peak_amplitude, tau_gaussian_rise, tau_exponential_decay]
         self.pitkin_test_params = np.array([
             400, (self.test_event.start_time + self.test_event.duration/2.0),
-            400, 400, 0.5, 0.5
+            400, 0.5, 0.5
         ])
 
     def test_fit_flares(self):
@@ -346,7 +347,7 @@ class TestFlareFitFunctions(TestCase):
         """
         Test generation of a model Pitkin flare lightcurve
         based on model parameters:
-        [baseline_flux, t, flux, peak, fwhm, tau_gaussian_rise, tau_exponential_decay]
+        [baseline_flux, t, peak, tau_gaussian_rise, tau_exponential_decay]
         """
         datasets = data_utils.get_reduced_data(self.test_event)
         lightcurve = data_utils.fetch_lightcurve(datasets)
@@ -365,7 +366,7 @@ class TestFlareFitFunctions(TestCase):
         """
         Test calculation of the log posterior for a Pitkin flare model
         Params contains:
-        [baseline_flux, t, flux, peak, fwhm, tau_gaussian_rise, tau_exponential_decay]
+        [baseline_flux, t, peak, tau_gaussian_rise, tau_exponential_decay]
         """
 
         datasets = data_utils.get_reduced_data(self.test_event)
@@ -394,7 +395,7 @@ class TestFlareFitFunctions(TestCase):
         requires that the input flare parameters remain within boundaries.
         If this is true, the function returns zero, if not, it returns -Inf
         Params contains:
-        [baseline_flux, t, flux, peak, tau_gaussian_rise, tau_exponential_decay]
+        [baseline_flux, t, peak, tau_gaussian_rise, tau_exponential_decay]
         """
 
         t_bounds = [
@@ -413,7 +414,7 @@ class TestFlareFitFunctions(TestCase):
         self.assertEqual(log_prior, 0.0)
 
         # Test each parameter outside boundaries in turn
-        for i in [1, 3, 4, 5]:
+        for i in [1, 2, 3, 4]:
             params = copy.deepcopy(self.pitkin_test_params)
             params[i] += 200000
             log_prior = flare_fit_functions.calc_log_prior(

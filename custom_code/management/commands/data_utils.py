@@ -1,11 +1,15 @@
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
-from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, Event,
+from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, EventModel,
                                 DavenportFlareModel, PitkinFlareModel)
+from django.core.files.base import ContentFile
+import io
 from datetime import datetime, UTC
 from astropy.time import Time
 import json
+import corner
+import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
@@ -533,3 +537,25 @@ def store_baseline_diagnostics(lcevent, results):
         lcevent.save()
 
         logger.info('Stored diagostics from baseline lightcurve fit for ' + lcevent.target.name)
+
+def generate_corner_plot(emodel, results, file_name):
+    """
+    Function to create a corner plot of MCMC samples
+
+    Parameters:
+        emodel  EventModel object
+        results Dict    Results of model fitting
+        file_name str   Filename for corner plot
+    """
+
+
+    fig = corner.corner(
+        results['samples'][:, results['sample_columns']], labels=results['parameter_labels']
+    )
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    plt.close(fig)
+
+    emodel.corner_plot.save(file_name, ContentFile(buf.getvalue()), save=False)
+    EventModel.objects.filter(pk=emodel.pk).update(corner_plot=emodel.corner_plot.name)

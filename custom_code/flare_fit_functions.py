@@ -43,6 +43,8 @@ def run_davenport_flare_fit(lcevent):
             fit_list[0]['time'], fit_list[0]['t_peak'], fit_list[0]['fwhm'],
             fit_list[0]['amplitude']
         )
+
+        # Five baseline parameters + 3 flare fit parameters
         baseline = build_baseline(fit_list[0]['time'], fit_list[0]['params'][:5])
         flux_lc = baseline + flare_model
         model_lightcurve = np.zeros((len(fit_list[0]['time']),2))
@@ -65,6 +67,9 @@ def run_davenport_flare_fit(lcevent):
         results['red_chisq'] = red_chi2
         results['BIC'] = bic
         results['model_lc'] = model_lightcurve
+        results['samples'] = fit_list[0]['posterior_samples']
+        results['parameter_labels'] = ['t peak', 'fwhm', 'amplitude']
+        results['sample_columns'] = [5, 6, 7]       # Columns in samples corresponding to labels
 
     return results
 
@@ -126,7 +131,6 @@ def run_pitkin_flare_model_fit(lcevent, nwalkers=50, n_steps=3000, discard=500, 
                                         boundaries['tau_exponential_decay_bounds']
                                     ))
 
-
     sampler.run_mcmc(start_position, n_steps, progress=True)
     samples = sampler.get_chain(discard=discard, thin=thinning_factor, flat=True)
     best_fit = np.median(samples, axis=0)
@@ -142,21 +146,23 @@ def run_pitkin_flare_model_fit(lcevent, nwalkers=50, n_steps=3000, discard=500, 
     chi2, red_chi2, bic = calc_goodness_of_flare_fit(lightcurve, model_lightcurve, 4)
 
     # Build results dictionary for consistency
-    # [baseline_flux, t, flux, peak, tau_gaussian_rise, tau_exponential_decay]
+    # [baseline_flux, t, peak, tau_gaussian_rise, tau_exponential_decay]
     results = {
         't_peak': best_fit[1],
         't_peak_error': 0.0,
-        'peak_amplitude': best_fit[3],
+        'peak_amplitude': best_fit[2],
         'peak_amplitude_error': 0.0,
-        'tau_gaussian_rise': best_fit[4],
+        'tau_gaussian_rise': best_fit[3],
         'tau_gaussian_rise_error': 0.0,
-        'tau_exponential_decay': best_fit[5],
+        'tau_exponential_decay': best_fit[4],
         'tau_exponential_decay_error': 0.0,
         'red_chisq': red_chi2,
         'chisq': chi2,
         'BIC': bic,
         'model_lc': model_lightcurve,
-        'samples': samples
+        'samples': samples,
+        'parameter_labels': ['t peak', 'peak amplitude', 'tau gaussian rise', 'tau exp decay'],
+        'sample_columns': [1, 2, 3, 4]
     }
 
     # Calculate parameter uncertainties
@@ -207,8 +213,7 @@ def pitkin_set_conditions_boundaries(lcevent, flux, nwalkers):
     baseline_guess = [np.median(flux)]
     flare_guess = [
         lcevent.start_time + (lcevent.duration / 2.0),  # t_peak
-        400, # flux
-        200.0,  # peak_amplitude
+        flux.max() - baseline_guess[0],  # peak_amplitude
         0.2,  # tau_gaussian_rise
         0.5  # tau_exponential_decay
     ]
@@ -253,8 +258,8 @@ def calc_log_posterior(
     # Verify all passed arrays have the same dimensions
     if not (len(time) == len(flux) == len(flux_err)):
         raise ValueError("Mismatch in length of time, flux, and flux_err arrays")
-    if len(params) < 6:
-        raise ValueError("Params must include at least 6 baseline values")
+    if len(params) < 5:
+        raise ValueError("Params must include at least 5 parameter values")
 
     if np.any(~np.isfinite(params)):
         return -np.inf
@@ -292,32 +297,32 @@ def calc_log_prior(params, t_bounds, peak_bounds,
     """
 
     # Verify input parameters and boundary arrays
-    if len(params) < 6:
-        raise ValueError("Params array must contain 7 parameter values")
+    if len(params) < 5:
+        raise ValueError("Params array must contain 5 parameter values")
 
     if len(t_bounds) != 2 or len(peak_bounds) != 2 \
         or len(tau_gaussian_rise_bounds) != 2 or len(tau_exponential_decay_bounds) != 2:
         raise ValueError('Boundary conditions must contain a minimum and maximum value')
 
     # Check parameter values are within all boundary conditions and finite
-    # params = [baseline_flux, t, flux, peak, tau_gaussian_rise, tau_exponential_decay]
+    # params = [baseline_flux, t, peak, tau_gaussian_rise, tau_exponential_decay]
     if not np.isfinite(params).all():
         return -np.inf
 
     if not (t_bounds[0] < params[1] < t_bounds[1]):
         return -np.inf
 
-    if not (peak_bounds[0] < params[3] < peak_bounds[1]):
+    if not (peak_bounds[0] < params[2] < peak_bounds[1]):
         return -np.inf
 
-    if not (tau_gaussian_rise_bounds[0] < params[4] < tau_gaussian_rise_bounds[1]):
+    if not (tau_gaussian_rise_bounds[0] < params[3] < tau_gaussian_rise_bounds[1]):
         return -np.inf
 
-    if not (tau_exponential_decay_bounds[0] < params[5] < tau_exponential_decay_bounds[1]):
+    if not (tau_exponential_decay_bounds[0] < params[4] < tau_exponential_decay_bounds[1]):
         return -np.inf
 
     # Disallow tau_gaussian_rise to exceed tau_exponential_decay
-    if params[4] > params[5]:
+    if params[3] > params[4]:
         return -np.inf
 
     t0prior = -np.log(t_bounds[1] - t_bounds[0])
@@ -400,15 +405,15 @@ def model_pitkin_flare_lightcurve(time, params):
     model_lc = np.zeros(len(time))
 
     # Set the peak flux amplitude
-    model_lc[time == params[1]] = params[3]
+    model_lc[time == params[1]] = params[2]
 
     # Set rising lightcurve
-    if params[4] > 0:
-        model_lc[time < params[1]] = params[3] * np.exp(-(time[time < params[1]] - params[1]) ** 2 / (2 * float(params[4]) ** 2))
+    if params[3] > 0:
+        model_lc[time < params[1]] = params[2] * np.exp(-(time[time < params[1]] - params[1]) ** 2 / (2 * float(params[3]) ** 2))
 
     # Set declining lightcurve
-    if params[5] > 0:
-        model_lc[time > params[1]] = params[3] * np.exp(-(time[time > params[1]] - params[1]) / float(params[5]))
+    if params[4] > 0:
+        model_lc[time > params[1]] = params[2] * np.exp(-(time[time > params[1]] - params[1]) / float(params[4]))
 
     # Add baseline
     baseline = np.zeros(len(time))

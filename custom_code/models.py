@@ -231,6 +231,8 @@ class EventModel(models.Model):
     BIC = models.FloatField(default=0, null=True, blank=True)
     fit_covariance = models.JSONField(default=dict, null=True, blank=True)
 
+    corner_plot = models.ImageField(upload_to='eventmodel_plots/%Y/%m/%d/', null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

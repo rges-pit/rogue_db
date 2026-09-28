@@ -21,6 +21,12 @@
       {% endif %}
     </div>
   </div>
+  {% if corner_plot %}
+    <div class="event-params-group">
+      <div class="event-params-label">Corner plot</div>
+      <img src="{{ corner_plot.url }}" alt="{{ model_type }} corner plot" class="event-corner-plot">
+    </div>
+  {% endif %}
 </div>
 {% else %}
 <div class="event-params-panel">

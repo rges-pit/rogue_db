@@ -275,6 +275,9 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
         context['model_type'] = base.model_type
         context['parameters'] = parameters
         context['blend_parameters'] = blend_parameters
+        # corner_plot lives on the base EventModel (not per-subtype), so this
+        # picks it up for whichever model types populate it, present or future.
+        context['corner_plot'] = base.corner_plot if base.corner_plot else None
         return context
 
 

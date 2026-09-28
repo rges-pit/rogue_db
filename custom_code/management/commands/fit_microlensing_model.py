@@ -30,5 +30,11 @@ class Command(BaseCommand):
                 event, pylima_results
             )
 
+            # Generate corner plots
+            data_utils.generate_corner_plot(
+                davenport_flare, davenport_results,
+                target.name + '_' + str(event.event_id) + '_davenport_corner_plot.png'
+            )
+
         else:
             logger.warning('Found no database entry for ' + options['target_name'])
