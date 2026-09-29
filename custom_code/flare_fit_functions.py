@@ -1,4 +1,5 @@
 from custom_code.management.commands import data_utils
+from custom_code import statistics
 import logging
 from altaipony.fit_flares import fit_flares, make_flare_table, build_baseline
 from altaipony.fakeflares import flare_model_davenport2014
@@ -67,6 +68,7 @@ def run_davenport_flare_fit(lcevent):
         results['red_chisq'] = red_chi2
         results['BIC'] = bic
         results['model_lc'] = model_lightcurve
+        results['tau'], results['tau_threshold'] = statistics.calc_tau(fit_list[0]['posterior_samples'])
         results['samples'] = fit_list[0]['posterior_samples']
         results['parameter_labels'] = ['t peak', 'fwhm', 'amplitude']
         results['sample_columns'] = [5, 6, 7]       # Columns in samples corresponding to labels
@@ -98,7 +100,7 @@ def calc_goodness_of_flare_fit(lightcurve, model_lightcurve, nparam):
 
     return chi2, red_chi2, bic
 
-def run_pitkin_flare_model_fit(lcevent, nwalkers=50, n_steps=3000, discard=500, thinning_factor=10):
+def run_pitkin_flare_model_fit(lcevent, nwalkers=50, n_steps=5000, discard=500, thinning_factor=10):
     """
     Function to perform a Pitkin flare model fit to an Event
 
@@ -148,24 +150,13 @@ def run_pitkin_flare_model_fit(lcevent, nwalkers=50, n_steps=3000, discard=500, 
 
     # Build results dictionary for consistency
     # [baseline_flux, t, peak, tau_gaussian_rise, tau_exponential_decay]
-    results = {
-        't_peak': best_fit[1],
-        't_peak_error': 0.0,
-        'peak_amplitude': best_fit[2],
-        'peak_amplitude_error': 0.0,
-        'tau_gaussian_rise': best_fit[3],
-        'tau_gaussian_rise_error': 0.0,
-        'tau_exponential_decay': best_fit[4],
-        'tau_exponential_decay_error': 0.0,
-        'red_chisq': red_chi2,
-        'chisq': chi2,
-        'BIC': bic,
-        'model_lc': model_lightcurve,
-        'samples': samples,
-        'parameter_labels': ['t peak', 'peak amplitude', 'tau gaussian rise', 'tau exp decay'],
-        'sample_columns': [1, 2, 3, 4],
-        'fit_method': 'MCMC'
-    }
+    results = {'t_peak': best_fit[1], 't_peak_error': 0.0, 'peak_amplitude': best_fit[2], 'peak_amplitude_error': 0.0,
+               'tau_gaussian_rise': best_fit[3], 'tau_gaussian_rise_error': 0.0, 'tau_exponential_decay': best_fit[4],
+               'tau_exponential_decay_error': 0.0, 'red_chisq': red_chi2, 'chisq': chi2, 'BIC': bic,
+               'model_lc': model_lightcurve, 'samples': samples,
+               'parameter_labels': ['t peak', 'peak amplitude', 'tau gaussian rise', 'tau exp decay'],
+               'sample_columns': [1, 2, 3, 4], 'fit_method': 'MCMC', 'tau': (statistics.calc_tau(samples))[0],
+               'tau_threshold': (statistics.calc_tau(samples))[1]}
 
     # Calculate parameter uncertainties
     results = estimate_pitkin_parameter_uncertainties(results)

@@ -379,6 +379,9 @@ def update_microlensing_model(event, fit_results, model_type):
                 'blend_mag_error': fit_results[model_type]['blend_mag_error']
             }
             mulens_model.fit_method = fit_results[model_type]['fit_method']
+            if fit_results[model_type]['fit_method'] == 'MCMC':
+                mulens_model.tau = fit_results[model_type]['tau']
+                mulens_model.tau_threshold = fit_results[model_type]['tau_threshold']
             mulens_model.save()
 
             logger.info('Stored ' + mulens_model.model_type
@@ -457,7 +460,9 @@ def store_davenportflare_model_parameters(event, results):
                 red_chisq=results['red_chisq'],
                 chisq=results['chisq'],
                 BIC=results['BIC'],
-                fit_method=results['fit_method']
+                fit_method=results['fit_method'],
+                tau=results['tau'],
+                tau_threshold=results['tau_threshold']
             )
 
         else:
@@ -472,6 +477,8 @@ def store_davenportflare_model_parameters(event, results):
             flare.chisq = results['chisq']
             flare.BIC = results['BIC']
             flare.fit_method = results['fit_method']
+            flare.tau = results['tau']
+            flare.tau_threshold = results['tau_threshold']
             flare.save()
 
         logger.info('Stored Davenport flare model parameters for event ' + event.target.name)
@@ -509,7 +516,9 @@ def store_pitkinflare_model_parameters(event, results):
                 chisq=results['chisq'],
                 red_chisq=results['red_chisq'],
                 BIC=results['BIC'],
-                fit_method=results['fit_method']
+                fit_method=results['fit_method'],
+                tau=results['tau'],
+                tau_thresold=results['tau_threshold']
             )
 
         else:
@@ -526,6 +535,8 @@ def store_pitkinflare_model_parameters(event, results):
             flare.red_chisq = results['red_chisq']
             flare.BIC = results['BIC']
             flare.fit_method = results['fit_method']
+            flare.tau = results['tau']
+            flare.tau_threshold = results['tau_threshold']
             flare.save()
 
         logger.info('Stored Pitkin flare model parameters for event ' + event.target.name)

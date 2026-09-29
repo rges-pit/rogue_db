@@ -1,4 +1,5 @@
 from custom_code.management.commands import data_utils
+from custom_code import statistics
 import logging
 import numpy as np
 
@@ -58,7 +59,7 @@ def run_fit(lcevent, bandpass=None, verbose=False):
     if verbose: logger.info('PSPL fitted parameters ' + repr(pspl_model_params))
 
     guess_parameters = pspl_model_fit.fit_results['best_model']
-    pspl_mcmc_fit = MCMC_fit.MCMCfit(pspl)
+    pspl_mcmc_fit = MCMC_fit.MCMCfit(pspl, MCMC_links=10000)
 
     pspl_mcmc_fit.model_parameters_guess = guess_parameters[:3]
     pspl_mcmc_fit.fit()
@@ -433,12 +434,14 @@ def mcmc_parameters(pevent, model_params, mcmc_fit):
 
         # Derive MCMC samples from the chains
         chains = mcmc_fit.fit_results['MCMC_chains_with_fluxes']
+        print('PYLIMA CHAINS: ', chains.shape)
         model_params['samples'] = chains.reshape(-1, chains.shape[2])
         model_params['parameter_labels'] = list(mcmc_fit.fit_parameters.keys())
         model_params['sample_columns'] = [0, 1, 2]
         if 'rho' in mcmc_fit.fit_parameters.keys():
             model_params['labels'].append('rho')
             model_params['sample_columns'].append(3)
+        model_params['tau'], model_params['tau_threshold'] = statistics.calc_tau(chains)
 
         # Extract best-fit model parameter values
         for i,key in enumerate(mcmc_fit.priors_parameters.keys()):

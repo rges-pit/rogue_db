@@ -231,6 +231,8 @@ class EventModel(models.Model):
     BIC = models.FloatField(default=0, null=True, blank=True)
     fit_covariance = models.JSONField(default=dict, null=True, blank=True)
     fit_method = models.CharField(max_length=30, null=True, blank=True)
+    tau = models.FloatField(default=0, null=True, blank=True)
+    tau_threshold = models.FloatField(default=0, null=True, blank=True)
 
     corner_plot = models.ImageField(upload_to='eventmodel_plots/%Y/%m/%d/', null=True, blank=True)
 
