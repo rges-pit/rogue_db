@@ -70,6 +70,7 @@ def run_davenport_flare_fit(lcevent):
         results['samples'] = fit_list[0]['posterior_samples']
         results['parameter_labels'] = ['t peak', 'fwhm', 'amplitude']
         results['sample_columns'] = [5, 6, 7]       # Columns in samples corresponding to labels
+        results['fit_method'] = 'MCMC'
 
     return results
 
@@ -162,7 +163,8 @@ def run_pitkin_flare_model_fit(lcevent, nwalkers=50, n_steps=3000, discard=500, 
         'model_lc': model_lightcurve,
         'samples': samples,
         'parameter_labels': ['t peak', 'peak amplitude', 'tau gaussian rise', 'tau exp decay'],
-        'sample_columns': [1, 2, 3, 4]
+        'sample_columns': [1, 2, 3, 4],
+        'fit_method': 'MCMC'
     }
 
     # Calculate parameter uncertainties

@@ -47,14 +47,16 @@ def run_event_straightline_fit(lcevent):
         return {
             'coeffs': coeffs, 'chisq': chi2, 'BIC': bic, 'red_chisq': red_chi2,
             'covar': covar,
-            'model_lc': model_lc
+            'model_lc': model_lc,
+            'fit_method': 'polyfit'
         }
 
     else:
         logger.info('Insufficient valid data during event')
         return {
             'coeffs': np.zeros(0), 'chisq': None, 'BIC': None, 'red_chisq': None,
-            'covar': np.zeros(0)
+            'covar': np.zeros(0),
+            'fit_method': 'polyfit'
         }
 
 def run_baseline_fit(lcevent):
@@ -113,7 +115,8 @@ def run_baseline_fit(lcevent):
             'coeffs': coeffs, 'chisq': chi2, 'BIC': bic, 'red_chisq': red_chi2,
             'model_lc': model_lc,
             'covar': covar, 'frac_below_baseline': frac_below_baseline,
-            'max_excursion_below_baseline': max_excursion_below_baseline
+            'max_excursion_below_baseline': max_excursion_below_baseline,
+            'fit_method': 'polyfit'
         }
 
     else:
@@ -121,5 +124,6 @@ def run_baseline_fit(lcevent):
         return {
             'coeffs': np.zeros(0), 'chisq': None, 'BIC': None, 'red_chisq': None,
             'covar': np.zeros(0), 'frac_below_baseline': None,
-            'max_excursion_below_baseline': None
+            'max_excursion_below_baseline': None,
+            'fit_method': 'polyfit'
         }

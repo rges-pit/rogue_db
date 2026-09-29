@@ -21,6 +21,7 @@ class Command(BaseCommand):
 
         if event:
             pylima_results = pylima_fit_functions.run_fit(event, bandpass='Roman_F146', verbose=True)
+            print(pylima_results)
 
             # Store model lightcurves
             data_utils.store_pylima_model_lightcurves(event, pylima_results)
@@ -32,8 +33,13 @@ class Command(BaseCommand):
 
             # Generate corner plots
             data_utils.generate_corner_plot(
-                davenport_flare, davenport_results,
-                target.name + '_' + str(event.event_id) + '_davenport_corner_plot.png'
+                pspl_model, pylima_results['pspl'],
+                target.name + '_' + str(event.event_id) + '_PSPL_corner_plot.png'
+            )
+
+            data_utils.generate_corner_plot(
+                fspl_model, pylima_results['fspl'],
+                target.name + '_' + str(event.event_id) + '_FSPL_corner_plot.png'
             )
 
         else:
