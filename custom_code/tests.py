@@ -42,7 +42,8 @@ def create_test_target_with_photometry():
         'timestamp': timezone.make_aware((start_time + i * datetime.timedelta(minutes=interval)), datetime.timezone.utc),
         'brightness': mean_mag,
         'brightness_error': 0.001,
-        'bandpass': 'F146'
+        'bandpass': 'Roman_F146',
+        'source_name': 'Roman_F146'
     }) for i in range(0, ndata, 1)]
     PhotometryReducedDatum.objects.bulk_create(datums)
     e = Event.objects.create(
@@ -250,6 +251,13 @@ class TestGeneralFitFunctions(TestCase):
 
         self.assertAlmostEqual(results['coeffs'][0], 0.0, 2)
         self.assertAlmostEqual(results['coeffs'][1], test_mean_mag, 0)
+
+    def test_calc_coverage(self):
+
+        frac_cover = general_fit_functions.calc_coverage(self.test_event)
+
+        assert(type(frac_cover) == type(1.0))
+        self.assertAlmostEqual(frac_cover, 1.0, 1)
 
 class TestFlareFitFunctions(TestCase):
 

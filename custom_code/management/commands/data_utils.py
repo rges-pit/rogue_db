@@ -110,7 +110,12 @@ def fetch_lightcurve(datasets):
     # If not, extract the first lightcurve found from the following
     # passbands in order of priority
     lightcurve = np.zeros(1)
-    priority_order = ['F146', 'F184', 'F213', 'I', 'OGLE-I', 'ip', 'G', 'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp']
+    priority_order = [
+        'Roman_F146', 'Roman_F184', 'Roman_F213',
+        'F146', 'F184', 'F213',
+        'I', 'OGLE-I', 'ip', 'G',
+        'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp'
+    ]
 
     dataset_order = [passband for passband in priority_order if passband in datasets.keys()]
 

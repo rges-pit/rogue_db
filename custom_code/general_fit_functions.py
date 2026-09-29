@@ -127,3 +127,40 @@ def run_baseline_fit(lcevent):
             'max_excursion_below_baseline': None,
             'fit_method': 'polyfit'
         }
+
+def calc_coverage(lcevent):
+    """
+    Function to estimate the fraction of the event that is covered with datapoints.
+    The number of datapoints during the event is easy to calculate but this doesn't directly
+    compare with the duration of the event without knowing the interval between points.
+    So this is estimated from the median interval
+
+    Parameters:
+        lcevent  Event object
+
+    Returns:
+        frac_cover float
+    """
+
+    datasets = data_utils.get_reduced_data(lcevent, bandpass='Roman_F146')
+    lightcurve = data_utils.fetch_lightcurve(datasets)
+
+    if len(lightcurve) > 0:
+        # Estimate the median interval between datapoints
+        dt = float(np.median(lightcurve[1:,0] - lightcurve[:-1,0]))
+
+        # Calculate the number of datapoints obtained during the event
+        idx1 = np.where(lightcurve[:,0] >= lcevent.start_time)[0]
+        idx2 = np.where(lightcurve[:,0] <= lcevent.start_time + lcevent.duration)[0]
+        idx = list(set(idx1).intersection(set(idx2)))
+
+        return min(len(idx) * dt / lcevent.duration, 1.0)
+
+    else:
+        return 0.0
+
+def calc_symmetry(lcevent):
+    """
+    Function to estimate the symmetry of the event lightcurve
+    """
+    
