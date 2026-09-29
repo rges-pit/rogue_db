@@ -67,6 +67,7 @@ class MSOSAlertSerializer(serializers.Serializer):
                 tE=float(validated_data['metadata']['tE_ref']),
                 source_magnitude=float(validated_data['metadata']['Source_F146']),
                 baseline_magnitude=float(validated_data['metadata']['Source_F146']),
+                mag_now_passband='Roman_F146'
             ),
         )
 
