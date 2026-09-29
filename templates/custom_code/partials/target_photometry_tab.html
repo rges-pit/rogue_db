@@ -1,10 +1,3 @@
-{% comment %}
-The plot and the data table are independent HTMX fragments, both firing
-hx-trigger="load" as soon as this shell arrives, so they load in parallel --
-the plot (building/embedding a Plotly figure over the target's full
-photometry history) is the slow part, and it shouldn't block the data
-table (fast, one page at a time) from appearing.
-{% endcomment %}
 <div id="photometry-plot-container"
      hx-get="{% url 'target-photometry:plot' %}?target={{ target.pk }}"
      hx-trigger="load" hx-swap="innerHTML">

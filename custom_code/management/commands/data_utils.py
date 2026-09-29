@@ -1,11 +1,15 @@
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
-from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, Event,
+from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, EventModel,
                                 DavenportFlareModel, PitkinFlareModel)
+from django.core.files.base import ContentFile
+import io
 from datetime import datetime, UTC
 from astropy.time import Time
 import json
+import corner
+import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
@@ -374,6 +378,7 @@ def update_microlensing_model(event, fit_results, model_type):
                 'blend_magnitude': fit_results[model_type]['blend_magnitude'],
                 'blend_mag_error': fit_results[model_type]['blend_mag_error']
             }
+            mulens_model.fit_method = fit_results[model_type]['fit_method']
             mulens_model.save()
 
             logger.info('Stored ' + mulens_model.model_type
@@ -403,7 +408,8 @@ def store_straightline_model_parameters(event, results, model_type):
                 BIC = results['BIC'],
                 fit_covariance = json.dumps(results['covar'].tolist()),
                 intercept = results['coeffs'][1],
-                gradient = results['coeffs'][0]
+                gradient = results['coeffs'][0],
+                fit_method = results['fit_method']
             )
 
         else:
@@ -414,6 +420,7 @@ def store_straightline_model_parameters(event, results, model_type):
             slmodel.fit_covariance = json.dumps(results['covar'].tolist())
             slmodel.intercept = results['coeffs'][1]
             slmodel.gradient = results['coeffs'][0]
+            slmodel.fit_method = results['fit_method']
             slmodel.save()
 
         logger.info('Stored straight line model parameters and diagnostics for event ' + event.target.name)
@@ -449,7 +456,8 @@ def store_davenportflare_model_parameters(event, results):
                 t_FWHM_error=results['t_FWHM_error'],
                 red_chisq=results['red_chisq'],
                 chisq=results['chisq'],
-                BIC=results['BIC']
+                BIC=results['BIC'],
+                fit_method=results['fit_method']
             )
 
         else:
@@ -463,6 +471,7 @@ def store_davenportflare_model_parameters(event, results):
             flare.red_chisq = results['red_chisq']
             flare.chisq = results['chisq']
             flare.BIC = results['BIC']
+            flare.fit_method = results['fit_method']
             flare.save()
 
         logger.info('Stored Davenport flare model parameters for event ' + event.target.name)
@@ -499,7 +508,8 @@ def store_pitkinflare_model_parameters(event, results):
                 tau_exponential_decay_error=results['tau_exponential_decay_error'],
                 chisq=results['chisq'],
                 red_chisq=results['red_chisq'],
-                BIC=results['BIC']
+                BIC=results['BIC'],
+                fit_method=results['fit_method']
             )
 
         else:
@@ -515,6 +525,7 @@ def store_pitkinflare_model_parameters(event, results):
             flare.chisq = results['chisq']
             flare.red_chisq = results['red_chisq']
             flare.BIC = results['BIC']
+            flare.fit_method = results['fit_method']
             flare.save()
 
         logger.info('Stored Pitkin flare model parameters for event ' + event.target.name)
@@ -533,3 +544,34 @@ def store_baseline_diagnostics(lcevent, results):
         lcevent.save()
 
         logger.info('Stored diagostics from baseline lightcurve fit for ' + lcevent.target.name)
+
+def generate_corner_plot(emodel, results, file_name):
+    """
+    Function to create a corner plot of MCMC samples.
+
+    If the MCMC fit failed to converge, it returns a results dictionary
+    with no 'samples' entry. In that case no plot is generated, and any
+    corner plot already stored against this EventModel from an earlier,
+    successful fit is removed.
+
+    Parameters:
+        emodel  EventModel object
+        results Dict    Results of model fitting
+        file_name str   Filename for corner plot
+    """
+
+    if 'samples' in results.keys():
+        fig = corner.corner(
+            results['samples'][:, results['sample_columns']], labels=results['parameter_labels']
+        )
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png')
+        plt.close(fig)
+
+        emodel.corner_plot.save(file_name, ContentFile(buf.getvalue()), save=False)
+        EventModel.objects.filter(pk=emodel.pk).update(corner_plot=emodel.corner_plot.name)
+
+    elif emodel.corner_plot:
+        emodel.corner_plot.delete(save=False)
+        EventModel.objects.filter(pk=emodel.pk).update(corner_plot=None)

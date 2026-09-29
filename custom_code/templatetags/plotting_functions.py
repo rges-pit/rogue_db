@@ -142,8 +142,9 @@ def plot_interactive_lightcurve(
                     width=1,
                     dash='dash',
                 )
-
-            ))
+            ),
+            row="all", col=1
+        )
     fig.update_xaxes(autorange=True)
 
     ### Try to plot model if exist
@@ -156,7 +157,8 @@ def plot_interactive_lightcurve(
                                  name=key_name,
                                  opacity=0.5,
                                  line=dict(width=5),
-                                 )
+                                 ),
+                        row=1, col=1,
                       )
 
     annotations = []
@@ -176,12 +178,8 @@ def plot_interactive_lightcurve(
 
     fig.update_layout(
         annotations=annotations,
-        xaxis_title="HJD-2460000",
         yaxis_title="Mag",
-        # Horizontal legend above the plot instead of Plotly's default
-        # vertical legend down the right side, which was eating into the
-        # plot area -- most noticeable on the narrower event-detail plot.
-        legend=dict(
+        legend=dict(            # Horizontal legend above the plot
             orientation='h',
             yanchor='bottom',
             y=1.02,
@@ -191,8 +189,13 @@ def plot_interactive_lightcurve(
         yaxis=dict(autorange='reversed'),
         xaxis=dict(autorange=True),
         height=height,
-        width=width,
+        width=width
     )
+    if show_residuals:
+        fig.update_yaxes(title_text="Residual", row=2, col=1)
+        fig.update_xaxes(title_text="HJD-2460000", row=2, col=1)  # only the bottom axis needs a label
+    else:
+        fig.update_xaxes(title_text="HJD-2460000",  row=1, col=1)
 
     # include_plotlyjs=False: the library is loaded once globally in
     # base.html instead of every plot embedding its own ~730KB copy --

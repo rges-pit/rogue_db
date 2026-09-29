@@ -246,6 +246,18 @@ li {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* MCMC corner plot, shown under a model's fit parameters when one has been
+   generated (EventModel.corner_plot -- any model type, not just flares).
+   The source image can be much wider than the panel, so it's scaled down to
+   fit rather than overflowing or forcing the panel wider. */
+.event-corner-plot {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--bs-border-radius);
+  margin-top: 4px;
+}
+
 .table {
   border-radius: var(--bs-border-radius);
   overflow: hidden;

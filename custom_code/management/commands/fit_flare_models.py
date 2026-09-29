@@ -29,6 +29,10 @@ class Command(BaseCommand):
                 event, davenport_results
             )
             data_utils.store_model_lightcurve(event, davenport_results, 'davenport_flare')
+            data_utils.generate_corner_plot(
+                davenport_flare, davenport_results,
+                target.name + '_' + str(event.event_id) + '_davenport_corner_plot.png'
+            )
 
             # Pitkin flare model fit
             pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(event)
@@ -36,3 +40,7 @@ class Command(BaseCommand):
                 event, pitkin_results
             )
             data_utils.store_model_lightcurve(event, pitkin_results, 'pitkin_flare')
+            data_utils.generate_corner_plot(
+                pitkin_flare, pitkin_results,
+                target.name + '_' + str(event.event_id) + '_pitkin_corner_plot.png'
+            )

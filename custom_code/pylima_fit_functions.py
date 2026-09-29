@@ -5,7 +5,7 @@ import numpy as np
 from pyLIMA import event
 from pyLIMA import telescopes
 from pyLIMA import toolbox
-from pyLIMA.fits import TRF_fit, DE_fit
+from pyLIMA.fits import TRF_fit, MCMC_fit
 from pyLIMA.fits import stats
 from pyLIMA.models import PSPL_model, FSPL_model
 from pyLIMA.outputs import pyLIMA_plots
@@ -57,11 +57,15 @@ def run_fit(lcevent, bandpass=None, verbose=False):
     pspl_model_params = gather_model_parameters(current_event, pspl_model_fit, verbose)
     if verbose: logger.info('PSPL fitted parameters ' + repr(pspl_model_params))
 
-    # Evaluate the quality of the best-available model.
-    # If the fitted values of key parameters are at the boundaries of then they are considered to
-    # be unreliable, and the fit parameters are reset to nan
-    pspl_model_params = evaluate_model(pspl_model_params)
-    if verbose: logger.info('PSPL evaluated parameters ' + repr(pspl_model_params))
+    guess_parameters = pspl_model_fit.fit_results['best_model']
+    pspl_mcmc_fit = MCMC_fit.MCMCfit(pspl)
+
+    pspl_mcmc_fit.model_parameters_guess = guess_parameters[:3]
+    pspl_mcmc_fit.fit()
+
+    pspl_model_params = mcmc_parameters(current_event, pspl_model_params, pspl_mcmc_fit)
+    if verbose: logger.info('PSPL MCMC parameters ' + repr(pspl_model_params))
+
 
     # MODEL 2: FSPL model without parallax
     fspl = FSPL_model.FSPLmodel(current_event, parallax=['None', 0.],
@@ -79,9 +83,15 @@ def run_fit(lcevent, bandpass=None, verbose=False):
     # model2_params['blend_magnitude'] = np.nan
     if verbose: logger.info('FSPL fitted parameters ' + repr(fspl_model_params))
 
-    # Evaluate the quality of this model
-    fspl_model_params = evaluate_model(fspl_model_params)
-    if verbose: logger.info('FSPL evaluated parameters ' + repr(fspl_model_params))
+    guess_parameters = fspl_model_fit.fit_results['best_model']
+
+    fspl_mcmc_fit = MCMC_fit.MCMCfit(fspl)
+
+    fspl_mcmc_fit.model_parameters_guess = guess_parameters[:4]
+    fspl_mcmc_fit.fit()
+
+    fspl_model_params = mcmc_parameters(current_event, fspl_model_params, fspl_mcmc_fit)
+    if verbose: logger.info('FSPL MCMC parameters ' + repr(fspl_model_params))
 
     # Decide which fit to accept based on the fitted chi2 in each case.
     # Ordinarily, model1 (with blending, parallax) should produce a lower chi2 because it has more parameters.
@@ -91,7 +101,7 @@ def run_fit(lcevent, bandpass=None, verbose=False):
     # The threshold is calculated assuming a 3-sigma distribution.
     if len(pspl_model_params) > 0 and len(fspl_model_params):
         delta_chi2 = fspl_model_params['red_chi2'] - pspl_model_params['red_chi2']
-        if verbose: logger.info('FITTOOLS: PSPL red chi2 = ' + str(pspl_model_params['red_chi2']) \
+        if verbose: logger.info('PSPL red chi2 = ' + str(pspl_model_params['red_chi2']) \
                                 + ', FSPL red chi2 = ' + str(fspl_model_params['red_chi2']) \
                                 + ', delta_chi2 = ' + str(delta_chi2))
         if delta_chi2 > 0.0:
@@ -242,16 +252,26 @@ def pylima_telescopes_from_datasets(datasets, emag_limit=None):
 
     return tel_list
 
-def gather_model_parameters(pevent, model_fit, verbose):
-    """
-    Function to gather the parameters of a PyLIMA fitted model into a dictionary for easier handling.
-    """
+def calc_magnification(u0, u0_err):
+
     def calc_A(u0):
         A = (u0 * u0 + 2) / (u0 * np.sqrt(u0 * u0 + 4))
         if np.isinf(A):
             A = 10000.0
         return A
 
+    A = calc_A(u0)
+    A_max = calc_A(u0 - u0_err)
+    A_min = calc_A(u0 + u0_err)
+    A_err = (A_max - A_min) / 2.0
+
+    return A, A_err
+
+def gather_model_parameters(pevent, model_fit, verbose):
+    """
+    Function to gather the parameters of a PyLIMA TRF fitted model into a dictionary for
+    easier handling.
+    """
     if 'best_model' in model_fit.fit_results.keys():
         # PyLIMA model objects store the fitted values of the model parameters in the fit_results attribute,
         # which is a list of the values pertaining to the model used for the fit.  Since this model can have a
@@ -259,7 +279,7 @@ def gather_model_parameters(pevent, model_fit, verbose):
         # list of key indices
         param_keys = list(model_fit.fit_parameters.keys())
 
-        model_params = {}
+        model_params = {'fit_method': 'TRF'}
 
         for i, key in enumerate(param_keys):
             if key in ['t0' 'tE']:
@@ -267,14 +287,10 @@ def gather_model_parameters(pevent, model_fit, verbose):
             else:
                 ndp = 5
             model_params[key] = np.around(model_fit.fit_results["best_model"][i], ndp)
-            model_params[key+'_error'] = np.around(np.sqrt(model_fit.fit_results["covariance_matrix"][i,i]), ndp)
+            if 'covariance_matrix' in model_fit.fit_results.keys():
+                model_params[key+'_error'] = np.around(np.sqrt(model_fit.fit_results["covariance_matrix"][i,i]), ndp)
 
-        model_params['A0'] = calc_A(model_params['u0'])
-        A_max = calc_A(model_params['u0'] - model_params['u0_error'])
-        A_min = calc_A(model_params['u0'] + model_params['u0_error'])
-        model_params['A0_error'] = (A_max - A_min)/2.0
-        if np.isinf(model_params['A0_error']):
-            model_params['A0_error'] = 10000.0
+        model_params['A0'],model_params['A0_error'] = calc_magnification(model_params['u0'], model_params['u0_error'])
 
         # model_params['chi2'] = np.around(model_fit.fit_results["best_model"][-1], 3)
         # Reporting actual chi2 instead value of the loss function
@@ -288,112 +304,22 @@ def gather_model_parameters(pevent, model_fit, verbose):
             model_params['piEE'] = 0.0
             model_params['piEE_error'] = 0.0
 
-        # Calculate the reduced chi2
+        # Calculate goodness of fit criteria
         ndata = 0
         for i,tel in enumerate(pevent.telescopes):
             ndata += len(tel.lightcurve)
         model_params['red_chi2'] = np.around(model_params['chi2'] / float(ndata - len(param_keys)),3)
-
-        # Calculate the BIC:
         model_params['BIC'] = model_params['chi2'] + len(param_keys) * np.log(ndata)
 
         # Retrieve the flux parameters, converting from PyLIMA's key nomenclature to MOPs
-        # Fetch the source flux
-        try:
-            source_flux = model_params['fsource_Tel_0']
-            source_flux_error = model_params['fsource_Tel_0_error']
-            model_params['source_magnitude'] = np.around(flux_to_mag(source_flux), 3)
+        model_params = extract_flux_parameters(model_params)
 
-            source_mag_error = fluxerror_to_magerror(model_params['fsource_Tel_0'],
-                                      model_params['fsource_Tel_0_error'])
-            model_params['source_mag_error'] = np.around(source_mag_error, 3)
-        except:
-            model_params['source_magnitude'] = np.nan
-            model_params['source_mag_error'] = np.nan
-        if verbose: logger.info('FITTOOLS: source flux ' + str(source_flux) + '+/-' + str(source_flux_error))
-        if verbose: logger.info(
-            'FITTOOLS: source mag ' + str(model_params['source_magnitude'])
-            + '+/-' + str(model_params['source_mag_error'])
-        )
-
-        # Handle blend flux, computed from ftotal
-        try:
-            total_flux = model_params['ftotal_Tel_0']
-            total_flux_error = model_params['ftotal_Tel_0_error']
-            blend_flux = total_flux - source_flux
-            model_params['blend_magnitude'] = np.around(flux_to_mag(blend_flux), 3)
-
-            blend_flux_error = np.sqrt(
-                total_flux_error * total_flux_error
-                + source_flux_error * source_flux_error
-            )
-            model_params['blend_mag_error'] = np.around(
-                fluxerror_to_magerror(blend_flux,
-                                      blend_flux_error),
-                3)
-        except:
-            model_params['blend_magnitude'] = get_zeropoint()
-            model_params['blend_mag_error'] = 0.0
-
-        # Occasionally fits with negative blend flux are possible
-        if blend_flux < 0.0:
-            blend_flux = 0.0
-            blend_flux_error = 0.0
-            model_params['blend_magnitude'] = get_zeropoint()
-            model_params['blend_mag_error'] = 0.0
-
-        if verbose: logger.info('FITTOOLS: blend flux ' + str(blend_flux) + '+/-' + str(blend_flux_error))
-        if verbose: logger.info(
-            'FITTOOLS: blend mag ' + str(model_params['blend_magnitude'])
-            + '+/-' + str(model_params['blend_mag_error'])
-        )
-
-        # If the model fitted contains valid entries for both source and blend flux,
-        # use these to calculate the baseline magnitude.  Otherwise, use the source magnitude
-        if not np.isnan(model_params['source_magnitude']) \
-               and not np.isnan(model_params['blend_magnitude']):
-            baseline_flux = source_flux + blend_flux
-            baseline_flux_error = np.sqrt(
-                source_flux_error ** 2 + blend_flux_error ** 2
-                + source_flux_error * blend_flux_error
-            )
-            model_params['baseline_magnitude'] = np.around(flux_to_mag(baseline_flux), 3)
-            model_params['baseline_mag_error'] = np.around(fluxerror_to_magerror(baseline_flux, baseline_flux_error), 3)
-
-        else:
-            model_params['baseline_magnitude'] = model_params['source_magnitude']
-            model_params['baseline_mag_error'] = model_params['source_mag_error']
-        if verbose: logger.info(
-            'FITTOOLS: baseline mag ' + str(model_params['baseline_magnitude'])
-            + '+/-' + str(model_params['baseline_mag_error'])
-        )
-
+        # Store parameters
         model_params['fit_covariance'] = model_fit.fit_results["covariance_matrix"]
-
         model_params['fit_parameters'] = model_fit.fit_parameters
 
         # Calculate fit statistics
-        # The model_fit.model_residuals returns photometric and astrometric residuals as a dictionary
-        # while the photometric residuals provides a list of arrays consisting of the
-        # photometric residuals, photometric errors, and error_flux
-        try:
-            res = model_fit.model_residuals(model_fit.fit_results['best_model'])
-            sw_test = stats.normal_Shapiro_Wilk(
-                (np.ravel(res[0]['photometry'][0]) / np.ravel(res[1]['photometry'][0])))
-            model_params['sw_test'] = np.around(sw_test[0],3)
-            ad_test = stats.normal_Anderson_Darling(
-                (np.ravel(res[0]['photometry'][0]) / np.ravel(res[1]['photometry'][0])))
-            model_params['ad_test'] = np.around(ad_test[0],3)
-            ks_test = stats.normal_Kolmogorov_Smirnov(
-                (np.ravel(res[0]['photometry'][0]) / np.ravel(res[1]['photometry'][0])))
-            model_params['ks_test'] = np.around(ks_test[0],3)
-            model_params['chi2_dof'] = np.sum((np.ravel(res[0]['photometry'][0]) / np.ravel(res[1]['photometry'][0])) ** 2) / (
-                    len(np.ravel(res[0]['photometry'][0])) - 5)
-        except:
-            model_params['sw_test'] = np.nan
-            model_params['ad_test'] = np.nan
-            model_params['ks_test'] = np.nan
-            model_params['chi2_dof'] = np.nan
+        model_params = calculate_fit_statistics(model_params, model_fit)
 
     else:
         logger.error('No model best fit results to record')
@@ -402,46 +328,149 @@ def gather_model_parameters(pevent, model_fit, verbose):
 
     return model_params
 
-def evaluate_model(best_model, verbose=False):
-    """Function to evaluate the overall quality of the fitted model.
-    The numerical noise threshold implicitly modified the permitted minimum u0 to its value.
+def extract_flux_parameters(model_params):
+    """
+    Function to extract the source and blend flux parameters and compute uncertainties
     """
 
-    if len(best_model) > 0:
-        epsilon_numerical_noise = 1e-5
-        u0_epsilon = 1e-20
+    # Retrieve the flux parameters, converting from PyLIMA's key nomenclature to MOPs
+    # Fetch the source flux
+    try:
+        source_flux = model_params['fsource_Tel_0']
+        source_flux_error = model_params['fsource_Tel_0_error']
+        model_params['source_magnitude'] = np.around(flux_to_mag(source_flux), 3)
 
-        test1 = np.abs(best_model['fit_parameters']["u0"][1][0] - best_model['u0'])
-        test2 = np.abs(best_model['fit_parameters']["u0"][1][1] - best_model['u0'])
-        test3 = np.abs(best_model['fit_parameters']["tE"][1][0] - best_model['tE'])
-        test4 = np.abs(best_model['fit_parameters']["tE"][1][1] - best_model['tE'])
+        source_mag_error = fluxerror_to_magerror(model_params['fsource_Tel_0'],
+                                                 model_params['fsource_Tel_0_error'])
+        model_params['source_mag_error'] = np.around(source_mag_error, 3)
+    except:
+        source_flux = np.nan
+        source_flux_error = np.nan
+        model_params['source_magnitude'] = np.nan
+        model_params['source_mag_error'] = np.nan
+    logger.info('Source flux ' + str(source_flux) + '+/-' + str(source_flux_error))
+    logger.info(
+        'Source mag ' + str(model_params['source_magnitude'])
+        + '+/-' + str(model_params['source_mag_error'])
+    )
 
-        if verbose:
-            logger.info('FITTOOLS Evaluating model fit:')
-            logger.info('Test 1 value='+str(test1)+' criterion >'+str(u0_epsilon))
-            logger.info('Test 2 value='+str(test2)+' criterion >'+str(u0_epsilon))
-            logger.info('Test 3 value='+str(test3)+' criterion >'+str(epsilon_numerical_noise))
-            logger.info('Test 4 value='+str(test3)+' criterion >'+str(epsilon_numerical_noise))
+    # Handle blend flux, computed from ftotal
+    try:
+        total_flux = model_params['ftotal_Tel_0']
+        total_flux_error = model_params['ftotal_Tel_0_error']
+        blend_flux = total_flux - source_flux
+        model_params['blend_magnitude'] = np.around(flux_to_mag(blend_flux), 3)
 
-        # The u0 constraints have been removed here after some experimentation because
-        # they were found to disallow valid fits for models with low u0 or apparent low u0
-        # for models pre-peak.
-        #if test1 < u0_epsilon or \
-        #    test2 < u0_epsilon or \
-        #    test3 < epsilon_numerical_noise or \
-        #    test4 < epsilon_numerical_noise:
-        if test3 < epsilon_numerical_noise or \
-            test4 < epsilon_numerical_noise:
-            for key in ['t0', 'u0', 'tE', 'chi2']:
-                best_model[key] = np.nan
+        blend_flux_error = np.sqrt(
+            total_flux_error * total_flux_error
+            + source_flux_error * source_flux_error
+        )
+        model_params['blend_mag_error'] = np.around(
+            fluxerror_to_magerror(blend_flux,
+                                  blend_flux_error),
+            3)
+    except:
+        model_params['blend_magnitude'] = get_zeropoint()
+        model_params['blend_mag_error'] = 0.0
 
-            if verbose:
-                logger.info('FITTOOLS model failed evaluation')
+    # Occasionally fits with negative blend flux are possible
+    if blend_flux < 0.0:
+        blend_flux = 0.0
+        blend_flux_error = 0.0
+        model_params['blend_magnitude'] = get_zeropoint()
+        model_params['blend_mag_error'] = 0.0
 
-    else:
-        logger.error('No best fit model to evaluate')
+    logger.info('Blend flux ' + str(blend_flux) + '+/-' + str(blend_flux_error))
+    logger.info(
+        'Blend mag ' + str(model_params['blend_magnitude'])
+        + '+/-' + str(model_params['blend_mag_error'])
+    )
 
-    return best_model
+    return model_params
+
+def calculate_fit_statistics(model_params, model_fit):
+    """
+    Calculate fit statistics
+    The model_fit.model_residuals returns photometric and astrometric residuals as a dictionary
+    while the photometric residuals provides a list of arrays consisting of the
+    photometric residuals, photometric errors, and error_flux
+    """
+
+    try:
+        res = model_fit.model_residuals(model_fit.fit_results['best_model'])
+        sw_test = stats.normal_Shapiro_Wilk(
+            (np.ravel(res[0]['photometry'][0]) / np.ravel(res[1]['photometry'][0])))
+        model_params['sw_test'] = np.around(sw_test[0], 3)
+        ad_test = stats.normal_Anderson_Darling(
+            (np.ravel(res[0]['photometry'][0]) / np.ravel(res[1]['photometry'][0])))
+        model_params['ad_test'] = np.around(ad_test[0], 3)
+        ks_test = stats.normal_Kolmogorov_Smirnov(
+            (np.ravel(res[0]['photometry'][0]) / np.ravel(res[1]['photometry'][0])))
+        model_params['ks_test'] = np.around(ks_test[0], 3)
+        model_params['chi2_dof'] = np.sum(
+            (np.ravel(res[0]['photometry'][0]) / np.ravel(res[1]['photometry'][0])) ** 2) / (
+                                           len(np.ravel(res[0]['photometry'][0])) - 5)
+    except:
+        model_params['sw_test'] = np.nan
+        model_params['ad_test'] = np.nan
+        model_params['ks_test'] = np.nan
+        model_params['chi2_dof'] = np.nan
+
+    return model_params
+
+def mcmc_parameters(pevent, model_params, mcmc_fit):
+    """
+    Function to harvest the best-fit model results from a PyLIMA MCMC fit
+
+    This function replaces the best-fit parameter values if the fit converged.
+    If not, the TRF best-fit values are used.
+    """
+
+    # Robust against missing parameters in the case of an aborted fit
+    try:
+        # Store parameters
+        model_params['fit_parameters'] = mcmc_fit.fit_parameters
+
+        # Derive MCMC samples from the chains
+        chains = mcmc_fit.fit_results['MCMC_chains_with_fluxes']
+        model_params['samples'] = chains.reshape(-1, chains.shape[2])
+        model_params['parameter_labels'] = list(mcmc_fit.fit_parameters.keys())
+        model_params['sample_columns'] = [0, 1, 2]
+        if 'rho' in mcmc_fit.fit_parameters.keys():
+            model_params['labels'].append('rho')
+            model_params['sample_columns'].append(3)
+
+        # Extract best-fit model parameter values
+        for i,key in enumerate(mcmc_fit.priors_parameters.keys()):
+            model_params[key] = mcmc_fit.fit_results['best_model'][i]
+            if 'likelihood' not in key:
+                model_params[key + '_error'] = 0.5 * (np.percentile(model_params['samples'][:, i], 84)
+                                              - np.percentile(model_params['samples'][:, i], 16))
+
+        # Calculate peak magnification
+        model_params['A0'], model_params['A0_error'] = calc_magnification(model_params['u0'], model_params['u0_error'])
+
+        # Calculate goodness of fit criteria
+        ndata = 0
+        for i,tel in enumerate(pevent.telescopes):
+            ndata += len(tel.lightcurve)
+        (chi2, pyLIMA_parameters) = mcmc_fit.model_chi2(mcmc_fit.fit_results["best_model"])
+        model_params['chi2'] = np.around(chi2, 3)
+        model_params['BIC'] = model_params['chi2'] + len(mcmc_fit.fit_parameters.keys()) * np.log(ndata)
+
+        # Retrieve the flux parameters, converting from PyLIMA's key nomenclature to MOPs
+        model_params = extract_flux_parameters(model_params)
+
+        # Calculate fit statistics
+        model_params = calculate_fit_statistics(model_params, mcmc_fit)
+
+        # Record fit method
+        model_params['fit_method'] = 'MCMC'
+
+    except KeyError:
+        logger.warning('MCMC failed')
+
+    return model_params
 
 def test_quality_of_model_fit(model_params):
     """Function to evaluate whether the initial model fit indicates a low degree of
