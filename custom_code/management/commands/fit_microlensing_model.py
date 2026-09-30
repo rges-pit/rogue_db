@@ -21,7 +21,6 @@ class Command(BaseCommand):
 
         if event:
             pylima_results = pylima_fit_functions.run_fit(event, bandpass='Roman_F146', verbose=True)
-            print(pylima_results)
 
             # Store model lightcurves
             data_utils.store_pylima_model_lightcurves(event, pylima_results)

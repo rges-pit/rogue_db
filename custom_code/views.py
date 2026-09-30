@@ -210,6 +210,7 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
         'piEE': 4, 'piEE_error': 4,
         'rho': 5, 'rho_error': 5,
         'chisq': 3, 'BIC': 3,
+        'tau': 2, 'tau_threshold': 2,
     }
     DEFAULT_PARAMETER_DECIMAL_PLACES = 3
 
@@ -251,6 +252,12 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
                 field = EventModel._meta.get_field(field_name)
                 fields.append((field_name, field.verbose_name, getattr(base, field_name)))
 
+            # Include tau parameters only if the fit method is MCMC
+            if getattr(base, 'fit_method') == 'MCMC':
+                for field_name in ('tau', 'tau_threshold'):
+                    field = EventModel._meta.get_field(field_name)
+                    fields.append((field_name, field.verbose_name, getattr(base, field_name)))
+
             raw_values = {name: value for name, _, value in fields}
             # A "<name>_error" field gets folded into its base field's row
             # (as "value ± error") rather than shown as its own row below it.
@@ -275,8 +282,6 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
         context['model_type'] = base.model_type
         context['parameters'] = parameters
         context['blend_parameters'] = blend_parameters
-        # corner_plot lives on the base EventModel (not per-subtype), so this
-        # picks it up for whichever model types populate it, present or future.
         context['corner_plot'] = base.corner_plot if base.corner_plot else None
         return context
 

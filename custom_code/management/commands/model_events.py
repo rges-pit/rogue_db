@@ -67,6 +67,12 @@ def fit_target(target_pk):
             )
             data_utils.store_baseline_diagnostics(events[0], baseline_results)
 
+            # Calculate coverage and skew
+            results = {}
+            results['coverage_fraction'] = general_fit_functions.calc_coverage(events[0])
+            results['symmetry'] = general_fit_functions.calc_symmetry(events[0])
+            data_utils.store_event_statistics(events[0], results)
+
             # Fit microlensing models and calculate diagnostics
             pylima_results = pylima_fit_functions.run_fit(events[0], verbose=False)
             data_utils.store_pylima_model_lightcurves(events[0], pylima_results)
@@ -77,6 +83,14 @@ def fit_target(target_pk):
                 events[0], pspl_model, fspl_model, straightline_model
             )
             best_mulens = diagnostics.get_best_mulens_model(pspl_model, fspl_model)
+            data_utils.generate_corner_plot(
+                pspl_model, pylima_results['pspl'],
+                target.name + '_' + str(events[0].event_id) + '_PSPL_corner_plot.png'
+            )
+            data_utils.generate_corner_plot(
+                fspl_model, pylima_results['fspl'],
+                target.name + '_' + str(events[0].event_id) + '_FSPL_corner_plot.png'
+            )
 
             # Fit flare models and calculate diagnostics
             davenport_results = flare_fit_functions.run_davenport_flare_fit(events[0])
@@ -84,12 +98,20 @@ def fit_target(target_pk):
             data_utils.store_model_lightcurve(
                 events[0], davenport_results, 'davenport_flare'
             )
+            data_utils.generate_corner_plot(
+                davenport_flare, davenport_results,
+                target.name + '_' + str(events[0].event_id) + '_davenport_corner_plot.png'
+            )
             pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(events[0])
             pitkin_flare = data_utils.store_pitkinflare_model_parameters(
                 events[0], pitkin_results
             )
             data_utils.store_model_lightcurve(events[0], pitkin_results, 'pitkin_flare')
             diagnostics.calc_flare_diagnostics(events[0], best_mulens, davenport_flare, pitkin_flare)
+            data_utils.generate_corner_plot(
+                pitkin_flare, pitkin_results,
+                target.name + '_' + str(events[0].event_id) + '_pitkin_corner_plot.png'
+            )
 
             return target_pk, target.name, True, None
 

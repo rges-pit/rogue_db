@@ -141,6 +141,11 @@ TOM_MFA_REQUIRED = 'all'
 # User/Profile fields every account must have filled in.
 # TOM_REQUIRED_USER_FIELDS = ['first_name', 'last_name', 'email']
 
+# When set to True, the Users page shows other users only to holders of the Django
+# "Can view user" permission (auth.view_user, which can be granted per user or per
+# group in the admin). (Superusers always see everyone).
+TOM_HIDE_OTHER_USERS = True
+
 # Users must accept this version of the terms of service (write the terms in
 # templates/tom_common/partials/terms_of_service_text.html). Change the value to require re-acceptance.
 # TOM_TERMS_OF_SERVICE_VERSION = '2026-01-01'

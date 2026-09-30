@@ -2,7 +2,8 @@ from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
 from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, EventModel,
-                                DavenportFlareModel, PitkinFlareModel)
+                                DavenportFlareModel, PitkinFlareModel,
+                                Event)
 from django.core.files.base import ContentFile
 import io
 from datetime import datetime, UTC
@@ -110,7 +111,12 @@ def fetch_lightcurve(datasets):
     # If not, extract the first lightcurve found from the following
     # passbands in order of priority
     lightcurve = np.zeros(1)
-    priority_order = ['F146', 'F184', 'F213', 'I', 'OGLE-I', 'ip', 'G', 'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp']
+    priority_order = [
+        'Roman_F146', 'Roman_F184', 'Roman_F213',
+        'F146', 'F184', 'F213',
+        'I', 'OGLE-I', 'ip', 'G',
+        'i_ZTF', 'r_ZTF', 'R', 'g_ZTF', 'gp'
+    ]
 
     dataset_order = [passband for passband in priority_order if passband in datasets.keys()]
 
@@ -379,6 +385,9 @@ def update_microlensing_model(event, fit_results, model_type):
                 'blend_mag_error': fit_results[model_type]['blend_mag_error']
             }
             mulens_model.fit_method = fit_results[model_type]['fit_method']
+            if fit_results[model_type]['fit_method'] == 'MCMC':
+                mulens_model.tau = fit_results[model_type]['tau']
+                mulens_model.tau_threshold = fit_results[model_type]['tau_threshold']
             mulens_model.save()
 
             logger.info('Stored ' + mulens_model.model_type
@@ -457,7 +466,9 @@ def store_davenportflare_model_parameters(event, results):
                 red_chisq=results['red_chisq'],
                 chisq=results['chisq'],
                 BIC=results['BIC'],
-                fit_method=results['fit_method']
+                fit_method=results['fit_method'],
+                tau=results['tau'],
+                tau_threshold=results['tau_threshold']
             )
 
         else:
@@ -472,6 +483,8 @@ def store_davenportflare_model_parameters(event, results):
             flare.chisq = results['chisq']
             flare.BIC = results['BIC']
             flare.fit_method = results['fit_method']
+            flare.tau = results['tau']
+            flare.tau_threshold = results['tau_threshold']
             flare.save()
 
         logger.info('Stored Davenport flare model parameters for event ' + event.target.name)
@@ -509,7 +522,9 @@ def store_pitkinflare_model_parameters(event, results):
                 chisq=results['chisq'],
                 red_chisq=results['red_chisq'],
                 BIC=results['BIC'],
-                fit_method=results['fit_method']
+                fit_method=results['fit_method'],
+                tau=results['tau'],
+                tau_thresold=results['tau_threshold']
             )
 
         else:
@@ -526,6 +541,8 @@ def store_pitkinflare_model_parameters(event, results):
             flare.red_chisq = results['red_chisq']
             flare.BIC = results['BIC']
             flare.fit_method = results['fit_method']
+            flare.tau = results['tau']
+            flare.tau_threshold = results['tau_threshold']
             flare.save()
 
         logger.info('Stored Pitkin flare model parameters for event ' + event.target.name)
@@ -575,3 +592,12 @@ def generate_corner_plot(emodel, results, file_name):
     elif emodel.corner_plot:
         emodel.corner_plot.delete(save=False)
         EventModel.objects.filter(pk=emodel.pk).update(corner_plot=None)
+
+def store_event_statistics(lcevent, results):
+    """
+    Function to store the keyword values for an event given in the results dictionary.
+    The keywords in the dictionary need to match the corresponding Event attributes,
+    and no other values can be present
+    """
+
+    Event.objects.filter(pk=lcevent.pk).update(**results)
