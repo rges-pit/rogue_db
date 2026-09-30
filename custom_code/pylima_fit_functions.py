@@ -25,7 +25,7 @@ def run_fit(lcevent, bandpass=None, verbose=False):
     logger.info('Starting to model most recent event for source ' + lcevent.target.name)
 
     # Retrieve timeseries photometry from the DB
-    datasets = data_utils.get_reduced_data(lcevent, bandpass=bandpass)
+    datasets = data_utils.get_reduced_data(lcevent, source_name=bandpass)
 
     # Initialize the new event to be fitted:
     current_event = event.Event(ra=lcevent.target.ra, dec=lcevent.target.dec)
@@ -57,14 +57,15 @@ def run_fit(lcevent, bandpass=None, verbose=False):
     pspl_model_params = gather_model_parameters(current_event, pspl_model_fit, verbose)
     if verbose: logger.info('PSPL fitted parameters ' + repr(pspl_model_params))
 
-    guess_parameters = pspl_model_fit.fit_results['best_model']
-    pspl_mcmc_fit = MCMC_fit.MCMCfit(pspl, MCMC_links=10000)
+    if 'best_model' in pspl_model_fit.fit_results.keys():
+        guess_parameters = pspl_model_fit.fit_results['best_model']
+        pspl_mcmc_fit = MCMC_fit.MCMCfit(pspl, MCMC_links=10000)
 
-    pspl_mcmc_fit.model_parameters_guess = guess_parameters[:3]
-    pspl_mcmc_fit.fit()
+        pspl_mcmc_fit.model_parameters_guess = guess_parameters[:3]
+        pspl_mcmc_fit.fit()
 
-    pspl_model_params = mcmc_parameters(current_event, pspl_model_params, pspl_mcmc_fit)
-    if verbose: logger.info('PSPL MCMC parameters ' + repr(pspl_model_params))
+        pspl_model_params = mcmc_parameters(current_event, pspl_model_params, pspl_mcmc_fit)
+        if verbose: logger.info('PSPL MCMC parameters ' + repr(pspl_model_params))
 
 
     # MODEL 2: FSPL model without parallax
@@ -83,15 +84,16 @@ def run_fit(lcevent, bandpass=None, verbose=False):
     # model2_params['blend_magnitude'] = np.nan
     if verbose: logger.info('FSPL fitted parameters ' + repr(fspl_model_params))
 
-    guess_parameters = fspl_model_fit.fit_results['best_model']
+    if 'best_model' in fspl_model_fit.fit_results.keys():
+        guess_parameters = fspl_model_fit.fit_results['best_model']
 
-    fspl_mcmc_fit = MCMC_fit.MCMCfit(fspl)
+        fspl_mcmc_fit = MCMC_fit.MCMCfit(fspl)
 
-    fspl_mcmc_fit.model_parameters_guess = guess_parameters[:4]
-    fspl_mcmc_fit.fit()
+        fspl_mcmc_fit.model_parameters_guess = guess_parameters[:4]
+        fspl_mcmc_fit.fit()
 
-    fspl_model_params = mcmc_parameters(current_event, fspl_model_params, fspl_mcmc_fit)
-    if verbose: logger.info('FSPL MCMC parameters ' + repr(fspl_model_params))
+        fspl_model_params = mcmc_parameters(current_event, fspl_model_params, fspl_mcmc_fit)
+        if verbose: logger.info('FSPL MCMC parameters ' + repr(fspl_model_params))
 
     # Decide which fit to accept based on the fitted chi2 in each case.
     # Ordinarily, model1 (with blending, parallax) should produce a lower chi2 because it has more parameters.

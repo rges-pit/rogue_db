@@ -64,7 +64,7 @@ def get_full_lightcurve(target, bandpass=None):
 
     return datasets
 
-def get_reduced_data(event, bandpass=None):
+def get_reduced_data(event, source_name=None):
     """Function to extract the timeseries data from a QuerySet of PhotometryReducedDatums, and
     creates the necessary arrays.
     Also accepts a QuerySet of generic ReducedDatums (lc_model, tabular, etc.) for the same
@@ -72,9 +72,9 @@ def get_reduced_data(event, bandpass=None):
     Note that the querysets must be provided separately and not derived directly from a query
     """
 
-    if bandpass:
+    if source_name:
         photometry_qs = PhotometryReducedDatum.objects.filter(
-            target__name=event.target.name, source_name=bandpass
+            target__name=event.target.name, source_name=source_name
         ).order_by("timestamp")
     else:
         photometry_qs = PhotometryReducedDatum.objects.filter(
@@ -114,7 +114,7 @@ def get_reduced_data(event, bandpass=None):
 
     return datasets
 
-def get_baseline_data(event, bandpass=None):
+def get_baseline_data(event, source_name=None):
     """
     Function to retrieve the full lightcurve of the source, removing those sections of it
     which are flagged as events
@@ -128,7 +128,7 @@ def get_baseline_data(event, bandpass=None):
     """
 
     # Extract the lightcurve segment for this event
-    datasets = get_reduced_data(event, source_name=bandpass)
+    datasets = get_reduced_data(event, source_name=source_name)
 
     # Filter the lightcurves to select points at the baseline.
     # Since the event lightcurve segment has already been cropped to include
@@ -273,37 +273,38 @@ def store_model_lightcurve(event, results, model_type):
     # Map array -> database keywords
     model_types_list = get_model_types_list()
 
-    data = {
-        'lc_model_time': results['model_lc'][:,0].tolist(),
-        'lc_model_magnitude': results['model_lc'][:,1].tolist()
-    }
+    if 'model_lc' in results.keys():
+        data = {
+            'lc_model_time': results['model_lc'][:,0].tolist(),
+            'lc_model_magnitude': results['model_lc'][:,1].tolist()
+        }
 
-    # If there is no existing model for this target, create one
-    data_type = 'lc_model_' + str(event.event_id) + '_' + model_types_list[model_type]
-    qs = ReducedDatum.objects.filter(target=event.target, data_type=data_type)
+        # If there is no existing model for this target, create one
+        data_type = 'lc_model_' + str(event.event_id) + '_' + model_types_list[model_type]
+        qs = ReducedDatum.objects.filter(target=event.target, data_type=data_type)
 
-    if qs.count() == 0:
-        rd = ReducedDatum.objects.create(
-            timestamp=model_time,
-            value=data,
-            source_name='RogueDB',
-            source_location=event.target.name,
-            data_type=data_type,
-            target=event.target
-        )
-        logger.info('Created ' + model_type + ' lightcurve model datum for ' + event.target.name)
+        if qs.count() == 0:
+            rd = ReducedDatum.objects.create(
+                timestamp=model_time,
+                value=data,
+                source_name='RogueDB',
+                source_location=event.target.name,
+                data_type=data_type,
+                target=event.target
+            )
+            logger.info('Created ' + model_type + ' lightcurve model datum for ' + event.target.name)
 
-    # If there is a pre-existing model, update it
-    else:
-        rd = qs[0]
-        rd.timestamp = model_time
-        rd.value = data
-        rd.source_name = 'RogueDB'
-        rd.source_location = event.target.name
-        rd.data_type = data_type
-        rd.target = event.target
-        rd.save()
-        logger.info('Updated existing ' + model_type + ' lightcurve model datum for ' + event.target.name)
+        # If there is a pre-existing model, update it
+        else:
+            rd = qs[0]
+            rd.timestamp = model_time
+            rd.value = data
+            rd.source_name = 'RogueDB'
+            rd.source_location = event.target.name
+            rd.data_type = data_type
+            rd.target = event.target
+            rd.save()
+            logger.info('Updated existing ' + model_type + ' lightcurve model datum for ' + event.target.name)
 
 
 def store_microlensing_model_parameters(event, pylima_results):
@@ -607,6 +608,7 @@ def store_baseline_diagnostics(lcevent, results):
     if results['frac_below_baseline']:
         lcevent.frac_below_baseline = results['frac_below_baseline']
         lcevent.max_excursion_below_baseline = results['max_excursion_below_baseline']
+        lcevent.Npoint_above_3sigma = results['Npoint_above_3sigma']
         lcevent.save()
 
         logger.info('Stored diagostics from baseline lightcurve fit for ' + lcevent.target.name)

@@ -9,7 +9,7 @@
           Dec: {{ target.dec|deg_to_sexigesimal:"dms" }} = {{ target.dec|floatformat:5 }}&deg;<br/>
           Baseline: {{ target.baseline_magnitude|floatformat:3 }} mag ({{ target.mag_now_passband }})<br/>
           Max peak periodogram: {{target.max_peak_periodogram|floatformat:2}}<br/>
-          Period: {{target.period|floatformat:3}}<br/>
+          Period: {{target.period|floatformat:3}} days<br/>
   </div>
     <div class="col-sm-3">
     <h5>{{ event.target.classification }}</h5>

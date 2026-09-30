@@ -1,4 +1,4 @@
-from custom_code import data_utils
+from custom_code import data_utils, diagnostics
 import logging
 import numpy as np
 import scipy.stats as stats
@@ -72,8 +72,10 @@ def run_baseline_fit(lcevent):
     logger.info('Starting baseline fit to event for event ' + lcevent.event_id)
 
     # Retrieve Roman's primary timeseries photometry from the DB, excluding events
-    datasets = data_utils.get_baseline_data(lcevent, bandpass='Roman_F146')
+    datasets = data_utils.get_baseline_data(lcevent, source_name='Roman_F146')
     lightcurve = data_utils.fetch_lightcurve(datasets)
+    full_datasets = data_utils.get_reduced_data(lcevent, source_name='Roman_F146')
+    full_lightcurve = data_utils.fetch_lightcurve(full_datasets)
 
     # Set a cap of a minimum of ten points for a sensible fit
     if len(lightcurve) > 10:
@@ -105,10 +107,15 @@ def run_baseline_fit(lcevent):
         red_chi2 = chi2 / (float(len(lightcurve[:, 0])) - 2.0)
         bic = chi2 + len(coeffs) * np.log(len(lightcurve))
 
-        # Calculate diagnostics for the straight line fit
+        # Calculate diagnostics for the baseline fit
         mean_mag = np.median(model_lc[:,1])
         frac_below_baseline = float(len(np.where(lightcurve[:,1] < mean_mag)[0])) / float(len(lightcurve))
         max_excursion_below_baseline = (lightcurve[:,1] - mean_mag).min()
+        npoints = diagnostics.calc_npoints_above_baseline(
+            lcevent,
+            lightcurve,
+            full_lightcurve
+        )
 
         logger.info('Completed baseline line fit with coefficients: ' + repr(coeffs))
 
@@ -117,6 +124,7 @@ def run_baseline_fit(lcevent):
             'model_lc': model_lc,
             'covar': covar, 'frac_below_baseline': frac_below_baseline,
             'max_excursion_below_baseline': max_excursion_below_baseline,
+            'Npoint_above_3sigma': npoints,
             'fit_method': 'polyfit'
         }
 
@@ -126,6 +134,7 @@ def run_baseline_fit(lcevent):
             'coeffs': np.zeros(0), 'chisq': None, 'BIC': None, 'red_chisq': None,
             'covar': np.zeros(0), 'frac_below_baseline': None,
             'max_excursion_below_baseline': None,
+            'Npoint_above_3sigma': None,
             'fit_method': 'polyfit'
         }
 
@@ -143,7 +152,7 @@ def calc_coverage(lcevent):
         frac_cover float
     """
 
-    datasets = data_utils.get_reduced_data(lcevent, bandpass='Roman_F146')
+    datasets = data_utils.get_reduced_data(lcevent, source_name='Roman_F146')
     lightcurve = data_utils.fetch_lightcurve(datasets)
 
     if len(lightcurve) > 0:
@@ -168,7 +177,7 @@ def calc_symmetry(lcevent):
     Negative value indicates a long tail to the left of the peak
     """
 
-    datasets = data_utils.get_reduced_data(lcevent, bandpass='Roman_F146')
+    datasets = data_utils.get_reduced_data(lcevent, source_name='Roman_F146')
     lightcurve = data_utils.fetch_lightcurve(datasets)
 
     if len(lightcurve) > 0:

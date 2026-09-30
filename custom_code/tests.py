@@ -4,7 +4,7 @@ from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum
 from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
 from custom_code import (pylima_fit_functions, general_fit_functions, utils,
-                         flare_fit_functions, data_utils, variable_stars)
+                         flare_fit_functions, data_utils, variable_stars, diagnostics)
 import datetime
 from astropy.time import Time
 from django.utils import timezone
@@ -304,6 +304,30 @@ class TestGeneralFitFunctions(TestCase):
 
         assert(type(skew) == type(1.0))
         assert(skew < 1.0)
+
+    def test_calc_npoints_above_baseline(self):
+
+        # Reset the start_time and duration of the test event to the start
+        # for easier array handling
+        self.test_event.start_time = Time(self.datums[0].timestamp).jd
+        self.test_event.duration = Time(self.datums[51].timestamp).jd - Time(self.datums[0].timestamp).jd
+
+        # Create two-level test lightcurves
+        high_points = 50
+        full_lightcurve = np.empty((self.ndata,3))
+        full_lightcurve[:,0] = [Time(rd.timestamp).jd for rd in self.datums]
+        full_lightcurve[0:high_points,1] = 16.0
+        full_lightcurve[high_points+1:,1] = 20.0
+        full_lightcurve[:,2] = 0.001
+        baseline_lightcurve = full_lightcurve[high_points+1:,:]
+
+        npoints = diagnostics.calc_npoints_above_baseline(
+            self.test_event,
+            baseline_lightcurve,
+            full_lightcurve
+        )
+
+        assert(npoints == high_points)
 
 class TestFlareFitFunctions(TestCase):
 

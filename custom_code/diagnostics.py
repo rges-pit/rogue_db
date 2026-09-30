@@ -1,3 +1,7 @@
+from itertools import groupby
+from operator import itemgetter
+import numpy as np
+
 def calc_mulens_diagnostics(event, pspl_model, fspl_model, straightline_model):
     """
     Function to compare the results of PyLIMA model fits for PSPL and FSPL
@@ -91,3 +95,30 @@ def compare_flare_models(event, mulens_model, davenport_model, pitkin_model):
         event.delta_chi2_FSPL_bestflare = delta_chisq
         event.delta_BIC_FSPL_bestflare = delta_bic
         event.save()
+
+def calc_npoints_above_baseline(lcevent, baseline_lightcurve, event_lightcurve):
+    """
+    Function to calculate the number of consecutive points points more than
+    3 sigma above baseline
+    """
+
+    # Identify those datapoints that are more than 3sigma above the median baseline
+    median_mag = np.median(baseline_lightcurve[:,1])
+    stddev = (baseline_lightcurve[:,1] - median_mag).std()
+
+    idx1 = np.where(event_lightcurve[:,1] < median_mag + 3.0*stddev)[0]
+
+    # Identify those datapoints within the event
+    idx2 = np.where(event_lightcurve[:,0] >= lcevent.start_time)[0]
+    idx3 = np.where(event_lightcurve[:,0] <= lcevent.start_time + lcevent.duration)[0]
+    idx4 = set(idx2).intersection(set(idx3))
+    idx = list(idx4.intersection(set(idx1)))
+
+    # Identify groups of consecutive datapoints, and find the length of the
+    # group with the most entries
+    npoints = 0
+    if len(idx) > 0:
+        groups = np.split(idx, np.where(np.diff(idx) != 1)[0] + 1)
+        npoints = np.array([len(entry) for entry in groups]).max()
+
+    return npoints
