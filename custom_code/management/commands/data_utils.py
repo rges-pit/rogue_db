@@ -2,7 +2,8 @@ from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
 from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, EventModel,
-                                DavenportFlareModel, PitkinFlareModel)
+                                DavenportFlareModel, PitkinFlareModel,
+                                Event)
 from django.core.files.base import ContentFile
 import io
 from datetime import datetime, UTC
@@ -591,3 +592,12 @@ def generate_corner_plot(emodel, results, file_name):
     elif emodel.corner_plot:
         emodel.corner_plot.delete(save=False)
         EventModel.objects.filter(pk=emodel.pk).update(corner_plot=None)
+
+def store_event_statistics(lcevent, results):
+    """
+    Function to store the keyword values for an event given in the results dictionary.
+    The keywords in the dictionary need to match the corresponding Event attributes,
+    and no other values can be present
+    """
+
+    Event.objects.filter(pk=lcevent.pk).update(**results)

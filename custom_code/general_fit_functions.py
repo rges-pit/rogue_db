@@ -1,6 +1,7 @@
 from custom_code.management.commands import data_utils
 import logging
 import numpy as np
+import scipy.stats as stats
 import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,23 @@ def calc_coverage(lcevent):
 
 def calc_symmetry(lcevent):
     """
-    Function to estimate the symmetry of the event lightcurve
+    Function to estimate the skewness of the event lightcurve
+    Skew = 0 indicates perfect symmetry
+    Positive value indicates a long tail to the right of the peak
+    Negative value indicates a long tail to the left of the peak
     """
-    
+
+    datasets = data_utils.get_reduced_data(lcevent, bandpass='Roman_F146')
+    lightcurve = data_utils.fetch_lightcurve(datasets)
+
+    if len(lightcurve) > 0:
+        # Get section of lightcurve within the event duration:
+        idx1 = np.where(lightcurve[:, 0] >= lcevent.start_time)[0]
+        idx2 = np.where(lightcurve[:, 0] <= lcevent.start_time + lcevent.duration)[0]
+        idx = list(set(idx1).intersection(set(idx2)))
+
+        skew = float(stats.skew(lightcurve[idx,1]))
+
+        return skew
+    else:
+        return np.nan

@@ -55,6 +55,46 @@ def create_test_target_with_photometry():
 
     return t, e, ndata, nlc, datums
 
+def create_test_target_with_gaussian():
+    """
+    Function to create a test target with photometry and an event
+    that occurs within the lightcurve, which is approximated by a Gaussian
+    """
+    t = Target.objects.create(
+        name='TestObject2',
+        classification='Microlensing PSPL',
+        category='Microlensing stellar/planet',
+        ra = 265.5,
+        dec = 17.5
+    )
+    nlc = 1
+    ndata = 100
+    mean_mag = 17.0
+    start_time = datetime.datetime.strptime('2026-08-01T00:00:00.0', '%Y-%m-%dT%H:%M:%S.%f')
+    jd_start_time = Time(start_time).jd
+    interval = 15.0 # Minutes between exposures
+    duration = 240 # minutes
+    rng = np.random.default_rng(seed=42)  # Setting seed for reproducibility
+    gaussian_values = rng.normal(loc=mean_mag, scale=duration / (24.0 * 60.0), size=ndata)
+    datums = [PhotometryReducedDatum(**{
+        'target': t,
+        'timestamp': timezone.make_aware((start_time + i * datetime.timedelta(minutes=interval)), datetime.timezone.utc),
+        'brightness': gaussian_values[i],
+        'brightness_error': 0.001,
+        'bandpass': 'Roman_F146',
+        'source_name': 'Roman_F146'
+    }) for i in range(0, ndata, 1)]
+    PhotometryReducedDatum.objects.bulk_create(datums)
+    e = Event.objects.create(
+        target=t,
+        event_id='test_event2',
+        start_time=jd_start_time + ((20*interval) / (24.0 * 60.0)),
+        duration=duration / (24.0 * 60.0)  # Units of days
+    )
+
+    return t, e, ndata, nlc, datums
+
+
 def create_test_pylima_event():
     """
     Funcion to simulate a PyLIMA event
@@ -242,6 +282,7 @@ class TestGeneralFitFunctions(TestCase):
 
     def setUp(self):
         self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
+        self.test_target2, self.test_event2, self.ndata2, self.nlc2, self.datums2 = create_test_target_with_gaussian()
 
     def test_run_event_straightline_fit(self):
 
@@ -258,6 +299,13 @@ class TestGeneralFitFunctions(TestCase):
 
         assert(type(frac_cover) == type(1.0))
         self.assertAlmostEqual(frac_cover, 1.0, 1)
+
+    def test_calc_symmetry(self):
+
+        skew = general_fit_functions.calc_symmetry(self.test_event2)
+
+        assert(type(skew) == type(1.0))
+        assert(skew < 1.0)
 
 class TestFlareFitFunctions(TestCase):
 

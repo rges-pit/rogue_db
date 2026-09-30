@@ -40,6 +40,12 @@ class Command(BaseCommand):
 
             # TO DO: Skew normal model fit
 
+            # Calculate coverage and skew
+            results = {}
+            results['coverage_fraction'] = general_fit_functions.calc_coverage(event)
+            results['symmetry'] = general_fit_functions.calc_symmetry(event)
+            data_utils.store_event_statistics(event, results)
+
             logger.info('Completed standard model fits for ' + options['source_name'])
 
         else:
