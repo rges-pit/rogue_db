@@ -3,7 +3,7 @@ from django.dispatch import receiver
 
 from .target_models import RogueTarget
 from .models import Event
-from .tasks import (check_target_for_variable_star,
+from .tasks import (check_target_for_variable_star, compute_periodogram,
                     check_event_for_moving_objects, make_event_lightcurve)
 
 @receiver(post_save, sender=RogueTarget)
@@ -20,6 +20,7 @@ def on_target_saved(sender, instance, created, update_fields, **kwargs):
         return
 
     check_target_for_variable_star.enqueue(instance.pk)
+    compute_periodogram.enqueue(instance.pk)
 
 @receiver(post_save, sender=Event)
 def on_event_saved(sender, instance, created, update_fields, **kwargs):

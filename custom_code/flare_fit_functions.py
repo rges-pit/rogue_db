@@ -1,5 +1,4 @@
-from custom_code.management.commands import data_utils
-from custom_code import statistics
+from custom_code import statistics, data_utils
 import logging
 from altaipony.fit_flares import fit_flares, make_flare_table, build_baseline
 from altaipony.fakeflares import flare_model_davenport2014

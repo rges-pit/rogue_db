@@ -7,7 +7,9 @@
       <h6>Source: <a href="{% url 'targets:detail' pk=target.id %}">{{ target.name }}</a><br/></h6>
           RA: {{ target.ra|deg_to_sexigesimal:"hms" }} = {{ target.ra|floatformat:5 }}&deg;<br/>
           Dec: {{ target.dec|deg_to_sexigesimal:"dms" }} = {{ target.dec|floatformat:5 }}&deg;<br/>
-          Baseline : {{ target.baseline_magnitude|floatformat:3 }} mag ({{ target.mag_now_passband }})<br/>
+          Baseline: {{ target.baseline_magnitude|floatformat:3 }} mag ({{ target.mag_now_passband }})<br/>
+          Max peak periodogram: {{target.max_peak_periodogram|floatformat:2}}<br/>
+          Period: {{target.period|floatformat:3}}<br/>
   </div>
     <div class="col-sm-3">
     <h5>{{ event.target.classification }}</h5>

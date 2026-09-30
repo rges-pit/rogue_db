@@ -41,7 +41,7 @@ def fit_target(target_pk):
     """
     from tom_targets.models import Target
     from custom_code.models import Event
-    from custom_code.management.commands import data_utils
+    from custom_code import data_utils
     from custom_code import (pylima_fit_functions, general_fit_functions,
             diagnostics, flare_fit_functions)
 

@@ -1,22 +1,20 @@
 from django.test import TestCase
 from custom_code.models import Event
-from custom_code.management.commands import data_utils
 from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum
 from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
 from custom_code import (pylima_fit_functions, general_fit_functions, utils,
-        flare_fit_functions)
+                         flare_fit_functions, data_utils, variable_stars)
 import datetime
 from astropy.time import Time
 from django.utils import timezone
 from pyLIMA import telescopes
-from pyLIMA.models import PSPL_model, FSPL_model
+from pyLIMA.models import PSPL_model
 from pyLIMA.fits import TRF_fit
 from pyLIMA import event as mulens_event
 from pyLIMA.simulations import simulator
 from altaipony.fit_flares import fit_flares
 import numpy as np
-import pandas as pd
 import copy
 
 def create_test_target_with_photometry():
@@ -505,3 +503,15 @@ class TestFlareFitFunctions(TestCase):
             assert(key in results.keys())
         tmax = self.test_event.start_time + self.test_event.duration
         self.assertTrue(self.test_event.start_time <= results['t_peak'] <= tmax)
+
+class TestVariableStars(TestCase):
+
+    def setUp(self):
+        self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
+
+    def test_calc_periodogram(self):
+
+        variable_stars.calc_periodogram(self.test_target)
+
+        assert(self.test_target.max_peak_periodogram != 0.0)
+        assert(self.test_target.period != 0.0)

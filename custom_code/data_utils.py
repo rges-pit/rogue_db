@@ -14,6 +14,55 @@ import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
+def get_full_lightcurve(target, bandpass=None):
+    """
+    Function to retrieve the full timeseries PhotometryReducedDatums for a Target,
+    selecting a specific bandpass if desired
+    """
+
+    if bandpass:
+        photometry_qs = PhotometryReducedDatum.objects.filter(
+            target__name=target.name, source_name=bandpass
+        ).order_by("timestamp")
+    else:
+        photometry_qs = PhotometryReducedDatum.objects.filter(
+            target__name=target.name
+        ).order_by("timestamp")
+    datasets = {}
+
+    for rd in photometry_qs:
+        ts = Time(rd.timestamp).jd
+        # When filtering to one source_name, key the result by that same
+        # value -- rd.bandpass uses a different naming scheme (e.g. "F146"
+        # vs. source_name "Roman_F146"), so keying by it here left callers
+        # that filtered by bandpass unable to find their own data back out
+        # of the returned dict under the name they asked for.
+        passband = bandpass if bandpass else rd.bandpass
+        if passband in datasets.keys():
+            lc = datasets[passband]
+        else:
+            lc = []
+
+        # Append the datapoint to the corresponding dataset
+        try:
+            lc.append([ts, rd.brightness, rd.brightness_error])
+        except:
+            # Necessary to handle the datapoints where only a limit is available.
+            # Skipping these for now
+            try:
+                lc.append([ts, rd.brightness, 1.0])
+            except KeyError:
+                pass
+
+        datasets[passband] = lc
+
+    # Convert the accumulated lightcurves into numpy arrays:
+    for passband, lc in datasets.items():
+        datasets[passband] = np.array(lc)
+
+    logger.info('Found ' + str(len(datasets)) + ' datasets')
+
+    return datasets
 
 def get_reduced_data(event, bandpass=None):
     """Function to extract the timeseries data from a QuerySet of PhotometryReducedDatums, and
@@ -79,7 +128,7 @@ def get_baseline_data(event, bandpass=None):
     """
 
     # Extract the lightcurve segment for this event
-    datasets = get_reduced_data(event, bandpass=bandpass)
+    datasets = get_reduced_data(event, source_name=bandpass)
 
     # Filter the lightcurves to select points at the baseline.
     # Since the event lightcurve segment has already been cropped to include

@@ -252,6 +252,7 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
                 field = EventModel._meta.get_field(field_name)
                 fields.append((field_name, field.verbose_name, getattr(base, field_name)))
 
+            # Perdio
             # Include tau parameters only if the fit method is MCMC
             if getattr(base, 'fit_method') == 'MCMC':
                 for field_name in ('tau', 'tau_threshold'):

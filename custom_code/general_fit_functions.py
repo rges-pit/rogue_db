@@ -1,4 +1,4 @@
-from custom_code.management.commands import data_utils
+from custom_code import data_utils
 import logging
 import numpy as np
 import scipy.stats as stats
@@ -182,3 +182,4 @@ def calc_symmetry(lcevent):
         return skew
     else:
         return np.nan
+

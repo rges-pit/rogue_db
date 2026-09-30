@@ -1,6 +1,8 @@
 from custom_code.models import VariableStar, RogueTarget
+from custom_code import data_utils
 from astropy.coordinates import SkyCoord
 from astropy import units as u
+from astropy.timeseries import LombScargle
 import numpy as np
 import logging
 
@@ -58,3 +60,29 @@ def find_nearest_rges_variable_catalog(target, radius=2):
 
 # def check_external_variable_catalog(target):
 # Future code to check an extended external catalog will go here
+
+def calc_periodogram(target):
+    """
+    Function to calculate the Lomb-Scargle periodogram for a Source's full lightcurve
+    """
+
+    datasets = data_utils.get_full_lightcurve(target, bandpass='Roman_F146')
+    lightcurve = datasets.get('Roman_F146')
+
+    if lightcurve is None or len(lightcurve) < 10:
+        logger.info(
+            'Skipping periodogram for ' + target.name
+            + ': fewer than 10 Roman_F146 datapoints available'
+        )
+        return
+
+    frequency, power = LombScargle(lightcurve[:,0], lightcurve[:,1]).autopower()
+
+    max_peak = power.max()
+    best_frequency = frequency[np.argmax(power)]
+    period = 1.0/best_frequency
+
+    RogueTarget.objects.filter(pk=target.pk).update(
+        max_peak_periodogram=max_peak,
+        period=period,
+    )

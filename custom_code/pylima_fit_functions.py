@@ -1,5 +1,4 @@
-from custom_code.management.commands import data_utils
-from custom_code import statistics
+from custom_code import statistics, data_utils
 import logging
 import numpy as np
 

@@ -1,7 +1,6 @@
 import io
 
-from tom_dataproducts.models import PhotometryReducedDatum
-from custom_code.management.commands import data_utils
+from custom_code import data_utils
 from custom_code.models import Event
 from django.core.files.base import ContentFile
 import numpy as np

@@ -9,6 +9,7 @@ from django.utils import timezone
 import datetime
 import numpy as np
 from custom_code import utils
+from custom_code.tasks import compute_periodogram
 
 
 class LightCurveBandSerializer(serializers.Serializer):
@@ -137,11 +138,11 @@ class MSOSAlertSerializer(serializers.Serializer):
                 })
                 for i in range(len(lc))
             ]
-            # ignore_conflicts: without it, rerunning ingestion on a file
-            # already ingested hits the unique_photometry constraint and
-            # raises IntegrityError, aborting the whole batch instead of
-            # just skipping the points that already exist.
+            # ignore_conflicts to ingest just the new datapoints and avoid
+            # crashing if any are duplicates
             PhotometryReducedDatum.objects.bulk_create(reduced_datums, ignore_conflicts=True)
+
+        compute_periodogram.enqueue(t.pk)
 
         return alert
 

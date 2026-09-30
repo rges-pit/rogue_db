@@ -48,6 +48,8 @@ class RogueTarget(BaseTarget):
     nearest_variable_star = models.CharField(max_length=60, default='', null=True, blank=True)
     angular_separation_variable = models.FloatField(default=0, null=True, blank=True)
     nearest_variable_type = models.CharField(max_length=30, default='', null=True, blank=True)
+    max_peak_periodogram = models.FloatField(null=True, blank=True)
+    period = models.FloatField(null=True, blank=True)
 
     class Meta:
         verbose_name = "target"
