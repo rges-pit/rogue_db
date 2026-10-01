@@ -1,6 +1,5 @@
-from itertools import groupby
-from operator import itemgetter
 import numpy as np
+from custom_code.models import Event
 
 def calc_mulens_diagnostics(event, pspl_model, fspl_model, straightline_model):
     """
@@ -122,3 +121,22 @@ def calc_npoints_above_baseline(lcevent, baseline_lightcurve, event_lightcurve):
         npoints = np.array([len(entry) for entry in groups]).max()
 
     return npoints
+
+def second_peak_diagnostics(e, event_list):
+
+    # Check to see if there is more than one event associated with this target
+    if len(event_list) > 1:
+
+        # Identify the nearest event to this one in the list
+        mid_event = e.start_time + e.duration/2.0
+        delta_mid_event_times = np.array(
+            [(et.start_time + et.duration/2.0)-mid_event for et in event_list if e != et]
+        )
+        et_idx = np.argmin(delta_mid_event_times)
+
+        # Time to nearest other peak
+        Event.objects.filter(pk=e.pk).update(time_to_second_peak=delta_mid_event_times[et_idx])
+
+        # Second peak mag
+        other_events = [et for et in event_list if e != et]
+        Event.objects.filter(pk=e.pk).update(second_peak_mag=other_events[et_idx].peak_mag)

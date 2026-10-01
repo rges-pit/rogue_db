@@ -17,13 +17,13 @@ from altaipony.fit_flares import fit_flares
 import numpy as np
 import copy
 
-def create_test_target_with_photometry():
+def create_test_target_with_photometry(name='TestObject'):
     """
     Function to create a test target with photometry and an event
     that occurs within the lightcurve
     """
     t = Target.objects.create(
-        name='TestObject',
+        name=name,
         classification='Microlensing PSPL',
         category='Microlensing stellar/planet',
         ra = 265.5,
@@ -48,7 +48,8 @@ def create_test_target_with_photometry():
         target=t,
         event_id='test_event',
         start_time=jd_start_time + ((20*interval) / (24.0 * 60.0)),
-        duration=240 / (24.0 * 60.0)  # Units of days
+        duration=240 / (24.0 * 60.0),  # Units of days
+        peak_mag=16.0
     )
 
     return t, e, ndata, nlc, datums
@@ -539,3 +540,28 @@ class TestVariableStars(TestCase):
 
         assert(self.test_target.max_peak_periodogram != 0.0)
         assert(self.test_target.period != 0.0)
+
+class TestMultiEventDiagnostics(TestCase):
+
+    def setUp(self):
+        self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
+        self.test_target2, self.test_event2, self.ndata2, self.nlc2, self.datums2 = create_test_target_with_photometry('TestObject2')
+        self.test_target3, self.test_event3, self.ndata3, self.nlc3, self.datums3 = create_test_target_with_photometry('TestObject3')
+        Event.objects.filter(pk=self.test_event2.pk).update(target=self.test_target, start_time=self.test_event2.start_time+0.3)
+        Event.objects.filter(pk=self.test_event3.pk).update(target=self.test_target, start_time=self.test_event3.start_time+0.5)
+        self.test_event2 = Event.objects.get(pk=self.test_event2.pk)
+        self.test_event3 = Event.objects.get(pk=self.test_event3.pk)
+
+    def test_second_peak_diagnostics(self):
+
+        event_list = list(Event.objects.filter(target=self.test_target))
+
+        diagnostics.second_peak_diagnostics(self.test_event, event_list)
+
+        test_event = Event.objects.get(pk=self.test_event.pk)
+
+        midpoint = self.test_event.start_time + self.test_event.duration/2.0
+        midpoint2 = self.test_event2.start_time + self.test_event2.duration/2.0
+        dt = abs(midpoint - midpoint2)
+        self.assertAlmostEqual(test_event.time_to_second_peak, dt, 2)
+        self.assertAlmostEqual(test_event.second_peak_mag, self.test_event2.peak_mag)

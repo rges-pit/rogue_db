@@ -52,72 +52,76 @@ def fit_target(target_pk):
         return target_pk, None, False, 'Target no longer exists'
 
     if events.count() > 0:
-        try:
-            # Straight line model fit
-            straightline_results = general_fit_functions.run_event_straightline_fit(events[0])
-            straightline_model = data_utils.store_straightline_model_parameters(
-                events[0], straightline_results, 'Straight line'
-            )
-            data_utils.store_model_lightcurve(events[0], straightline_results, 'straight_line')
+        for e in events:
+            try:
+                # Search for secondary peaks for the same source
+                diagnostics.second_peak_diagnostics(e, list(events))
 
-            # Baseline model fit
-            baseline_results = general_fit_functions.run_baseline_fit(events[0])
-            baseline_model = data_utils.store_straightline_model_parameters(
-                events[0], baseline_results, 'Baseline'
-            )
-            data_utils.store_baseline_diagnostics(events[0], baseline_results)
+                # Straight line model fit
+                straightline_results = general_fit_functions.run_event_straightline_fit(e)
+                straightline_model = data_utils.store_straightline_model_parameters(
+                    e, straightline_results, 'Straight line'
+                )
+                data_utils.store_model_lightcurve(e, straightline_results, 'straight_line')
 
-            # Calculate coverage and skew
-            results = {}
-            results['coverage_fraction'] = general_fit_functions.calc_coverage(events[0])
-            results['symmetry'] = general_fit_functions.calc_symmetry(events[0])
-            data_utils.store_event_statistics(events[0], results)
+                # Baseline model fit
+                baseline_results = general_fit_functions.run_baseline_fit(e)
+                baseline_model = data_utils.store_straightline_model_parameters(
+                    e, baseline_results, 'Baseline'
+                )
+                data_utils.store_baseline_diagnostics(e, baseline_results)
 
-            # Fit microlensing models and calculate diagnostics
-            pylima_results = pylima_fit_functions.run_fit(events[0], verbose=False)
-            data_utils.store_pylima_model_lightcurves(events[0], pylima_results)
-            pspl_model, fspl_model = data_utils.store_microlensing_model_parameters(
-                events[0], pylima_results
-            )
-            diagnostics.calc_mulens_diagnostics(
-                events[0], pspl_model, fspl_model, straightline_model
-            )
-            best_mulens = diagnostics.get_best_mulens_model(pspl_model, fspl_model)
-            data_utils.generate_corner_plot(
-                pspl_model, pylima_results['pspl'],
-                target.name + '_' + str(events[0].event_id) + '_PSPL_corner_plot.png'
-            )
-            data_utils.generate_corner_plot(
-                fspl_model, pylima_results['fspl'],
-                target.name + '_' + str(events[0].event_id) + '_FSPL_corner_plot.png'
-            )
+                # Calculate coverage and skew
+                results = {}
+                results['coverage_fraction'] = general_fit_functions.calc_coverage(e)
+                results['symmetry'] = general_fit_functions.calc_symmetry(e)
+                data_utils.store_event_statistics(e, results)
 
-            # Fit flare models and calculate diagnostics
-            davenport_results = flare_fit_functions.run_davenport_flare_fit(events[0])
-            davenport_flare = data_utils.store_davenportflare_model_parameters(events[0], davenport_results)
-            data_utils.store_model_lightcurve(
-                events[0], davenport_results, 'davenport_flare'
-            )
-            data_utils.generate_corner_plot(
-                davenport_flare, davenport_results,
-                target.name + '_' + str(events[0].event_id) + '_davenport_corner_plot.png'
-            )
-            pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(events[0])
-            pitkin_flare = data_utils.store_pitkinflare_model_parameters(
-                events[0], pitkin_results
-            )
-            data_utils.store_model_lightcurve(events[0], pitkin_results, 'pitkin_flare')
-            diagnostics.calc_flare_diagnostics(events[0], best_mulens, davenport_flare, pitkin_flare)
-            data_utils.generate_corner_plot(
-                pitkin_flare, pitkin_results,
-                target.name + '_' + str(events[0].event_id) + '_pitkin_corner_plot.png'
-            )
+                # Fit microlensing models and calculate diagnostics
+                pylima_results = pylima_fit_functions.run_fit(e, verbose=False)
+                data_utils.store_pylima_model_lightcurves(e, pylima_results)
+                pspl_model, fspl_model = data_utils.store_microlensing_model_parameters(
+                    e, pylima_results
+                )
+                diagnostics.calc_mulens_diagnostics(
+                    e, pspl_model, fspl_model, straightline_model
+                )
+                best_mulens = diagnostics.get_best_mulens_model(pspl_model, fspl_model)
+                data_utils.generate_corner_plot(
+                    pspl_model, pylima_results['pspl'],
+                    target.name + '_' + str(e.event_id) + '_PSPL_corner_plot.png'
+                )
+                data_utils.generate_corner_plot(
+                    fspl_model, pylima_results['fspl'],
+                    target.name + '_' + str(e.event_id) + '_FSPL_corner_plot.png'
+                )
 
-            return target_pk, target.name, True, None
+                # Fit flare models and calculate diagnostics
+                davenport_results = flare_fit_functions.run_davenport_flare_fit(e)
+                davenport_flare = data_utils.store_davenportflare_model_parameters(e, davenport_results)
+                data_utils.store_model_lightcurve(
+                    e, davenport_results, 'davenport_flare'
+                )
+                data_utils.generate_corner_plot(
+                    davenport_flare, davenport_results,
+                    target.name + '_' + str(e.event_id) + '_davenport_corner_plot.png'
+                )
+                pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(e)
+                pitkin_flare = data_utils.store_pitkinflare_model_parameters(
+                    e, pitkin_results
+                )
+                data_utils.store_model_lightcurve(e, pitkin_results, 'pitkin_flare')
+                diagnostics.calc_flare_diagnostics(e, best_mulens, davenport_flare, pitkin_flare)
+                data_utils.generate_corner_plot(
+                    pitkin_flare, pitkin_results,
+                    target.name + '_' + str(e.event_id) + '_pitkin_corner_plot.png'
+                )
 
-        except Exception as e:
-            logger.exception('Fit failed for event ' + target.name)
-            return target_pk, target.name, False, str(e)
+                return target_pk, target.name, True, None
+
+            except Exception as e:
+                logger.exception('Fit failed for event ' + target.name)
+                return target_pk, target.name, False, str(e)
 
     return target_pk, target.name, False, 'No events found for this target'
 

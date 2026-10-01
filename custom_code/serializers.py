@@ -86,6 +86,7 @@ class MSOSAlertSerializer(serializers.Serializer):
                 target=t,
                 start_time=tstart,
                 duration=duration,
+                peak_mag=0.0
             ),
         )
 
@@ -116,6 +117,12 @@ class MSOSAlertSerializer(serializers.Serializer):
 
         # Parse the lightcurve data into PhotometryReducedDatums
         lightcurves = self.convert_lightcurve_to_mag(validated_data)
+
+        # If no alert_peak_mag is given, estimate it from the lightcurve in F146
+        if alert.alert_peak_mag == 0.0:
+            peak_mag = estimate_peak_mag(event, lightcurves['F146'])
+            RGESAlert.objects.filter(pk=alert.pk).update(alert_peak_mag=peak_mag)
+            Event.objects.filter(pk=event.pk).update(peak_mag=peak_mag)
 
         for passband in ['F087', 'F146', 'F213']:
             lc = lightcurves[passband]
@@ -166,3 +173,14 @@ class MSOSAlertSerializer(serializers.Serializer):
             lightcurves[passband] = np.array(lc)
 
         return lightcurves
+
+def estimate_peak_mag(lcevent, lightcurve):
+    """
+    Function to estimate an event's peak magnitude if none is given in the alert packet
+    """
+
+    idx = np.where(
+        (lightcurve[:,0] >= lcevent.start_time)
+        & (lightcurve[:,0] <= lcevent.start_time + lcevent.duration))
+
+    return lightcurve[idx,1].max()

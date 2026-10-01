@@ -16,6 +16,7 @@ class Event(models.Model):
     event_id = models.CharField(max_length=30, null=True, blank=True)
     start_time = models.FloatField(null=True, blank=True)
     duration = models.FloatField(null=True, blank=True)
+    peak_mag = models.FloatField(null=True, blank=True)
     time_to_second_peak = models.FloatField(null=True, blank=True)
     second_peak_mag = models.FloatField(null=True, blank=True)
     coverage_fraction = models.FloatField(null=True, blank=True)

@@ -22,7 +22,7 @@
         <div class="event-params-panel">
           <div class="event-params-group">
             <div class="event-params-label">Event Parameters</div>
-            <div class="event-params-grid">
+            <div class="event-params-grid event-params-grid--single-row">
               <div class="event-params-cell">
                 <div class="event-params-key">Start time [JD]</div>
                 <div class="event-params-value">{{event.start_time|floatformat:3}}</div>
@@ -32,7 +32,11 @@
                 <div class="event-params-value">{{event.duration|floatformat:5}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Coverage fraction</div>
+                <div class="event-params-key">Peak mag</div>
+                <div class="event-params-value">{{event.peak_mag|floatformat:5}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">Coverage</div>
                 <div class="event-params-value">{{event.coverage_fraction|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
@@ -40,7 +44,7 @@
                 <div class="event-params-value">{{event.symmetry|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Time to 2nd peak [d]</div>
+                <div class="event-params-key">&Delta;t 2nd peak [d]</div>
                 <div class="event-params-value">{{event.time_to_second_peak|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">

@@ -170,28 +170,12 @@ li {
   background-color: var(--panel-dark);
 }
 
-/* Bootstrap flex columns default to min-width:auto, so a child wider than
-   the column (e.g. the wide alerts table swapped into
-   #event-model-parameters-container) grows the column itself instead of
-   scrolling within it -- pushing/squeezing the sibling column (the
-   lightcurve plot) sideways. min-width:0 lets .table-responsive's own
-   overflow-x:auto contain the wide content instead. Scoped to this specific
-   column (not the shared .dashboard-panel class) -- applied broadly it also
-   stripped the *other* dashboard panels' protective min-width:auto, letting
-   the compact event-parameters panel collapse to zero width whenever its
-   sibling row (model params + lightcurve) wanted more space than was
-   available, since it has flex-basis:0% and flex-shrink:0 (Bootstrap's
-   .col-lg) with nothing left to floor it at. */
 #event-model-parameters-col {
   min-width: 0;
 }
 
-/* Compact label/value grid for the event parameter tables at the top of
-   EventDetailView -- replaces three separate bordered <table>s (one row of
-   many columns each) with grouped stat cells, so the same parameter count
-   fits in roughly the same vertical space without the repeated table chrome. */
 .event-params-panel {
-  padding: 16px 20px;
+  padding: 10px 20px;
 }
 
 .event-params-group + .event-params-group {
@@ -212,8 +196,17 @@ li {
 .event-params-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  column-gap: 12px;
+  column-gap: 6px;
   row-gap: 6px;
+}
+
+/* Forces every cell onto a single row, regardless of how many there are --
+   minmax(130px, 1fr) above wraps once a group has enough cells that 130px
+   columns no longer all fit, which left a group's extra cell(s) stranded
+   alone on their own row. minmax(0, ...) removes that per-column minimum, so
+   auto-fit never wraps; columns just get narrower to share the row instead. */
+.event-params-grid--single-row {
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
 }
 
 .event-params-cell {
@@ -246,10 +239,6 @@ li {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* MCMC corner plot, shown under a model's fit parameters when one has been
-   generated (EventModel.corner_plot -- any model type, not just flares).
-   The source image can be much wider than the panel, so it's scaled down to
-   fit rather than overflowing or forcing the panel wider. */
 .event-corner-plot {
   display: block;
   max-width: 100%;
@@ -270,10 +259,6 @@ li {
   border-color: #fff;
   border-radius: var(--bs-border-radius);
   overflow: hidden;
-  /* Bootstrap's reboot sets table { border-collapse: collapse } globally --
-     border-radius has no effect at all on table cells under collapsed
-     borders (a CSS spec limitation, not a specificity issue), which is why
-     the corner-cell radius below was being silently ignored. */
   border-collapse: separate;
   border-spacing: 0;
 }
@@ -286,11 +271,6 @@ li {
   color: #fff;
 }
 
-/* overflow:hidden on .event-table only clips the table's own box -- it can't
-   bend a corner cell's square border to follow that curve, so without this
-   the clip just cuts the corner cell's white border off mid-line, leaving a
-   gap that shows the black background behind it. Rounding the corner cells
-   to match makes their own border trace the curve instead. */
 .event-table thead tr:first-child th:first-child {
   border-top-left-radius: var(--bs-border-radius);
 }
@@ -309,27 +289,12 @@ li {
     margin-bottom: 10px;
   }
 
-/* Bootstrap's .progress is a thin (height:1rem), overflow:hidden bar meant to
-   contain a slim .progress-bar fill. Several loading placeholders keep the
-   "progress" class only so they still match existing hx-indicator=".progress"
-   selectors (the search form and every HTMXTable's sort/pagination controls),
-   while actually showing a much taller spinner-border -- without this, that
-   spinner gets clipped down to a 1rem sliver. */
 .progress.htmx-indicator {
   height: auto;
   overflow: visible;
   background-color: transparent;
 }
 
-/* event-model-parameters-progress / model-parameters-progress show a full
-   spinner-border + explanatory text, not a small inline icon. htmx's own
-   injected .htmx-indicator{opacity:0} rule hides them while idle, but
-   opacity doesn't remove an element from layout -- its full box (spinner
-   circle + text + my-4 margins) was still reserved and pushed the sibling
-   parameter table/container down even while invisible. display:none actually
-   takes it out of flow. Scoped by id (not the shared .htmx-indicator class)
-   so this reliably wins regardless of load order against htmx's own
-   injected style. */
 #event-model-parameters-progress,
 #model-parameters-progress {
   display: none;
@@ -339,25 +304,10 @@ li {
   display: block;
 }
 
-/* HTMXTableFilterSet's general search field (tom_common/htmx_table.py, shared
-   by every search form across the app -- id="filter-form") wraps its "query"
-   input in a fixed col-md-3, sized against whatever column it happens to sit
-   in rather than the page. That's fine in a full-width layout, but inside a
-   narrower sidebar column (e.g. the targets page's col-md-4) it compounds
-   into a visibly compressed search box. Scoped via :has(#div_id_query) so
-   this only widens the general-search column, not the (deliberately
-   multi-column) advanced-filter fields, which share the same col-md-3 class. */
 #filter-form .col-md-3:has(#div_id_query) {
   width: 100%;
 }
 
-/* tom_common/css/main.css's .content { padding: 3rem 1.5rem } stacks with
-   body's own padding-top: 5rem (clearance for the fixed navbar) to leave 8rem
-   of empty space above any page's content. The body padding is tied to the
-   fixed navbar's actual rendered height (its logo has no max-height set, so
-   that's not safe to shrink blindly), but .content's top padding is a
-   separate, purely decorative value -- trimmed here instead. Bottom padding
-   is left alone so there's still breathing room at the end of the page. */
 .content {
   padding-top: 1rem;
 }
