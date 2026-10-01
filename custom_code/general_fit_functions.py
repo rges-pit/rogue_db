@@ -29,10 +29,14 @@ def run_event_straightline_fit(lcevent):
     if len(lightcurve) > 10:
         # Fit a straight line (f(x) = p[0]*x + p[1]) to the lightcurve segment
         # and generate fitted lightcurve
-        coeffs, covar = np.polyfit(
-            lightcurve[:,0], lightcurve[:,1], deg=1, w=1.0/lightcurve[:,2],
-            full=False, cov=True
-        )
+        try:
+            coeffs, covar = np.polyfit(
+                lightcurve[:,0], lightcurve[:,1], deg=1, w=1.0/lightcurve[:,2],
+                full=False, cov=True
+            )
+        except numpy.linalg.LinAlgError:
+            coeffs = np.array([0.0, 0.0])
+            covar = np.array([])
 
         model_lc = np.zeros((len(lightcurve[:,0]), 2))
         model_lc[:,0] = lightcurve[:,0]

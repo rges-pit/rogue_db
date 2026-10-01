@@ -640,7 +640,7 @@ def generate_corner_plot(emodel, results, file_name):
         emodel.corner_plot.save(file_name, ContentFile(buf.getvalue()), save=False)
         EventModel.objects.filter(pk=emodel.pk).update(corner_plot=emodel.corner_plot.name)
 
-    elif emodel.corner_plot:
+    elif emodel and emodel.corner_plot:
         emodel.corner_plot.delete(save=False)
         EventModel.objects.filter(pk=emodel.pk).update(corner_plot=None)
 

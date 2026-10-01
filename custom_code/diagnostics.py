@@ -1,5 +1,11 @@
 import numpy as np
+from scipy.cluster.hierarchy import single, fcluster
+from scipy.spatial.distance import pdist
 from custom_code.models import Event
+import matplotlib.pyplot as plt
+import logging
+
+logger = logging.getLogger(__name__)
 
 def calc_mulens_diagnostics(event, pspl_model, fspl_model, straightline_model):
     """
@@ -140,3 +146,39 @@ def second_peak_diagnostics(e, event_list):
         # Second peak mag
         other_events = [et for et in event_list if e != et]
         Event.objects.filter(pk=e.pk).update(second_peak_mag=other_events[et_idx].peak_mag)
+
+def link_events(events_qs, plot=False):
+    """
+    Function to perform a cluster analysis on all Events in [RA, Dec, time] space,
+    following the approach by Will DeRocco.
+
+    All events linked to a cluster will record the number of members in that cluster
+    """
+
+    # Prefilter events list to avoid any invalid entries
+    events_list = [e for e in events_qs if e.target != None]
+    logger.info('Performing cluster analysis on ' + str(len(events_list)) + ' events')
+
+    peaks = np.array([
+        [e.target.ra, e.target.dec, e.start_time+e.duration/2.0] for e in events_list
+    ])
+
+    condenseddistances = pdist(peaks)
+    dendrogram = single(condenseddistances)
+
+    # Assign a cluster to each Event in the list
+    cluster = fcluster(dendrogram, 4, criterion="distance")  # 4" distance scale
+
+    # Compile the members of each cluster
+    clusters = [peaks[cluster == i + 1] for i in range(max(cluster))]
+
+    if plot:
+        plt.scatter(peaks.T[0], peaks.T[2], c=cluster)
+        plt.savefig('./data/cluster_diagram.png')
+
+    # For each Event, indicate the number of other members of the same cluster,
+    # subtracting the Event itself from it's cluster membership
+    for i,e in enumerate(events_list):
+        event_cluster = cluster[i] - 1  # Offset for Python array indexing
+        nlinked = len(clusters[event_cluster]) - 1  # Exclude the current event from the total
+        Event.objects.filter(pk=e.pk).update(Nlinked_events=nlinked)

@@ -93,6 +93,61 @@ def create_test_target_with_gaussian():
 
     return t, e, ndata, nlc, datums
 
+def create_event_set(nevents=100):
+    """
+    Function to simulate a set of events for a set of targets with random parameters
+
+    Parameters:
+        nevents  int  Number of events to simulate
+
+    Returns:
+        target_list  List of Target objects
+        event_list  List of Event objects
+        corr_idx    List of indicies of the correlated events
+    """
+
+    start_time = datetime.datetime.strptime('2026-08-01T00:00:00.0', '%Y-%m-%dT%H:%M:%S.%f')
+    jd_start_time = Time(start_time).jd
+    rng = np.random.default_rng(seed=42)  # Setting seed for reproducibility
+
+    # Randomly distributed set of events - note units must be in seconds
+    ra = rng.normal(loc=256.5*3600.0, scale=60.0, size=nevents)
+    dec = rng.normal(loc=17.5*3600.0, scale=60.0, size=nevents)
+    times = rng.normal(loc=jd_start_time*3600.0*24, scale=60.0*8.0, size=nevents)
+
+    # Correlated set of events - units in seconds
+    ncorr = 10
+    ra2 = rng.normal(loc=256.6*3600.0, scale=1, size=ncorr)
+    dec2 = rng.normal(loc=18.5*3600.0, scale=1, size=ncorr)
+    times2 = [jd_start_time*3600.0*24]*ncorr
+
+    ra = np.append(ra, ra2)
+    dec = np.append(dec, dec2)
+    times = np.append(times, times2)
+    nevents += ncorr
+    corr_idx = np.arange(0, nevents, 1)
+    corr_idx = corr_idx[(corr_idx >= nevents-ncorr)]
+
+    target_list = []
+    event_list = []
+    for i in range(0, nevents, 1):
+        t = Target.objects.create(
+            name='test_target' + str(i),
+            classification='Microlensing PSPL',
+            category='Microlensing stellar/planet',
+            ra=ra[i],
+            dec=dec[i]
+        )
+        e = Event.objects.create(
+            target=t,
+            event_id='test_event' + str(i),
+            start_time=times[i],
+            duration=1.0
+        )
+        target_list.append(t)
+        event_list.append(e)
+
+    return target_list, event_list, corr_idx
 
 def create_test_pylima_event():
     """
@@ -565,3 +620,13 @@ class TestMultiEventDiagnostics(TestCase):
         dt = abs(midpoint - midpoint2)
         self.assertAlmostEqual(test_event.time_to_second_peak, dt, 2)
         self.assertAlmostEqual(test_event.second_peak_mag, self.test_event2.peak_mag)
+
+    def test_link_events(self):
+        target_list, events_list, corr_idx = create_event_set()
+
+        diagnostics.link_events(events_list)
+
+        for i in corr_idx:
+            e = events_list[i]
+            e = Event.objects.get(pk=e.pk)
+            assert(e.Nlinked_events == len(corr_idx) - 1)

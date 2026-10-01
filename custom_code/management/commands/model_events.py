@@ -137,8 +137,15 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from tom_targets.models import Target
+        from custom_code.models import Event
+        from custom_code import diagnostics
 
         max_workers = options['max_workers']
+
+        # First perform a cluster analysis on all known Events in order to identify
+        # clusters in RA, Dec and time
+        events_list = Event.objects.all()
+        diagnostics.link_events(events_list, plot=False)
 
         # Retrieve a list of Targets classified as microlensing candidates with t0 within the last
         # week.  Each Target has a last_fit parameter which has a default (i.e. unmodeled) value of
@@ -158,9 +165,8 @@ class Command(BaseCommand):
             logger.info('No targets need fitting')
             return
 
-        # Release this process's DB connection before spawning workers -- each worker
-        # opens its own via _init_worker, and connections must never be shared
-        # across processes.
+        # Release this process's DB connection before spawning workers;
+        # connections must never be shared across processes.
         connections.close_all()
 
         succeeded = []
