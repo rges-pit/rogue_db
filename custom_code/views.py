@@ -1,4 +1,9 @@
+import math
+
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.serializers.json import DjangoJSONEncoder
+from django.http import JsonResponse
+from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.views.generic.base import TemplateView
@@ -19,12 +24,10 @@ from .models import (RGESAlert, Event, EventModel, MODEL_TYPE_CLASSES,
                      PSPLModel, FSPLModel, WideBoundPlanetModel,
                      DavenportFlareModel, PitkinFlareModel)
 from .filters import (
-    RGESAlertFilterSet, EventModelFilterSet,
-    PSPLCutfileFilterSet, FSPLCutfileFilterSet,
-    DavenportFlareCutfileFilterSet, PitkinFlareCutfileFilterSet,
-    EventFilterSet
+    RGESAlertFilterSet, EventModelFilterSet, CutfileFilterSet, EventFilterSet,
+    CUTFILE_SOURCE_PARAMS
 )
-from .tables import RGESAlertTable, EventModelTable, EventTable, TargetEventTable
+from .tables import RGESAlertTable, EventModelTable, EventTable, TargetEventTable, CutfileTable
 from .forms import (RGESAlertForm, PSPLModelForm, FSPLModelForm, WideBoundPlanetModelForm,
                     DavenportFlareModelForm, PitkinFlareModelForm)
 
@@ -353,64 +356,125 @@ class PitkinFlareModelCreateView(LoginRequiredMixin, CreateView):
     def get_success_url(self):
         return reverse('eventmodels:list')
 
-class TargetCutfileView(HTMXTableViewMixin, FilterView):
+def _json_safe(value):
+    """JSON has no NaN or infinity; a fit that failed can leave either in a float column."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _field_values(instance, exclude=()):
     """
-    This view enables a user to configure microlensing or flare-model
-    selection criteria based on min/max thresholds on that type's own
-    parameters, and see the matching models displayed as a list.
+    The values of an instance's own columns, keyed by field name. Relations are left
+    out (the export nests the related rows instead), as are the named fields.
+    """
+    return {
+        field.name: _json_safe(field.value_from_object(instance))
+        for field in instance._meta.concrete_fields
+        if not field.is_relation and field.name not in exclude
+    }
+
+
+class TargetCutfileView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
+    """
+    This view enables a user to select EventModels of any of the model types
+    (all of them by default) using min/max thresholds on each type's own
+    parameters and on the parameters of the models' Events and Sources, and see
+    the matching models displayed as a list. The query form can also be saved to,
+    and reloaded from, a cutfile; a cutfile is stamped with a moment, and only
+    finds models created up to then.
+    Requires the user to be logged in.
     """
     template_name = 'custom_code/target_cutfile_list.html'
     paginate_by = 20
     strict = False
-    table_class = EventModelTable
+    model = EventModel
+    filterset_class = CutfileFilterSet
+    table_class = CutfileTable
 
     ordering = ['-created_at']
 
-    def get_model_type(self):
-        # Values match the ?model_type= query params used by the tab links
-        # in target_cutfile_list.html.
-        model_set = ('pspl', 'fspl', 'davenport_flare', 'pitkin_flare')
-        model_type = self.request.GET.get('model_type')
-        return model_type if model_type in model_set else 'pspl'
+    # Query parameters that shape the results page, rather than selecting what's in it
+    NON_CRITERIA_PARAMS = ('export', 'sort', 'page')
 
     def get_queryset(self, *args, **kwargs):
-        if self.get_model_type() == 'pspl':
-            self.model = PSPLModel
-        elif self.get_model_type() == 'fspl':
-            self.model = FSPLModel
-        elif self.get_model_type() == 'davenport_flare':
-            self.model = DavenportFlareModel
-        elif self.get_model_type() == 'pitkin_flare':
-            self.model = PitkinFlareModel
-        else:
-            self.model = PSPLModel
-        return super().get_queryset(*args, **kwargs)
+        # The results table shows each model's target, reached via its event
+        return super().get_queryset(*args, **kwargs).select_related('event__target')
 
-    def get_filterset_class(self):
-        if self.get_model_type() == 'pspl':
-            filter_set = PSPLCutfileFilterSet
-        elif self.get_model_type() == 'fspl':
-            filter_set = FSPLCutfileFilterSet
-        elif self.get_model_type() == 'davenport_flare':
-            filter_set = DavenportFlareCutfileFilterSet
-        elif self.get_model_type() == 'pitkin_flare':
-            filter_set = PitkinFlareCutfileFilterSet
-        else:
-            filter_set = PSPLCutfileFilterSet
-        return filter_set
+    def get(self, request, *args, **kwargs):
+        if request.GET.get('export') == 'json':
+            return self.export_json()
+        return super().get(request, *args, **kwargs)
+
+    def export_json(self):
+        """
+        Downloads the parameters of every model the current search selects (not just the
+        page on show), each with those of its Event and Source, as a JSON file.
+
+        :returns: the JSON file as an attachment
+        :rtype: JsonResponse
+        """
+        filterset = self.get_filterset(self.get_filterset_class())
+        model_types = filterset.selected_model_types
+
+        # The search selects EventModel rows; each type's own parameters live on its subclass
+        # table, so go back to that, a type at a time, then put them in the table's order.
+        found = filterset.qs
+        models = []
+        for model_type in model_types:
+            model_class = MODEL_TYPE_CLASSES[model_type.db_value]
+            models.extend(model_class.objects
+                          .filter(pk__in=found.filter(model_type=model_type.db_value).values('pk'))
+                          .select_related('event__target'))
+        models.sort(key=lambda model: (model.created_at, model.pk), reverse=True)
+
+        source_fields = ['id', 'name'] + [param.name for param in CUTFILE_SOURCE_PARAMS]
+        results = []
+        for model in models:
+            event, target = model.event, model.event.target if model.event else None
+            results.append({
+                'source': {name: _json_safe(getattr(target, name, None)) for name in source_fields} if target else None,
+                'event': _field_values(event, exclude=('thumbnail',)) if event else None,
+                'model': _field_values(model, exclude=('corner_plot', 'eventmodel_ptr')),
+            })
+
+        data = {
+            'generated_at': timezone.now(),
+            'model_types': [model_type.slug for model_type in model_types],
+            'as_of': filterset.cutoff,
+            'criteria': self.criteria(),
+            'count': len(results),
+            'results': results,
+        }
+        response = JsonResponse(data, encoder=DjangoJSONEncoder, json_dumps_params={'indent': 2})
+        response['Content-Disposition'] = 'attachment; filename="cutfile_results.json"'
+        return response
+
+    def criteria(self):
+        """The search criteria in the request: parameter name -> value, leaving out unset ones."""
+        return {name: value for name, value in self.request.GET.items()
+                if value != '' and name not in self.NON_CRITERIA_PARAMS and name not in ('model_type', 'as_of')}
 
     def get_context_data(self, *args, **kwargs):
         """
-        Adds the number of models visible, which model type is being searched,
-        and the query string to the context object.
+        Adds the query form's layout, which tab the page should open on, and a
+        flag asking the table to show the number of models found.
 
         :returns: context dictionary
         :rtype: dict
         """
         context = super().get_context_data(*args, **kwargs)
-        context['model_count'] = context['record_count']
-        context['model_type'] = self.get_model_type()
-        context['query_string'] = self.request.META['QUERY_STRING']
+        context['show_record_count'] = True
+        context['cutfile_layout'] = context['filter'].layout()
+        context['as_of'] = context['filter'].cutoff
+        context['searched_at'] = timezone.now().isoformat()
+        export_params = self.request.GET.copy()
+        for name in self.NON_CRITERIA_PARAMS:
+            export_params.pop(name, None)
+        export_params.setlist('model_type', [mt.slug for mt in context['filter'].selected_model_types])
+        export_params['export'] = 'json'
+        context['export_url'] = '?' + export_params.urlencode()
+        context['initial_tab'] = 'results' if self.request.GET else 'query'
 
         return context
 

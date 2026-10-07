@@ -1,11 +1,16 @@
-from django.test import TestCase
-from custom_code.models import Event
+from django.contrib.auth.models import User
+from django.http import QueryDict
+from django.test import TestCase, override_settings
+from django.urls import reverse
+from custom_code.models import Event, EventModel, PSPLModel, PitkinFlareModel, StraightLineModel
+from custom_code.filters import CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES
 from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum
 from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
 from custom_code import (pylima_fit_functions, general_fit_functions, utils,
                          flare_fit_functions, data_utils, variable_stars, diagnostics)
 import datetime
+import re
 from astropy.time import Time
 from django.utils import timezone
 from pyLIMA import telescopes
@@ -630,3 +635,332 @@ class TestMultiEventDiagnostics(TestCase):
             e = events_list[i]
             e = Event.objects.get(pk=e.pk)
             assert(e.Nlinked_events == len(corr_idx) - 1)
+
+
+class TestCutfileSearch(TestCase):
+    """
+    The cutfile query: EventModels of one type, selected by thresholds on their own
+    parameters, their Event's and their Source's.
+    """
+
+    def setUp(self):
+        # Two sources, each with one event carrying a PSPL model, a Pitkin flare model,
+        # and a straight line and a baseline fit (both stored as StraightLineModels)
+        specs = [
+            # name, ra, variable type, event duration, PSPL tE, chisq, straight line gradient
+            ('CutfileA', 100.0, 'RRLyr', 2.0, 0.2, 50.0, -0.5),
+            ('CutfileB', 200.0, 'Mira', 6.0, 5.0, 500.0, 0.5),
+        ]
+        for name, ra, variable_type, duration, tE, chisq, gradient in specs:
+            target = Target.objects.create(name=name, ra=ra, dec=10.0, nearest_variable_type=variable_type)
+            event = Event.objects.create(target=target, event_id=name + '-1', start_time=2460000.0, duration=duration)
+            PSPLModel.objects.create(event=event, model_type='PSPL microlensing', tE=tE, chisq=chisq)
+            PitkinFlareModel.objects.create(event=event, model_type='Pitkin flare', t_peak=2460000.5, chisq=chisq)
+            StraightLineModel.objects.create(event=event, model_type='Straight line', gradient=gradient, intercept=20.0)
+            StraightLineModel.objects.create(event=event, model_type='Baseline', gradient=99.0, intercept=20.0)
+
+    def search(self, query_string=''):
+        filterset = CutfileFilterSet(QueryDict(query_string), queryset=EventModel.objects.all())
+        return sorted(filterset.qs.values_list('event__target__name', flat=True))
+
+    def test_event_parameters_cover_event_model_except_thumbnail(self):
+        names = {p.name for p in CUTFILE_EVENT_PARAMS}
+        expected = {f.name for f in Event._meta.get_fields() if f.concrete} - {'id', 'target', 'thumbnail'}
+        self.assertEqual(names, expected)
+        self.assertIn('peak_mag', names)
+
+    def model_types_found(self, query_string):
+        filterset = CutfileFilterSet(QueryDict(query_string), queryset=EventModel.objects.all())
+        return set(filterset.qs.values_list('model_type', flat=True))
+
+    def test_defaults_to_all_model_types(self):
+        all_slugs = [mt.slug for mt in CUTFILE_MODEL_TYPES]
+        for query_string in ['', 'model_type=not-a-model-type']:
+            filterset = CutfileFilterSet(QueryDict(query_string), queryset=EventModel.objects.all())
+            self.assertEqual([mt.slug for mt in filterset.selected_model_types], all_slugs)
+            self.assertEqual(self.model_types_found(query_string),
+                             {'PSPL microlensing', 'Pitkin flare', 'Straight line', 'Baseline'})
+
+        # Unknown types are dropped from a list that has valid ones
+        filterset = CutfileFilterSet(QueryDict('model_type=fspl&model_type=bogus'), queryset=EventModel.objects.all())
+        self.assertEqual([mt.slug for mt in filterset.selected_model_types], ['fspl'])
+
+    def test_selects_model_types(self):
+        self.assertEqual(self.model_types_found('model_type=pitkin_flare'), {'Pitkin flare'})
+        self.assertEqual(self.model_types_found('model_type=pitkin_flare&model_type=pspl'),
+                         {'Pitkin flare', 'PSPL microlensing'})
+
+    def test_searches_several_model_types_at_once(self):
+        both = 'model_type=pspl&model_type=pitkin_flare'
+        self.assertEqual(self.search(both), ['CutfileA', 'CutfileA', 'CutfileB', 'CutfileB'])
+
+        # A type's thresholds apply to its own models only: here the PSPL models are cut to
+        # A's, while Pitkin flare has no thresholds so contributes both of its models
+        self.assertEqual(self.search(both + '&pspl_tE_max=1'), ['CutfileA', 'CutfileA', 'CutfileB'])
+        self.assertEqual(self.model_types_found(both + '&pspl_tE_max=1&pitkin_flare_t_peak_max=1'),
+                         {'PSPL microlensing'})
+
+        # ...and a model is found if it meets its own type's thresholds: B's PSPL and both Pitkin
+        self.assertEqual(self.search(both + '&pspl_tE_min=1&pitkin_flare_t_peak_min=2460000'),
+                         ['CutfileA', 'CutfileB', 'CutfileB'])
+
+        # Source, event and fit-statistic thresholds apply to every model found
+        self.assertEqual(self.search(both + '&model_chisq_max=100'), ['CutfileA', 'CutfileA'])
+        self.assertEqual(self.search('source_ra_max=150'), ['CutfileA'] * 4)
+        self.assertEqual(self.search(both + '&pspl_tE_max=1&source_ra_min=150'), ['CutfileB'])
+
+        # Thresholds for a type that isn't searched are ignored
+        self.assertEqual(self.search('model_type=pspl&pitkin_flare_t_peak_max=1'), ['CutfileA', 'CutfileB'])
+
+    def test_straight_line_parameters(self):
+        self.assertEqual(self.search('model_type=straight_line'), ['CutfileA', 'CutfileB'])
+        self.assertEqual(self.search('model_type=straight_line&straight_line_gradient_max=0'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=straight_line&straight_line_gradient_min=0'), ['CutfileB'])
+        # Baseline fits share the table (here with gradient 99) but aren't straight line models
+        self.assertEqual(self.search('model_type=straight_line&straight_line_gradient_min=50'), [])
+
+    def test_baseline_parameters(self):
+        self.assertEqual(self.model_types_found('model_type=baseline'), {'Baseline'})
+        self.assertEqual(self.search('model_type=baseline'), ['CutfileA', 'CutfileB'])
+        self.assertEqual(self.search('model_type=baseline&baseline_gradient_min=50'), ['CutfileA', 'CutfileB'])
+        self.assertEqual(self.search('model_type=baseline&baseline_gradient_max=50'), [])
+        # Its thresholds are its own: the straight line type's don't select baseline fits
+        self.assertEqual(self.search('model_type=baseline&straight_line_gradient_max=0'), ['CutfileA', 'CutfileB'])
+        # ...and alongside straight line, each type is judged by its own: A's straight line
+        # (gradient -0.5) and both baselines (99)
+        self.assertEqual(
+            self.search('model_type=straight_line&model_type=baseline&straight_line_gradient_max=0'
+                        '&baseline_gradient_min=50'),
+            ['CutfileA', 'CutfileA', 'CutfileB'])
+
+    def test_model_parameter_thresholds(self):
+        self.assertEqual(self.search('model_type=pspl&pspl_tE_max=1'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=pspl&pspl_tE_min=1'), ['CutfileB'])
+        # chisq lives on the EventModel base table, shared by every model type
+        self.assertEqual(self.search('model_type=pspl&model_chisq_max=100'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=pitkin_flare&model_chisq_min=100'), ['CutfileB'])
+
+    def test_event_and_source_thresholds(self):
+        self.assertEqual(self.search('model_type=pspl&event_duration_min=4'), ['CutfileB'])
+        self.assertEqual(self.search('model_type=pspl&source_ra_max=150'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=pspl&source_nearest_variable_type=mira'), ['CutfileB'])  # case-insensitive "contains"
+        self.assertEqual(self.search('model_type=pspl&event_event_id=CutfileA'), ['CutfileA'])
+
+    def test_sections_combine(self):
+        self.assertEqual(self.search('model_type=pspl&source_ra_max=150&event_duration_max=3&pspl_tE_max=1'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=pspl&source_ra_max=150&event_duration_min=4'), [])
+
+    def test_other_model_types_values_are_ignored(self):
+        self.assertEqual(
+            self.search('model_type=pspl&pitkin_flare_t_peak_min=9999999&fspl_rho_min=5'),
+            ['CutfileA', 'CutfileB'],
+        )
+
+    def test_layout_expands_sections_with_values(self):
+        filterset = CutfileFilterSet(QueryDict('event_duration_min=4'), queryset=EventModel.objects.all())
+        layout = filterset.layout()
+        self.assertEqual({s['id']: s['open'] for s in layout['sections']},
+                         {'source': False, 'event': True, 'model': False})
+
+        # With nothing set the model section is open, rather than a form of all-closed sections
+        layout = CutfileFilterSet(None, queryset=EventModel.objects.all()).layout()
+        self.assertEqual([s['id'] for s in layout['sections'] if s['open']], ['model'])
+
+    def test_search_limited_to_models_available_as_of_a_moment(self):
+        # CutfileA's models were made in 2025, CutfileB's in 2026
+        EventModel.objects.filter(event__target__name='CutfileA').update(
+            created_at=datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc))
+        EventModel.objects.filter(event__target__name='CutfileB').update(
+            created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc))
+
+        self.assertEqual(self.search('model_type=pspl'), ['CutfileA', 'CutfileB'])
+        for as_of in ['2025-06-01T00:00:00Z', '2025-06-01T00:00:00+00:00', '2025-06-01T02:00:00+02:00']:
+            query = QueryDict(mutable=True)
+            query.update({'model_type': 'pspl', 'as_of': as_of})
+            self.assertEqual(self.search(query.urlencode()), ['CutfileA'], as_of)
+        self.assertEqual(self.search('model_type=pspl&as_of=2026-06-01T00:00:00Z'), ['CutfileA', 'CutfileB'])
+        self.assertEqual(self.search('model_type=pspl&as_of=2024-06-01T00:00:00Z'), [])
+
+        # The cutoff applies alongside the parameter thresholds, and to every model type
+        self.assertEqual(self.search('model_type=pspl&as_of=2026-06-01T00:00:00Z&pspl_tE_max=1'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=straight_line&as_of=2025-06-01T00:00:00Z'), ['CutfileA'])
+
+        # A model made after the cutfile doesn't change what it finds
+        before = self.search('model_type=pspl&as_of=2026-06-01T00:00:00Z')
+        event = Event.objects.get(event_id='CutfileA-1')
+        PSPLModel.objects.create(event=event, model_type='PSPL microlensing', tE=0.1, chisq=1.0)
+        self.assertEqual(self.search('model_type=pspl&as_of=2026-06-01T00:00:00Z'), before)
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_view_as_of(self):
+        EventModel.objects.filter(event__target__name='CutfileA').update(
+            created_at=datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc))
+        self.client.force_login(User.objects.create_user('cutfile_user'))
+        url = reverse('cutfiles:list')
+
+        # Every results page is stamped with when it was read, for saving a cutfile from it
+        response = self.client.get(url + '?model_type=pspl')
+        self.assertIsNone(response.context['as_of'])
+        searched_at = response.context['searched_at']
+        self.assertContains(response, 'data-searched-at="%s"' % searched_at)
+        self.assertGreater(datetime.datetime.fromisoformat(searched_at), datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc))
+        self.assertContains(response, 'name="as_of"')
+        self.assertNotContains(response, 'available up to')
+
+        # A cutfile's search is limited to its moment, and says so; and so does its export
+        query = '?model_type=pspl&as_of=2025-06-01T00:00:00%2B00:00'
+        response = self.client.get(url + query, headers={'HX-Request': 'true'})
+        self.assertContains(response, '1 event model available up to 2025-06-01 00:00 UTC')
+        self.assertContains(response, 'CutfileA')
+        self.assertNotContains(response, 'CutfileB')
+
+        data = self.client.get(url + query + '&export=json').json()
+        self.assertEqual(data['as_of'], '2025-06-01T00:00:00Z')
+        self.assertEqual(data['criteria'], {})
+        self.assertEqual([r['source']['name'] for r in data['results']], ['CutfileA'])
+        self.assertIsNone(self.client.get(url + '?model_type=pspl&export=json').json()['as_of'])
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_results_table_columns(self):
+        event = Event.objects.get(event_id='CutfileA-1')
+        event.thumbnail = 'event_thumbnails/cutfile_a.png'
+        event.duration = 2.0456
+        event.save()
+        EventModel.objects.filter(event=event, model_type='PSPL microlensing').update(chisq=50.126, BIC=12.3456)
+        self.client.force_login(User.objects.create_user('cutfile_user'))
+
+        response = self.client.get(reverse('cutfiles:list') + '?model_type=pspl&pspl_tE_max=1',
+                                   headers={'HX-Request': 'true'})
+
+        table = response.context['table']
+        self.assertEqual([c.verbose_name for c in table.columns],
+                         ['Source name', 'Thumbnail', 'Event ID', 'Duration [d]', 'Model type', 'Chisq', 'BIC'])
+        self.assertContains(response, '<img src="%s"' % event.thumbnail.url)
+        self.assertContains(response, 'href="%s"' % reverse('events:detail', kwargs={'pk': event.pk}))
+        self.assertContains(response, 'CutfileA-1')
+
+        # Duration, chisq and BIC are shown to 2 decimal places
+        self.assertContains(response, '<td >2.05</td>', html=False)
+        self.assertContains(response, '<td >50.13</td>', html=False)
+        self.assertContains(response, '<td >12.35</td>', html=False)
+
+        # The columns sort by the Event's values
+        response = self.client.get(reverse('cutfiles:list') + '?model_type=pspl&sort=-duration',
+                                   headers={'HX-Request': 'true'})
+        self.assertEqual([r.record.event.event_id for r in response.context['table'].page.object_list],
+                         ['CutfileB-1', 'CutfileA-1'])
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_export_json(self):
+        self.client.force_login(User.objects.create_user('cutfile_user'))
+        url = reverse('cutfiles:list')
+
+        # The results page offers the download for the search on show
+        response = self.client.get(url + '?model_type=pspl&pspl_tE_max=1&sort=chisq&page=1')
+        export_url = response.context['export_url']
+        self.assertEqual(QueryDict(export_url.lstrip('?')).dict(),
+                         {'model_type': 'pspl', 'pspl_tE_max': '1', 'export': 'json'})
+        self.assertContains(response, 'Download JSON')
+
+        response = self.client.get(url + export_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/json')
+        self.assertIn('attachment; filename="cutfile_results.json"', response['Content-Disposition'])
+        data = response.json()
+        self.assertEqual(data['model_types'], ['pspl'])
+        self.assertEqual(data['criteria'], {'pspl_tE_max': '1'})
+        self.assertEqual(data['count'], 1)
+
+        # The source, its event and the PSPL model, with the model's own parameters
+        result = data['results'][0]
+        self.assertEqual(result['source']['name'], 'CutfileA')
+        self.assertEqual(result['source']['ra'], 100.0)
+        self.assertEqual(result['source']['nearest_variable_type'], 'RRLyr')
+        self.assertEqual(result['event']['event_id'], 'CutfileA-1')
+        self.assertEqual(result['event']['duration'], 2.0)
+        self.assertNotIn('thumbnail', result['event'])
+        self.assertEqual(result['model']['tE'], 0.2)
+        self.assertEqual(result['model']['chisq'], 50.0)
+        self.assertEqual(result['model']['model_type'], 'PSPL microlensing')
+        self.assertNotIn('corner_plot', result['model'])
+
+        # Every match is exported, whatever the table's page size; and a model type's own columns
+        response = self.client.get(url + '?model_type=straight_line&export=json')
+        data = response.json()
+        self.assertEqual(data['count'], 2)
+        self.assertEqual(sorted(r['model']['gradient'] for r in data['results']), [-0.5, 0.5])
+        self.assertEqual({r['model']['model_type'] for r in data['results']}, {'Straight line'})
+
+        # Several model types in one file, each with its own parameters
+        response = self.client.get(url + '?model_type=pspl&model_type=straight_line&export=json&pspl_tE_max=1')
+        data = response.json()
+        self.assertEqual(data['model_types'], ['pspl', 'straight_line'])
+        self.assertEqual(data['count'], 3)
+        by_type = {}
+        for r in data['results']:
+            by_type.setdefault(r['model']['model_type'], []).append(r['model'])
+        self.assertEqual(sorted(by_type), ['PSPL microlensing', 'Straight line'])
+        self.assertEqual([m['tE'] for m in by_type['PSPL microlensing']], [0.2])
+        self.assertTrue(all('gradient' in m and 'tE' not in m for m in by_type['Straight line']))
+
+        # Straight line and Baseline fits share a table but are exported as the types they are
+        data = self.client.get(url + '?model_type=straight_line&model_type=baseline&export=json').json()
+        self.assertEqual(data['count'], 4)
+        self.assertEqual(sorted((r['model']['model_type'], r['model']['gradient']) for r in data['results']),
+                         [('Baseline', 99.0), ('Baseline', 99.0), ('Straight line', -0.5), ('Straight line', 0.5)])
+
+    def test_export_json_requires_login(self):
+        response = self.client.get(reverse('cutfiles:list') + '?model_type=pspl&export=json')
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith('/accounts/login/'))
+
+    def test_view_requires_login(self):
+        url = reverse('cutfiles:list') + '?model_type=pspl'
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith('/accounts/login/'))
+
+        response = self.client.get(url, headers={'HX-Request': 'true'})
+        self.assertTrue(response['HX-Redirect'].startswith('/accounts/login/'))
+        self.assertNotContains(response, 'CutfileA')
+
+    # The project requires every user to enrol in 2FA (TOM_MFA_REQUIRED='all'), which
+    # would redirect this test user to the enrolment page; not what's being tested here.
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_view(self):
+        self.client.force_login(User.objects.create_user('cutfile_user'))
+        url = reverse('cutfiles:list')
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        for text in ['Upload file', 'Query form', 'Results', 'Source parameters',
+                     'Event parameters', 'Event model parameters']:
+            self.assertContains(response, text)
+        self.assertEqual(response.context['initial_tab'], 'query')
+        # The upload tab can run the same search as the query form, being tied to its form
+        self.assertContains(response, 'type="submit" form="filter-form"')
+        # Both tabs can clear the form
+        self.assertContains(response, 'onclick="clearCriteria()"', count=2)
+
+        # Every model type is searched unless the form says otherwise
+        self.assertEqual(len(response.context['filter'].selected_model_types), len(CUTFILE_MODEL_TYPES))
+        self.assertContains(response, 'type="checkbox" name="model_type"', count=len(CUTFILE_MODEL_TYPES))
+        self.assertEqual(len(re.findall(r'id="include-\w+" checked', response.content.decode())),
+                         len(CUTFILE_MODEL_TYPES))
+
+        # A search from the form is an HTMX request, answered with just the table
+        response = self.client.get(url + '?model_type=pspl&pspl_tE_max=1', headers={'HX-Request': 'true'})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '1 event model')
+        self.assertContains(response, 'CutfileA')
+        self.assertNotContains(response, 'CutfileB')
+        self.assertNotContains(response, '<html')
+
+        # Sorting and paging keep every model type searched
+        response = self.client.get(url + '?model_type=pspl&model_type=fspl', headers={'HX-Request': 'true'})
+        self.assertContains(response, 'model_type=pspl&amp;model_type=fspl&amp;sort=')
+
+        # ...while a search URL loaded directly opens on the results
+        response = self.client.get(url + '?model_type=fspl')
+        self.assertEqual(response.context['initial_tab'], 'results')

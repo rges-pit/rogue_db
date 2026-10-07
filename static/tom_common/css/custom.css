@@ -166,6 +166,13 @@ li {
   background-color: var(--rges-purple-light);
 }
 
+/* tom_common/css/main.css gives every .pagination a --theme_accent1 background behind the
+   page links, which this theme sets to white: a white bar under every paginated table on the
+   dark page. The page links carry their own backgrounds, so the bar itself needs none. */
+.pagination {
+  background-color: transparent;
+}
+
 .dashboard-panel {
   background-color: var(--panel-dark);
 }
@@ -312,3 +319,55 @@ li {
   padding-top: 1rem;
 }
 
+/* The cutfile query page's tabs, accordion, pills and inputs are plain Bootstrap
+   components, which default to a light palette with Bootstrap's blue accent. The page
+   sets data-bs-theme="dark" for the former (Bootstrap's own dark colour mode); this
+   swaps the accent for the site's purple, which colour mode doesn't know about. */
+.cutfile-page {
+  --bs-primary: var(--rges-purple-light);
+  --bs-primary-rgb: 166, 88, 225;
+  --bs-link-color: var(--rges-purple-light);
+  --bs-link-color-rgb: 166, 88, 225;
+  --bs-link-hover-color: var(--rges-purple-light);
+  --bs-link-hover-color-rgb: 166, 88, 225;
+  --bs-body-bg: var(--panel-dark);
+}
+
+/* Bootstrap 5.3 hard-codes its blue into these rather than reading --bs-primary */
+.cutfile-page .nav-pills {
+  --bs-nav-pills-link-active-bg: var(--rges-purple-light);
+}
+
+/* Bootstrap 5.3 hard-codes the blue of the active page chip. */
+.cutfile-page .pagination {
+  --bs-pagination-active-bg: var(--rges-purple-light);
+  --bs-pagination-active-border-color: var(--rges-purple-light);
+}
+
+/* The results spinner. htmx's own `.htmx-indicator { opacity: 0 }` hides it while idle but
+   leaves it in the layout, so its margins and height showed as a blank gap above the results.
+   display:none removes it until a request is under way, when htmx adds .htmx-request to it. */
+.cutfile-page .progress.htmx-indicator {
+  display: none;
+}
+.cutfile-page .progress.htmx-indicator.htmx-request {
+  display: block;
+}
+
+.cutfile-page .accordion {
+  --bs-accordion-active-color: #fff;
+  --bs-accordion-active-bg: rgba(166, 88, 225, 0.15);
+  --bs-accordion-btn-focus-border-color: var(--rges-purple-light);
+  --bs-accordion-btn-focus-box-shadow: 0 0 0 0.25rem rgba(166, 88, 225, 0.25);
+  --bs-accordion-btn-active-icon: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23a658e1'%3e%3cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3e%3c/svg%3e");
+}
+
+/* Bootstrap 5.3 hard-codes the blue of a ticked checkbox too. */
+.cutfile-page .form-check-input:checked {
+  background-color: var(--rges-purple-light);
+  border-color: var(--rges-purple-light);
+}
+.cutfile-page .form-check-input:focus {
+  border-color: var(--rges-purple-light);
+  box-shadow: 0 0 0 0.25rem rgba(166, 88, 225, 0.25);
+}

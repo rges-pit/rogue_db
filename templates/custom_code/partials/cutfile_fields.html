@@ -1,0 +1,13 @@
+<div class="row g-2">
+  {% for f in fields %}
+    <div class="col-sm-6 col-xl-4">
+      {% if f.kind == 'range' %}
+        <label class="form-label small mb-0" for="{{ f.min.id_for_label }}">{{ f.label }}</label>
+        <div class="input-group input-group-sm">{{ f.min }}{{ f.max }}</div>
+      {% else %}
+        <label class="form-label small mb-0" for="{{ f.field.id_for_label }}">{{ f.label }}</label>
+        {{ f.field }}
+      {% endif %}
+    </div>
+  {% endfor %}
+</div>

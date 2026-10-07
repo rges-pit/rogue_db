@@ -1,191 +1,356 @@
 {% extends 'tom_common/base.html' %}
-{% load crispy_forms_tags %}
 
-{% block title %}Event Model Cutfile Selection{% endblock %}
+{% block title %}Event Cutfile Selection{% endblock %}
 
 {% block content %}
 <div class="row">
-  <div class="col-md-10">
-    <div class="row">
-      <h1>Event Model Cutfile Selection</h1>
-      <div class="col-md-12">
-        <span class="float-end">
-        {{ model_count }} Event Model{{ model_count|pluralize }} &nbsp;
-      </span>
-      </div>
-    </div>
+  <div class="col-12 cutfile-page" data-bs-theme="dark">
+    <h1>Event Cutfile Selection</h1>
 
-    {% block target_table_content %}
-
-    <ul class="nav nav-tabs mb-2">
-      <li class="nav-item">
-        <a class="nav-link {% if model_type == 'pspl' %}active{% endif %}"
-           href="{% url 'cutfiles:list' %}?model_type=pspl">PSPL microlensing</a>
+    <ul class="nav nav-tabs mb-3" id="cutfile-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="upload-tab" type="button" role="tab"
+                data-bs-toggle="tab" data-bs-target="#upload-pane"
+                aria-controls="upload-pane" aria-selected="false">Upload file</button>
       </li>
-      <li class="nav-item">
-        <a class="nav-link {% if model_type == 'fspl' %}active{% endif %}"
-           href="{% url 'cutfiles:list' %}?model_type=fspl">FSPL microlensing</a>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link{% if initial_tab == 'query' %} active{% endif %}" id="query-tab" type="button" role="tab"
+                data-bs-toggle="tab" data-bs-target="#query-pane"
+                aria-controls="query-pane" aria-selected="{% if initial_tab == 'query' %}true{% else %}false{% endif %}">Query form</button>
       </li>
-      <li class="nav-item">
-        <a class="nav-link {% if model_type == 'davenport_flare' %}active{% endif %}"
-           href="{% url 'cutfiles:list' %}?model_type=davenport_flare">Davenport Flare</a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link {% if model_type == 'pitkin_flare' %}active{% endif %}"
-           href="{% url 'cutfiles:list' %}?model_type=pitkin_flare">Pitkin Flare</a>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link{% if initial_tab == 'results' %} active{% endif %}" id="results-tab" type="button" role="tab"
+                data-bs-toggle="tab" data-bs-target="#results-pane"
+                aria-controls="results-pane" aria-selected="{% if initial_tab == 'results' %}true{% else %}false{% endif %}">Results</button>
       </li>
     </ul>
 
-    <hr>
-    {# Search form #}
-    <form id="filter-form" class="mb-3"
-      hx-get="{% url 'cutfiles:list' %}?model_type={{ model_type }}"
-      hx-target="div.table-container"
-      hx-swap="outerHTML"
-      hx-indicator=".progress">
-        <div class="mb-3">
-            <label for="cutfile-upload" class="form-label">Load a saved cutfile</label>
-            <input type="file" id="cutfile-upload" class="form-control" accept="application/json,.json" onchange="loadCutfile(event)">
-        </div>
-        {% crispy filter.form %}
-    </form>
+    <div id="cutfile-status" role="status" aria-live="polite"></div>
 
-    {# Progress indicator -- "progress" keeps matching the hx-indicator=".progress"
-       selector used by the search form above and by every HTMXTable's own sort/
-       pagination controls; "htmx-indicator" is what actually makes it show/hide
-       (via htmx's own injected CSS keyed on the htmx-request class it toggles). #}
-    <div class="progress htmx-indicator text-center my-4">
-        <div class="spinner-border" role="status">
+    <div class="tab-content">
+
+      {# Upload file #}
+      <div class="tab-pane fade" id="upload-pane" role="tabpanel" aria-labelledby="upload-tab" tabindex="0">
+        <label for="cutfile-upload" class="form-label">Load a saved cutfile</label>
+        <input type="file" id="cutfile-upload" class="form-control mb-2"
+               accept="application/json,.json" onchange="loadCutfile(event)">
+        <p class="text-muted">
+          Loading a cutfile populates the query form with its saved parameter thresholds.
+          The parameters can be reviewed and adjusted using the query form tab.  Once
+          a search is complete, the results can be viewed on the results tab.
+        </p>
+        <div class="d-flex gap-2">
+          <button type="submit" form="filter-form" class="btn btn-primary">Search</button>
+          <button type="button" class="btn btn-outline-secondary" onclick="clearCriteria()">Clear</button>
+        </div>
+      </div>
+
+      {# Query form #}
+      <div class="tab-pane fade{% if initial_tab == 'query' %} show active{% endif %}" id="query-pane" role="tabpanel" aria-labelledby="query-tab" tabindex="0">
+        <form id="filter-form" class="mb-3"
+          hx-get="{% url 'cutfiles:list' %}"
+          hx-target="div.table-container"
+          hx-swap="outerHTML"
+          hx-indicator=".progress">
+
+          {{ cutfile_layout.as_of_field }}
+          <p class="text-muted small" id="as-of-note" hidden></p>
+
+          <div class="accordion mb-3" id="cutfile-sections">
+            {% for section in cutfile_layout.sections %}
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button{% if not section.open %} collapsed{% endif %}" type="button"
+                          data-bs-toggle="collapse" data-bs-target="#cutfile-section-{{ section.id }}"
+                          aria-expanded="{% if section.open %}true{% else %}false{% endif %}"
+                          aria-controls="cutfile-section-{{ section.id }}">
+                    {{ section.title }}
+                    {% if section.id == 'model' %}
+                      <span class="badge text-bg-secondary ms-2" id="model-type-badge"></span>
+                    {% endif %}
+                    <span class="badge text-bg-primary ms-2 cutfile-section-count"{% if not section.count %} hidden{% endif %}>{{ section.count }} set</span>
+                  </button>
+                </h2>
+                <div id="cutfile-section-{{ section.id }}" class="accordion-collapse collapse{% if section.open %} show{% endif %}">
+                  <div class="accordion-body">
+                    {% if section.id == 'model' %}
+                      <fieldset class="mb-3" id="model-type-includes">
+                        <legend class="form-label small mb-1">Model types searched</legend>
+                        <div class="d-flex flex-wrap column-gap-3">
+                          {% for model_type in section.model_types %}
+                            <div class="form-check form-check-inline me-0">
+                              <input class="form-check-input" type="checkbox" name="model_type" value="{{ model_type.slug }}"
+                                     id="include-{{ model_type.slug }}"{% if model_type.included %} checked{% endif %}>
+                              <label class="form-check-label" for="include-{{ model_type.slug }}">{{ model_type.label }}</label>
+                            </div>
+                          {% endfor %}
+                        </div>
+                      </fieldset>
+                      <p class="text-muted small">
+                        An event model is included in the queryset if it meets the criteria set for its own type.
+                        Source- and event-criteria are applied to all models.  If a model type is selected, but
+                        no thresholds are set then all models of that type will be included. 
+                      </p>
+                      <ul class="nav nav-pills mb-3" id="model-type-pills" role="tablist">
+                        {% for model_type in section.model_types %}
+                          <li class="nav-item" role="presentation">
+                            <button class="nav-link{% if forloop.first %} active{% endif %}" type="button" role="tab"
+                                    id="pill-{{ model_type.slug }}"
+                                    data-bs-toggle="pill" data-bs-target="#pane-{{ model_type.slug }}"
+                                    data-model-slug="{{ model_type.slug }}"
+                                    aria-controls="pane-{{ model_type.slug }}"
+                                    aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">{{ model_type.label }}</button>
+                          </li>
+                        {% endfor %}
+                      </ul>
+                      <div class="tab-content mb-3">
+                        {% for model_type in section.model_types %}
+                          <div class="tab-pane fade{% if forloop.first %} show active{% endif %}" id="pane-{{ model_type.slug }}"
+                               role="tabpanel" data-model-pane="{{ model_type.slug }}" tabindex="0">
+                            <p class="text-warning small" data-excluded-note hidden>
+                              {{ model_type.label }} models aren't searched: these thresholds are ignored.
+                            </p>
+                            {% include "custom_code/partials/cutfile_fields.html" with fields=model_type.fields %}
+                          </div>
+                        {% endfor %}
+                      </div>
+                      <h3 class="h6">Fit statistics</h3>
+                      {% include "custom_code/partials/cutfile_fields.html" with fields=section.common_fields %}
+                    {% else %}
+                      {% include "custom_code/partials/cutfile_fields.html" with fields=section.fields %}
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">Search</button>
+            <button type="button" class="btn btn-secondary" onclick="saveCutfile()">Save cutfile</button>
+            <button type="button" class="btn btn-outline-secondary" onclick="clearCriteria()">Clear</button>
+          </div>
+        </form>
+      </div>
+
+      {# Results #}
+      <div class="tab-pane fade{% if initial_tab == 'results' %} show active{% endif %}" id="results-pane" role="tabpanel" aria-labelledby="results-tab" tabindex="0">
+        <div class="progress htmx-indicator text-center my-4">
+          <div class="spinner-border" role="status">
             <span class="visually-hidden">Loading...</span>
+          </div>
         </div>
-    </div>
 
-    {# The actual table #}
-    <div class="table-container">
         {% include "custom_code/partials/eventmodel_table.html" %}
-    </div>
+      </div>
 
-    <hr>
-      {% endblock target_table_content %}
+    </div>
   </div>
-  </div>
+</div>
 
 <script>
-// Defines which model type this page is currently showing; the type is chosen via
-// the ?model_type= URL param (see the tabs above), not a form field, since
-// the models live in separate tables and each request can only search one at a time.
-const CURRENT_MODEL_TYPE = "{{ model_type }}";
-
-// Which threshold fields belong to which model type -- shared by save and load
-// so the two stay in sync with each other and with the panels in filters.py.
-const CUTFILE_PARAM_NAMES_BY_MODEL_TYPE = {
-    pspl: ['t0', 'u0', 'tE', 'piEN', 'piEE', 'chi2', 'bic'],
-    fspl: ['t0', 'u0', 'tE', 'rho', 'piEN', 'piEE', 'chi2', 'bic'],
-    davenport_flare: ['t_peak', 'peak_amplitude', 't_FWHM', 'chi2', 'bic'],
-    pitkin_flare: ['t_peak', 'peak_amplitude', 'tau_gaussian_rise', 'tau_exponential_decay', 'chi2', 'bic'],
-};
-
-function saveCutfile() {
-    // Builds a JSON snapshot of the current filter form's min/max thresholds and
-    // triggers a browser download -- entirely client-side, no server round trip.
-    // Only the parameters relevant to the currently-viewed model type are
-    // included, since that's all this page's form ever has fields for.
+(function () {
     const form = document.getElementById('filter-form');
-    const data = new FormData(form);
+    const includeBoxes = Array.from(document.querySelectorAll('#model-type-includes input[type=checkbox]'));
+    const modelTypeBadge = document.getElementById('model-type-badge');
+    const statusBox = document.getElementById('cutfile-status');
+    // When set, only models created up to this moment are searched (see saveCutfile)
+    const asOfInput = document.getElementById('id_as_of');
+    const asOfNote = document.getElementById('as-of-note');
 
-    function toNumberOrNull(value) {
-        if (value === null || value === '') return null;
-        const n = parseFloat(value);
-        return Number.isNaN(n) ? null : n;
+    function formatMoment(iso) {
+        return new Date(iso).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
     }
 
-    const paramNames = CUTFILE_PARAM_NAMES_BY_MODEL_TYPE[CURRENT_MODEL_TYPE] || [];
+    function updateAsOfNote() {
+        asOfNote.hidden = asOfInput.value === '';
+        asOfNote.textContent = asOfInput.value === '' ? '' :
+            'Searching only the models available on ' + formatMoment(asOfInput.value) +
+            ', as when the loaded cutfile was saved. Clear the form to search all models.';
+    }
+    updateAsOfNote();
 
-    const thresholds = {};
-    paramNames.forEach(name => {
-        thresholds[name] = {
-            min: toNumberOrNull(data.get(name + '_min')),
-            max: toNumberOrNull(data.get(name + '_max')),
-        };
+    function showTab(buttonId) {
+        bootstrap.Tab.getOrCreateInstance(document.getElementById(buttonId)).show();
+    }
+
+    // The inputs holding search criteria (not the hidden model_type field)
+    function criteriaFields(root) {
+        return Array.from((root || form).querySelectorAll('input.form-control, select.form-select'));
+    }
+
+    // The model types searched: those ticked, or all of them if none are, as the server does
+    function searchedTypes() {
+        const ticked = includeBoxes.filter(box => box.checked).map(box => box.value);
+        return ticked.length ? ticked : includeBoxes.map(box => box.value);
+    }
+
+    function typesSummary() {
+        const types = searchedTypes();
+        if (types.length === includeBoxes.length) return 'All types';
+        const labels = types.map(t => document.querySelector('label[for="include-' + t + '"]').textContent);
+        return types.length <= 2 ? labels.join(', ') : types.length + ' of ' + includeBoxes.length + ' types';
+    }
+
+    // Each model type's parameters sit in their own pane. Those of a type that isn't searched
+    // are left out of the search (the server ignores them), the section counts and a cutfile.
+    function inExcludedModelPane(el) {
+        const pane = el.closest('[data-model-pane]');
+        return pane !== null && !searchedTypes().includes(pane.dataset.modelPane);
+    }
+
+    function activeFields(root) {
+        return criteriaFields(root).filter(el => el.value !== '' && !inExcludedModelPane(el));
+    }
+
+    function updateSectionCounts() {
+        document.querySelectorAll('#cutfile-sections .accordion-item').forEach(item => {
+            const n = activeFields(item).length;
+            const badge = item.querySelector('.cutfile-section-count');
+            badge.textContent = n + ' set';
+            badge.hidden = n === 0;
+        });
+    }
+    form.addEventListener('input', updateSectionCounts);
+    form.addEventListener('change', updateSectionCounts);
+
+    // Searched model types: flag the pills and panes of types that aren't, and keep the
+    // section header in step.
+    function syncModelTypes() {
+        const searched = searchedTypes();
+        includeBoxes.forEach(box => {
+            const excluded = !searched.includes(box.value);
+            document.getElementById('pill-' + box.value).classList.toggle('opacity-50', excluded);
+            document.querySelector('[data-model-pane="' + box.value + '"] [data-excluded-note]').hidden = !excluded;
+        });
+        modelTypeBadge.textContent = typesSummary();
+        updateSectionCounts();
+    }
+    document.getElementById('model-type-includes').addEventListener('change', syncModelTypes);
+    syncModelTypes();
+
+    // Searching shows the results, wherever it was triggered from
+    document.body.addEventListener('htmx:beforeRequest', e => {
+        if (e.detail.elt === form) showTab('results-tab');
     });
 
-    const cutfile = {
-        model_type: CURRENT_MODEL_TYPE,
-        target: data.get('target') || null,
-        thresholds: thresholds,
+    function setStatus(message, level) {
+        statusBox.replaceChildren();
+        if (!message) return;
+        const box = document.createElement('div');
+        box.className = 'alert alert-' + level + ' py-2';
+        box.textContent = message;
+        statusBox.appendChild(box);
+    }
+
+    window.clearCriteria = function () {
+        // Every criteria field, including any held in the panes of model types that aren't
+        // showing. The model types searched stay: they pick what's searched, they aren't a criterion.
+        criteriaFields().forEach(el => { el.value = ''; });
+        asOfInput.value = '';  // back to searching everything in the database
+        updateAsOfNote();
+        updateSectionCounts();
+        setStatus('');  // a "loaded <file>" message no longer describes the form
     };
 
-    const blob = new Blob([JSON.stringify(cutfile, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'cutfile.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-}
-
-function loadCutfile(event) {
-    // Reads a JSON cutfile (as produced by saveCutfile) picked via the file
-    // input, and populates the form from it -- entirely client-side.
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function() {
-        let cutfile;
-        try {
-            cutfile = JSON.parse(reader.result);
-        } catch (e) {
-            alert('That file is not valid JSON.');
-            event.target.value = '';
+    window.saveCutfile = function () {
+        // A JSON snapshot of the form's criteria, stamped with the moment its models are
+        // limited to: a loaded cutfile's own, or else when the results on show were read, so
+        // that running the cutfile later finds the models that were there to be seen.
+        const resultsTable = document.querySelector('[data-searched-at]');
+        const timestamp = asOfInput.value || (resultsTable && resultsTable.dataset.searchedAt);
+        if (!timestamp) {
+            setStatus('Search first: a cutfile needs the results it was made from to be stamped.', 'danger');
             return;
         }
-        applyCutfile(cutfile);
-        event.target.value = '';  // allow re-selecting the same file later
-    };
-    reader.onerror = function() {
-        alert('Could not read that file.');
-        event.target.value = '';
-    };
-    reader.readAsText(file);
-}
+        const filters = {};
+        activeFields().forEach(el => {
+            filters[el.name] = el.type === 'number' ? parseFloat(el.value) : el.value;
+        });
+        const cutfile = {model_types: searchedTypes(), timestamp: timestamp, filters: filters};
 
-function applyCutfile(cutfile) {
-    // This page can only show fields for one model type at a time (Microlensing
-    // and Flare models live in separate tables). If the loaded file is for the
-    // other type, send the user to that tab rather than silently ignoring or
-    // misapplying its thresholds.
-    if (cutfile.model_type && cutfile.model_type !== CURRENT_MODEL_TYPE) {
-        alert(
-            'This cutfile is for ' + cutfile.model_type + ' models, but you are viewing ' +
-            CURRENT_MODEL_TYPE + '. Switch tabs first, then load it again.'
-        );
-        return;
+        const blob = new Blob([JSON.stringify(cutfile, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'cutfile.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    // Fills in the form from a parsed cutfile; returns the names it couldn't place.
+    function applyCutfile(cutfile) {
+        const filters = cutfile && cutfile.filters;
+        if (!filters) throw new Error('That file is not a cutfile.');
+        if (typeof cutfile.timestamp !== 'string' || isNaN(Date.parse(cutfile.timestamp))) {
+            throw new Error('That cutfile has no valid timestamp.');
+        }
+
+        if (!Array.isArray(cutfile.model_types) || cutfile.model_types.length === 0) {
+            throw new Error('That cutfile has no model types.');
+        }
+        const unknown = cutfile.model_types.filter(t => !includeBoxes.some(box => box.value === t));
+        if (unknown.length) throw new Error('That cutfile is for unknown model types: ' + unknown.join(', ') + '.');
+        includeBoxes.forEach(box => { box.checked = cutfile.model_types.includes(box.value); });
+
+        asOfInput.value = cutfile.timestamp;
+        updateAsOfNote();
+        criteriaFields().forEach(el => { el.value = ''; });
+        const unplaced = [];
+        Object.entries(filters).forEach(([name, value]) => {
+            const el = document.getElementById('id_' + name);
+            if (!el || !criteriaFields().includes(el)) {
+                unplaced.push(name);
+                return;
+            }
+            el.value = value === null ? '' : value;
+            if (el.value === '' && value !== null && value !== '') unplaced.push(name);  // e.g. a target not in the list
+        });
+
+        syncModelTypes();
+
+        // Show the first model type with thresholds, and open the sections that now hold
+        // values, so what was loaded is visible
+        const typeWithValues = searchedTypes().find(t =>
+            activeFields(document.querySelector('[data-model-pane="' + t + '"]')).length > 0);
+        if (typeWithValues) bootstrap.Tab.getOrCreateInstance(document.getElementById('pill-' + typeWithValues)).show();
+        document.querySelectorAll('#cutfile-sections .accordion-collapse').forEach(section => {
+            if (activeFields(section).length > 0) {
+                bootstrap.Collapse.getOrCreateInstance(section, {toggle: false}).show();
+            }
+        });
+        updateSectionCounts();
+        return unplaced;
     }
 
-    const paramNames = CUTFILE_PARAM_NAMES_BY_MODEL_TYPE[CURRENT_MODEL_TYPE] || [];
-    paramNames.forEach(name => {
-        const minField = document.getElementById('id_' + name + '_min');
-        const maxField = document.getElementById('id_' + name + '_max');
-        if (minField) minField.value = '';
-        if (maxField) maxField.value = '';
-    });
+    window.loadCutfile = function (event) {
+        const input = event.target;
+        const file = input.files[0];
+        if (!file) return;
 
-    const targetField = document.getElementById('id_target');
-    if (targetField && cutfile.target) {
-        targetField.value = cutfile.target;
-    }
-
-    const thresholds = cutfile.thresholds || {};
-    Object.keys(thresholds).forEach(name => {
-        const minField = document.getElementById('id_' + name + '_min');
-        const maxField = document.getElementById('id_' + name + '_max');
-        const value = thresholds[name] || {};
-        if (minField) minField.value = value.min ?? '';
-        if (maxField) maxField.value = value.max ?? '';
-    });
-}
+        const reader = new FileReader();
+        reader.onload = function () {
+            try {
+                const unplaced = applyCutfile(JSON.parse(reader.result));
+                const n = activeFields().length;
+                let message = 'Loaded ' + file.name + ': ' + n + (n === 1 ? ' criterion' : ' criteria') +
+                    ' set. Model types searched: ' + typesSummary() + '. Searching the models available on ' +
+                    formatMoment(asOfInput.value) + '.';
+                if (unplaced.length) message += ' Could not use: ' + unplaced.join(', ') + '.';
+                setStatus(message, unplaced.length ? 'warning' : 'success');
+            } catch (e) {
+                setStatus(e instanceof SyntaxError ? 'That file is not valid JSON.' : e.message, 'danger');
+            }
+            input.value = '';  // allow re-selecting the same file later
+        };
+        reader.onerror = function () {
+            setStatus('Could not read that file.', 'danger');
+            input.value = '';
+        };
+        reader.readAsText(file);
+    };
+})();
 </script>
 {% endblock content %}

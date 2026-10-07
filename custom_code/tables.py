@@ -193,3 +193,54 @@ class TargetTable(HTMXTable):
 
     # Override to use Target-specific partial
     partial_template_name = "tom_targets/partials/target_table_partial.html"
+
+
+class CutfileTable(EventRenderMixin, HTMXTable):
+    """
+    Results of a cutfile search: one row per EventModel, with the lightcurve thumbnail
+    and identifying details of the Event it belongs to.
+
+    Separate from EventModelTable (used by the Event Models page) because the columns differ.
+    """
+
+    target = tables.Column(
+        accessor='event__target',
+        order_by='event__target__name',
+        verbose_name='Source name',
+        linkify=True,
+        attrs={"a": {"hx-boost": "false"}}
+    )
+    thumbnail = tables.Column(accessor='event__thumbnail', orderable=False)
+    event_id = tables.Column(
+        accessor='event__event_id',
+        order_by='event__event_id',
+        verbose_name='Event ID'
+    )
+    duration = tables.Column(
+        accessor='event__duration',
+        order_by='event__duration',
+        verbose_name='Duration [d]'
+    )
+
+    class Meta(HTMXTable.Meta):
+        model = EventModel
+        fields = [
+            'target', 'thumbnail', 'event_id', 'duration', 'model_type', 'chisq', 'BIC'
+        ]
+        exclude = ['selection']
+
+    partial_template_name = "custom_code/partials/eventmodel_table.html"
+
+    render_model_type = EventModelTable.render_model_type
+
+    # Missing values never reach these: django-tables2 shows its default in their place
+    def render_duration(self, value):
+        return f'{value:.2f}'
+
+    render_chisq = render_BIC = render_duration
+
+    def render_event_id(self, value, record):
+        if not value:
+            return value
+        url = reverse('events:detail', kwargs={'pk': record.event_id})
+        return format_html('<a href="{}" hx-boost="false">{}</a>', url, value)
