@@ -3,7 +3,7 @@ from django.dispatch import receiver
 
 from .target_models import RogueTarget
 from .models import Event
-from .tasks import (check_target_for_variable_star, compute_periodogram,
+from .tasks import (compute_source_diagnostics,
                     check_event_for_moving_objects, make_event_lightcurve)
 
 # What the tasks of each model are worked out from. They need queuing when a row is created,
@@ -41,8 +41,7 @@ def before_target_saved(sender, instance, update_fields, **kwargs):
 @receiver(post_save, sender=RogueTarget)
 def on_target_saved(sender, instance, **kwargs):
     if getattr(instance, '_queue_tasks', True):
-        check_target_for_variable_star.enqueue(instance.pk)
-        compute_periodogram.enqueue(instance.pk)
+        compute_source_diagnostics.enqueue(instance.pk)
 
 @receiver(pre_save, sender=Event)
 def before_event_saved(sender, instance, update_fields, **kwargs):

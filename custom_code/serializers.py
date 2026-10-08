@@ -11,7 +11,6 @@ from erfa import ErfaWarning
 import datetime
 import numpy as np
 from custom_code import utils
-from custom_code.tasks import compute_periodogram
 import logging
 
 logger = logging.getLogger(__name__)
@@ -192,9 +191,6 @@ class MSOSAlertSerializer(serializers.Serializer):
                     PhotometryReducedDatum.objects.bulk_create(reduced_datums, ignore_conflicts=True)
 
                     logger.info('Ingested timeseries photometry for ' + t.name)
-
-            compute_periodogram.enqueue(t.pk)
-            logger.info('Computed periodogram for ' + t.name)
 
         return alert
 

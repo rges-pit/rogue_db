@@ -835,8 +835,6 @@ class TestBackgroundTasks(TestCase):
 
     def test_tasks_run_for_existing_rows(self):
         for task, work, row in [
-            (tasks.check_target_for_variable_star, 'find_nearest_rges_variable_catalog', self.target),
-            (tasks.compute_periodogram, 'calc_periodogram', self.target),
             (tasks.check_event_for_moving_objects, 'find_moving_objects_near_event', self.event),
             (tasks.make_event_lightcurve, 'generate_event_lightcurves', self.event),
         ]:
@@ -851,8 +849,6 @@ class TestBackgroundTasks(TestCase):
         self.target.delete()
 
         for task, work, pk in [
-            (tasks.check_target_for_variable_star, 'find_nearest_rges_variable_catalog', target_pk),
-            (tasks.compute_periodogram, 'calc_periodogram', target_pk),
             (tasks.check_event_for_moving_objects, 'find_moving_objects_near_event', event_pk),
             (tasks.make_event_lightcurve, 'generate_event_lightcurves', event_pk),
         ]:
@@ -918,11 +914,25 @@ class TestVariableStars(TestCase):
         self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
 
     def test_calc_periodogram(self):
+        diagnostics = {
+            'classification': 'Microlensing PSPL',
+            'category': 'Microlensing stellar/planet',
+            'source_magnitude': 0.0,
+            'source_mag_error': 0.0,
+            'baseline_magnitude': 0.0,
+            'baseline_mag_error': 0.0,
+            'nearest_flare_star': '',
+            'angular_separation_flare_star': 0.0,
+            'nearest_variable_star': '',
+            'angular_separation_variable': 0.0,
+            'nearest_variable_type': '',
+            'max_peak_periodogram': 0.0,
+            'period': 0.0
+        }
+        diagnostics = variable_stars.calc_periodogram(self.test_target, diagnostics)
 
-        variable_stars.calc_periodogram(self.test_target)
-
-        assert(self.test_target.max_peak_periodogram != 0.0)
-        assert(self.test_target.period != 0.0)
+        assert(diagnostics['max_peak_periodogram'] != 0.0)
+        assert(diagnostics['period'] != 0.0)
 
 class TestMultiEventDiagnostics(TestCase):
 

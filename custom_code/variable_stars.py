@@ -1,4 +1,5 @@
-from custom_code.models import VariableStar, RogueTarget
+from custom_code.models import VariableStar, SourceDiagnostics
+from custom_code.target_models import RogueTarget
 from custom_code import data_utils
 from astropy.coordinates import SkyCoord
 from astropy import units as u
@@ -8,7 +9,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def find_nearest_rges_variable_catalog(target, radius=2):
+def find_nearest_rges_variable_catalog(target, diagnostics, radius=2):
     """
     Function to check whether there is a star nearby to the Target in the VariableStar table.
     This is stored as the variable star name (nearest_variable_star) and angular separation
@@ -39,29 +40,28 @@ def find_nearest_rges_variable_catalog(target, radius=2):
         closest_idx = int(np.argmin(separation))  # QuerySet indexing rejects numpy's int64
         closest_separation_deg = separation[closest_idx].deg
 
-        # Update Target with information about the nearest variable star, if the nearest
+        # Update diagnostics with information about the nearest variable star, if the nearest
         # star is closer than the search radius
         if closest_separation_deg <= radius:  # In degrees
             vstar = qs[closest_idx]
 
             if vstar.type == 'flare':
-                RogueTarget.objects.filter(pk=target.pk).update(
-                    nearest_flare_star=vstar.get_name(),
-                    angular_separation_flare_star=closest_separation_deg,
-                )
+                diagnostics['nearest_flare_star'] = vstar.get_name()
+                diagnostics['angular_separation_flare_star'] = closest_separation_deg
+
             else:
-                RogueTarget.objects.filter(pk=target.pk).update(
-                    nearest_variable_star=vstar.get_name(),
-                    angular_separation_variable=closest_separation_deg,
-                    nearest_variable_type=vstar.type
-                )
+                diagnostics['nearest_variable_star'] = vstar.get_name()
+                diagnostics['angular_separation_variable'] = closest_separation_deg
+                diagnostics['nearest_variable_type'] = vstar.type
 
             logger.info('Identified a variable star close to target ' + str(target.pk))
+
+    return diagnostics
 
 # def check_external_variable_catalog(target):
 # Future code to check an extended external catalog will go here
 
-def calc_periodogram(target):
+def calc_periodogram(target, diagnostics):
     """
     Function to calculate the Lomb-Scargle periodogram for a Source's full lightcurve
     """
@@ -74,7 +74,7 @@ def calc_periodogram(target):
             'Skipping periodogram for ' + target.name
             + ': fewer than 10 Roman_F146 datapoints available'
         )
-        return
+        return diagnostics
 
     frequency, power = LombScargle(lightcurve[:,0], lightcurve[:,1]).autopower()
 
@@ -82,7 +82,7 @@ def calc_periodogram(target):
     best_frequency = frequency[np.argmax(power)]
     period = 1.0/best_frequency
 
-    RogueTarget.objects.filter(pk=target.pk).update(
-        max_peak_periodogram=max_peak,
-        period=period,
-    )
+    diagnostics['max_peak_periodogram'] = max_peak
+    diagnostics['period'] = period
+
+    return diagnostics

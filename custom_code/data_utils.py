@@ -38,11 +38,6 @@ def get_full_lightcurve(target, bandpass=None):
 
         for rd in photometry_qs:
             ts = Time(rd.timestamp).jd
-            # When filtering to one source_name, key the result by that same
-            # value -- rd.bandpass uses a different naming scheme (e.g. "F146"
-            # vs. source_name "Roman_F146"), so keying by it here left callers
-            # that filtered by bandpass unable to find their own data back out
-            # of the returned dict under the name they asked for.
             passband = bandpass if bandpass else rd.bandpass
             if passband in datasets.keys():
                 lc = datasets[passband]
@@ -59,8 +54,7 @@ def get_full_lightcurve(target, bandpass=None):
                     lc.append([ts, rd.brightness, 1.0])
                 except KeyError:
                     pass
-
-        datasets[passband] = lc
+            datasets[passband] = lc
 
     # Convert the accumulated lightcurves into numpy arrays:
     for passband, lc in datasets.items():

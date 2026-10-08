@@ -2,6 +2,40 @@ from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 from .target_models import RogueTarget
 
+class SourceDiagnostics(models.Model):
+    """
+    Source diagnostic criteria that may be revised over the course of the Roman survey but
+    which are included in the cutfiles and therefore need a timestamp
+    """
+
+    target = models.ForeignKey(
+        RogueTarget,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='sourcediagnostics'
+    )
+    classification = models.CharField(max_length=50, default='Microlensing PSPL')
+    category = models.CharField(max_length=50, default='Microlensing stellar/planet')
+    source_magnitude = models.FloatField(default=0)
+    source_mag_error = models.FloatField(default=0)
+    baseline_magnitude = models.FloatField(default=0)
+    baseline_mag_error = models.FloatField(default=0)
+    nearest_flare_star = models.CharField(max_length=60, default='', null=True, blank=True)
+    angular_separation_flare_star = models.FloatField(default=0, null=True, blank=True)
+    nearest_variable_star = models.CharField(max_length=60, default='', null=True, blank=True)
+    angular_separation_variable = models.FloatField(default=0, null=True, blank=True)
+    nearest_variable_type = models.CharField(max_length=30, default='', null=True, blank=True)
+    max_peak_periodogram = models.FloatField(null=True, blank=True)
+    period = models.FloatField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "source diagnostics"
+
+
 class Event(models.Model):
     """
     An event is a feature in a source's lightcurve that occurs during a finite time window
@@ -38,6 +72,9 @@ class Event(models.Model):
     frac_below_baseline = models.FloatField(null=True, blank=True)
     max_excursion_below_baseline = models.FloatField(null=True, blank=True)
     thumbnail = models.ImageField(upload_to='event_thumbnails/%Y/%m/%d/', null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 class RGESAlert(models.Model):
     """

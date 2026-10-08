@@ -1,7 +1,7 @@
 from django_tasks import task
 from .target_models import RogueTarget
 from custom_code.models import Event
-from .variable_stars import find_nearest_rges_variable_catalog, calc_periodogram
+from .source_functions import run_source_diagnostics
 from .solar_system import find_moving_objects_near_event
 from .event_functions import generate_event_lightcurves
 import logging
@@ -22,16 +22,10 @@ def get_or_skip(model, pk, task_name):
     return obj
 
 @task
-def check_target_for_variable_star(target_id):
-    target = get_or_skip(RogueTarget, target_id, 'check_target_for_variable_star')
+def compute_source_diagnostics(target_id):
+    target = get_or_skip(RogueTarget, target_id, 'compute_source_diagnostics')
     if target is not None:
-        find_nearest_rges_variable_catalog(target)
-
-@task
-def compute_periodogram(target_id):
-    target = get_or_skip(RogueTarget, target_id, 'compute_periodogram')
-    if target is not None:
-        calc_periodogram(target)
+        run_source_diagnostics(target)
 
 @task
 def check_event_for_moving_objects(event_id):
