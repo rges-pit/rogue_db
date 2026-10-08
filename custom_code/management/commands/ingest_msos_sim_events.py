@@ -6,7 +6,7 @@ import json
 import glob
 
 class Command(BaseCommand):
-    help = 'Tool to ingest the RGES-PIT catalog of variable stars'
+    help = 'Tool to ingest the MSOS-format alerts'
 
     def add_arguments(self, parser):
         parser.add_argument('data_dir', help='Path to the directory of JSON catalog files')
@@ -22,7 +22,7 @@ class Command(BaseCommand):
             with open(file_path, 'r') as file:
                 data = json.load(file)
 
-                alert = MSOSAlertSerializer(data=data)
+                alert, source, event = MSOSAlertSerializer(data=data)
                 alert.is_valid(raise_exception=True)
                 try:
                     alert.save()

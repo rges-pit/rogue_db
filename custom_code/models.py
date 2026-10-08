@@ -13,7 +13,7 @@ class Event(models.Model):
         on_delete=models.SET_NULL,
         related_name='events'
     )
-    event_id = models.CharField(max_length=30, null=True, blank=True)
+    event_id = models.CharField(max_length=60, null=True, blank=True)
     start_time = models.FloatField(null=True, blank=True)
     duration = models.FloatField(null=True, blank=True)
     peak_mag = models.FloatField(null=True, blank=True)
@@ -79,13 +79,20 @@ class RGESAlert(models.Model):
         unknown = 'unknown', 'Unknown'
 
     class AlertOrigin(models.TextChoices):
-        aethra = 'aethra', 'Aethra'
+        aethra = 'pyaethra', 'pyAethra'
         neural_network = 'neural network', 'Neural Network'
         msos = 'MSOS', 'MSOS'
         unknown = 'unknown', 'Unknown'
 
     alert_id = models.IntegerField(default=0, null=True, blank=True)
     roman_id = models.CharField(max_length=100, verbose_name='Roman ID')
+    target = models.ForeignKey(
+        RogueTarget,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='alerts'
+    )
     event = models.ForeignKey(
         Event,
         null=True,
@@ -185,6 +192,13 @@ class RGESAlert(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        # An alert's source is its event's, so alerts recorded against an event (by the
+        # alert form, say) needn't name it again
+        if self.target_id is None and self.event_id is not None:
+            self.target = self.event.target
+        super().save(*args, **kwargs)
 
     class Meta:
         verbose_name = "rges_alert"

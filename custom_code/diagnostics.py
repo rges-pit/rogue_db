@@ -128,9 +128,10 @@ def calc_npoints_above_baseline(lcevent, baseline_lightcurve, event_lightcurve):
 
     return npoints
 
-def second_peak_diagnostics(e, event_list):
+def second_peak_diagnostics(e):
+    """Check to see if there is more than one event associated with this target"""
 
-    # Check to see if there is more than one event associated with this target
+    event_list = Event.objects.filter(target=e.target).order_by('-start_time')
     if len(event_list) > 1:
 
         # Identify the nearest event to this one in the list
@@ -141,11 +142,17 @@ def second_peak_diagnostics(e, event_list):
         et_idx = np.argmin(delta_mid_event_times)
 
         # Time to nearest other peak
-        Event.objects.filter(pk=e.pk).update(time_to_second_peak=delta_mid_event_times[et_idx])
-
-        # Second peak mag
         other_events = [et for et in event_list if e != et]
-        Event.objects.filter(pk=e.pk).update(second_peak_mag=other_events[et_idx].peak_mag)
+        e.time_to_second_peak = delta_mid_event_times[et_idx]
+        e.second_peak_mag = other_events[et_idx].peak_mag
+
+        # Only these fields: the caller goes on to save() this instance, and a full save here
+        # would write back whatever else it holds
+        Event.objects.filter(pk=e.pk).update(
+            time_to_second_peak=e.time_to_second_peak, second_peak_mag=e.second_peak_mag
+        )
+
+    logger.info('Calculated second peak diagnostics')
 
 def link_events(events_qs, plot=False):
     """

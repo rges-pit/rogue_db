@@ -2,7 +2,13 @@ from django.contrib.auth.models import User
 from django.http import QueryDict
 from django.test import TestCase, override_settings
 from django.urls import reverse
-from custom_code.models import Event, EventModel, PSPLModel, PitkinFlareModel, StraightLineModel
+from custom_code.serializers import MSOSAlertSerializer
+from custom_code import tasks
+from collections import Counter
+from django_tasks.backends.database.models import DBTaskResult
+from unittest import mock
+from custom_code.models import (Event, EventModel, PSPLModel, PitkinFlareModel, StraightLineModel,
+                                DavenportFlareModel, RGESAlert)
 from custom_code.filters import CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES
 from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum
@@ -10,7 +16,9 @@ from custom_code.solar_system import query_horizons_for_roman, parse_sbident_res
 from custom_code import (pylima_fit_functions, general_fit_functions, utils,
                          flare_fit_functions, data_utils, variable_stars, diagnostics)
 import datetime
+import importlib
 import re
+from django.apps import apps as django_apps
 from astropy.time import Time
 from django.utils import timezone
 from pyLIMA import telescopes
@@ -258,6 +266,56 @@ class TestDataUtils(TestCase):
 
         for dname, data in datasets.items():
             assert(len(data) < self.ndata)
+
+    def test_store_flare_model_parameters(self):
+        """
+        Both flare models are created the first time an event's fit is stored, and
+        updated in place after that
+        """
+        fit = {
+            'chisq': 12.5, 'red_chisq': 1.25, 'BIC': 30.0, 'fit_method': 'mcmc',
+            'tau': 40.0, 'tau_threshold': 0.4, 't_peak': 2460000.5, 't_peak_error': 0.01,
+            'peak_amplitude': 0.8, 'peak_amplitude_error': 0.05,
+        }
+        cases = [
+            (data_utils.store_davenportflare_model_parameters, DavenportFlareModel,
+             {'t_FWHM': 0.2, 't_FWHM_error': 0.01}),
+            (data_utils.store_pitkinflare_model_parameters, PitkinFlareModel,
+             {'tau_gaussian_rise': 0.1, 'tau_gaussian_rise_error': 0.01,
+              'tau_exponential_decay': 0.3, 'tau_exponential_decay_error': 0.02}),
+        ]
+        for store, model_class, extra in cases:
+            with self.subTest(model=model_class.__name__):
+                results = {**fit, **extra}
+
+                flare = store(self.event, results)
+                self.assertEqual(model_class.objects.filter(event=self.event).count(), 1)
+                for name, value in results.items():
+                    self.assertEqual(getattr(flare, name), value, name)
+
+                results['chisq'], results['tau_threshold'] = 15.0, 0.5
+                store(self.event, results)
+                flare = model_class.objects.get(event=self.event)
+                self.assertEqual((flare.chisq, flare.tau_threshold), (15.0, 0.5))
+
+    def test_store_event_statistics(self):
+        """
+        The statistics reach the database and the Event instance the caller holds, so that
+        a later save() of that instance (as the diagnostics do) doesn't write the old values
+        back over them
+        """
+        results = {'coverage_fraction': 0.85, 'symmetry': 0.4}
+
+        data_utils.store_event_statistics(self.event, results)
+
+        stored = Event.objects.get(pk=self.event.pk)
+        self.assertEqual((stored.coverage_fraction, stored.symmetry), (0.85, 0.4))
+        self.assertEqual((self.event.coverage_fraction, self.event.symmetry), (0.85, 0.4))
+
+        self.event.delta_chi2_PSPL = 3.0
+        self.event.save()
+        stored = Event.objects.get(pk=self.event.pk)
+        self.assertEqual((stored.coverage_fraction, stored.symmetry, stored.delta_chi2_PSPL), (0.85, 0.4, 3.0))
 
     def test_get_reduced_data(self):
         """
@@ -589,6 +647,271 @@ class TestFlareFitFunctions(TestCase):
         tmax = self.test_event.start_time + self.test_event.duration
         self.assertTrue(self.test_event.start_time <= results['t_peak'] <= tmax)
 
+@override_settings(TOM_MFA_REQUIRED=None)
+class TestGeneralSearch(TestCase):
+    """The general search box on the Events and Alerts pages"""
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_user('search_user'))
+        self.target_a = Target.objects.create(name='SearchTargetA', ra=10.0, dec=10.0)
+        self.target_b = Target.objects.create(name='SearchTargetB', ra=20.0, dec=10.0)
+        self.event_a = Event.objects.create(
+            target=self.target_a, event_id='EVA_24', start_time=2460000.0, duration=2.0)
+        self.event_b = Event.objects.create(
+            target=self.target_b, event_id='EVB_99', start_time=2460010.0, duration=2.0,
+            nearest_moving_object='Ceres')
+        PSPLModel.objects.create(event=self.event_a, model_type='PSPL microlensing', chisq=24.0)
+        for event in (self.event_a, self.event_b):
+            RGESAlert.objects.create(
+                alert_id=1, roman_id='ROMAN-' + event.event_id, event=event, alert_origin='MSOS')
+
+    def test_migration_sets_target_of_existing_alerts(self):
+        migration = importlib.import_module('custom_code.migrations.0042_rgesalert_target')
+        RGESAlert.objects.update(target=None)
+        orphan = RGESAlert.objects.create(alert_id=3, roman_id='ROMAN-Y')
+
+        migration.set_target_from_event(django_apps, None)
+
+        self.assertEqual(RGESAlert.objects.get(event=self.event_a).target, self.target_a)
+        self.assertEqual(RGESAlert.objects.get(event=self.event_b).target, self.target_b)
+        orphan.refresh_from_db()
+        self.assertIsNone(orphan.target)
+
+    def test_alert_takes_its_events_target(self):
+        alert = RGESAlert.objects.get(event=self.event_a)
+        self.assertEqual(alert.target, self.target_a)
+        self.assertEqual(list(self.target_b.alerts.values_list('roman_id', flat=True)), ['ROMAN-EVB_99'])
+
+        # ...unless it's given one, and an alert needs no event
+        other = RGESAlert.objects.create(alert_id=2, roman_id='ROMAN-X', event=self.event_a, target=self.target_b)
+        self.assertEqual(other.target, self.target_b)
+        self.assertIsNone(RGESAlert.objects.create(alert_id=3, roman_id='ROMAN-Y').target)
+
+    def found(self, url_name, query):
+        response = self.client.get(reverse(url_name), {'query': query}, headers={'HX-Request': 'true'})
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    def test_event_search(self):
+        for query, expected, unexpected in [
+            ('EVA', 'EVA_24', 'EVB_99'),             # event ID
+            ('TargetB', 'EVB_99', 'EVA_24'),         # source name
+            ('ceres', 'EVB_99', 'EVA_24'),           # nearest moving object, case-insensitive
+        ]:
+            with self.subTest(query=query):
+                response = self.found('events:list', query)
+                self.assertContains(response, expected)
+                self.assertNotContains(response, unexpected)
+
+        # Any field of the event: a number is found wherever it occurs
+        Event.objects.filter(pk=self.event_b.pk).update(delta_chi2_PSPL=777.5, Nlinked_events=3)
+        response = self.found('events:list', '777.5')
+        self.assertContains(response, 'EVB_99')
+        self.assertNotContains(response, 'EVA_24')
+        self.assertContains(self.found('events:list', 'EVA_24'), 'EVA_24')
+
+    def test_event_table_scrolls_horizontally(self):
+        # More than a page of events, so that there is a pagination bar
+        for i in range(25):
+            Event.objects.create(target=self.target_a, event_id=f'EVX_{i}', start_time=2460100.0 + i, duration=1.0)
+
+        # The full page, and the fragments HTMX swaps in for a sort or a change of page
+        for params, headers in [({}, {}), ({'sort': 'duration'}, {'HX-Request': 'true'}),
+                                ({'page': 2}, {'HX-Request': 'true'})]:
+            with self.subTest(params=params):
+                html = self.client.get(reverse('events:list'), params, headers=headers).content.decode()
+                self.assertEqual(html.count('class="table-responsive"'), 1)
+                # Only the table is in the scroller: the pagination bar follows it
+                self.assertRegex(html, r'(?s)class="table-responsive".*?</table>\s*</div>\s*<nav')
+
+    def test_event_model_search(self):
+        for query, expected in [('TargetA', 'SearchTargetA'), ('pspl', 'PSPL microlensing')]:
+            with self.subTest(query=query):
+                self.assertContains(self.found('eventmodels:list', query), expected)
+        self.assertNotContains(self.found('eventmodels:list', 'TargetB'), 'SearchTargetA')
+
+    def test_alert_search(self):
+        for query, expected, unexpected in [
+            ('ROMAN-EVA', 'ROMAN-EVA_24', 'ROMAN-EVB_99'),   # Roman ID
+            ('TargetB', 'ROMAN-EVB_99', 'ROMAN-EVA_24'),     # source name
+        ]:
+            with self.subTest(query=query):
+                response = self.found('candidates:list', query)
+                self.assertContains(response, expected)
+                self.assertNotContains(response, unexpected)
+
+
+class TestTaskQueuing(TestCase):
+    """
+    The tasks that work out a target's or event's derived values are queued when it is created
+    or the fields they depend on change, and not by every other save
+    """
+
+    def setUp(self):
+        patches = {name: mock.patch(f'custom_code.signals.{name}') for name in
+                   ('check_target_for_variable_star', 'compute_periodogram',
+                    'check_event_for_moving_objects', 'make_event_lightcurve')}
+        self.queued = {name: patch.start() for name, patch in patches.items()}
+        for patch in patches.values():
+            self.addCleanup(patch.stop)
+
+    def counts(self):
+        counts = {name: task.enqueue.call_count for name, task in self.queued.items()}
+        for task in self.queued.values():
+            task.enqueue.reset_mock()
+        return counts
+
+    def only(self, *names):
+        return {name: int(name in names) for name in self.queued}
+
+    def test_event_tasks(self):
+        target = Target.objects.create(name='QueueTarget', ra=10.0, dec=10.0)
+        self.counts()
+        event_tasks = ('check_event_for_moving_objects', 'make_event_lightcurve')
+
+        event = Event.objects.create(target=target, event_id='Q_1', start_time=2460000.0, duration=2.0)
+        self.assertEqual(self.counts(), self.only(*event_tasks))
+
+        # Saves that don't change when the event happens: whole or partial, repeated, or from
+        # an instance holding stale values (as in the modeling code)
+        stale = Event.objects.get(pk=event.pk)
+        event.delta_chi2_PSPL = 3.0
+        event.save()
+        event.save()
+        event.save(update_fields=['delta_chi2_PSPL'])
+        Event.objects.filter(pk=event.pk).update(peak_mag=20.0)
+        stale.save()
+        self.assertEqual(self.counts(), self.only())
+
+        # Changes to it, however they're saved
+        event.duration = 3.0
+        event.save()
+        self.assertEqual(self.counts(), self.only(*event_tasks))
+        event.start_time = 2460001.0
+        event.save(update_fields=['start_time'])
+        self.assertEqual(self.counts(), self.only(*event_tasks))
+
+        # ...but only when it is a change: the new value is what's stored already
+        event.save(update_fields=['start_time', 'duration'])
+        self.assertEqual(self.counts(), self.only())
+
+        # An instance with stale old values changes nothing if the stored row matches it
+        stale.start_time, stale.duration = event.start_time, event.duration
+        stale.save()
+        self.assertEqual(self.counts(), self.only())
+
+    def test_target_tasks(self):
+        target_tasks = ('check_target_for_variable_star', 'compute_periodogram')
+
+        target = Target.objects.create(name='QueueTarget', ra=10.0, dec=10.0)
+        self.assertEqual(self.counts(), self.only(*target_tasks))
+
+        target.nearest_variable_star = 'V1234'
+        target.save()
+        target.save(update_fields=['nearest_variable_star'])
+        self.assertEqual(self.counts(), self.only())
+
+        target.ra = 11.0
+        target.save()
+        self.assertEqual(self.counts(), self.only(*target_tasks))
+
+        target.dec = 12.0
+        target.save(update_fields=['dec'])
+        self.assertEqual(self.counts(), self.only(*target_tasks))
+
+        # Edited through the TOM's own Target form: a full save with the position changed
+        edited = Target.objects.get(pk=target.pk)
+        edited.ra = 13.0
+        edited.save()
+        self.assertEqual(self.counts(), self.only(*target_tasks))
+
+
+class TestBackgroundTasks(TestCase):
+    """A task queued for a row that has since been deleted ends quietly instead of failing"""
+
+    def setUp(self):
+        self.target = Target.objects.create(name='TaskTarget', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(target=self.target, event_id='TASK_1', start_time=2460000.0, duration=2.0)
+
+    def test_tasks_run_for_existing_rows(self):
+        for task, work, row in [
+            (tasks.check_target_for_variable_star, 'find_nearest_rges_variable_catalog', self.target),
+            (tasks.compute_periodogram, 'calc_periodogram', self.target),
+            (tasks.check_event_for_moving_objects, 'find_moving_objects_near_event', self.event),
+            (tasks.make_event_lightcurve, 'generate_event_lightcurves', self.event),
+        ]:
+            with self.subTest(task=work), mock.patch(f'custom_code.tasks.{work}') as mocked:
+                task.call(row.pk)
+                self.assertEqual(mocked.call_count, 1)
+                self.assertEqual(mocked.call_args.args[0].pk, row.pk)
+
+    def test_tasks_for_deleted_rows_do_nothing(self):
+        target_pk, event_pk = self.target.pk, self.event.pk
+        self.event.delete()
+        self.target.delete()
+
+        for task, work, pk in [
+            (tasks.check_target_for_variable_star, 'find_nearest_rges_variable_catalog', target_pk),
+            (tasks.compute_periodogram, 'calc_periodogram', target_pk),
+            (tasks.check_event_for_moving_objects, 'find_moving_objects_near_event', event_pk),
+            (tasks.make_event_lightcurve, 'generate_event_lightcurves', event_pk),
+        ]:
+            with self.subTest(task=work), mock.patch(f'custom_code.tasks.{work}') as mocked:
+                task.call(pk)   # no DoesNotExist
+                mocked.assert_not_called()
+
+
+class TestIngestAlert(TestCase):
+    """Ingesting the same alert packet again must not record it again"""
+
+    def packet(self):
+        t = np.linspace(2460000.0, 2460010.0, 60)
+        band = {'time': t.tolist(), 'flux': np.full(60, 1000.0).tolist(), 'flux_err': np.full(60, 10.0).tolist()}
+        return {
+            'id': '12345', 'objname': 'IngestTest', 'ra': 270.0, 'dec': -30.0,
+            'metadata': {'t0lens1': 2460005.0, 'u0lens1': 0.1, 'tE_ref': 1.0, 'rho': 0.01,
+                         'Source_F146': 20.0, 'EventID': 7.0},
+            'light_curves': {'F087': band, 'F146': band, 'F213': band},
+        }
+
+    def ingest(self, data):
+        serial = MSOSAlertSerializer(data=data)
+        serial.is_valid(raise_exception=True)
+        # Tasks are queued once the transaction commits, which a TestCase never does by itself
+        with self.captureOnCommitCallbacks(execute=True), mock.patch('custom_code.serializers.compute_periodogram'):
+            serial.save()
+        return serial
+
+    def test_repeat_ingest_finds_existing_alert(self):
+        first = self.ingest(self.packet())
+        self.assertEqual(RGESAlert.objects.count(), 1)
+        # The peak magnitude is estimated after the alert is created, so it no longer has
+        # its initial value, and the ingest timestamp is different each time
+        self.assertNotEqual(RGESAlert.objects.get().alert_peak_mag, 0.0)
+
+        second = self.ingest(self.packet())
+
+        self.assertEqual(RGESAlert.objects.count(), 1)
+        self.assertEqual(Event.objects.count(), 1)
+        self.assertEqual(Target.objects.filter(name='IngestTest').count(), 1)
+        self.assertEqual(second.alert.pk, first.alert.pk)
+        self.assertEqual(first.alert.target, first.target)
+
+        # Each task was queued once per row, not again for the repeat ingest
+        queued = Counter(DBTaskResult.objects.values_list('task_path', flat=True))
+        self.assertEqual({path.split('.')[-1]: n for path, n in queued.items()}, {
+            'check_target_for_variable_star': 1, 'compute_periodogram': 1,
+            'check_event_for_moving_objects': 1, 'make_event_lightcurve': 1,
+        })
+
+        # A different alert for the same source is recorded
+        other = self.packet()
+        other['id'] = '12346'
+        self.ingest(other)
+        self.assertEqual(RGESAlert.objects.count(), 2)
+        self.assertEqual(Event.objects.count(), 2)
+
+
 class TestVariableStars(TestCase):
 
     def setUp(self):
@@ -614,9 +937,7 @@ class TestMultiEventDiagnostics(TestCase):
 
     def test_second_peak_diagnostics(self):
 
-        event_list = list(Event.objects.filter(target=self.test_target))
-
-        diagnostics.second_peak_diagnostics(self.test_event, event_list)
+        diagnostics.second_peak_diagnostics(self.test_event)
 
         test_event = Event.objects.get(pk=self.test_event.pk)
 
@@ -625,6 +946,19 @@ class TestMultiEventDiagnostics(TestCase):
         dt = abs(midpoint - midpoint2)
         self.assertAlmostEqual(test_event.time_to_second_peak, dt, 2)
         self.assertAlmostEqual(test_event.second_peak_mag, self.test_event2.peak_mag)
+
+    def test_second_peak_diagnostics_survive_saving_the_event(self):
+        # The modeling pipeline goes on to save() the Event instance it passes to the diagnostics
+        diagnostics.second_peak_diagnostics(self.test_event)
+        self.assertIsNotNone(self.test_event.time_to_second_peak)
+
+        self.test_event.delta_chi2_PSPL = 3.0
+        self.test_event.save()
+
+        test_event = Event.objects.get(pk=self.test_event.pk)
+        self.assertIsNotNone(test_event.time_to_second_peak)
+        self.assertIsNotNone(test_event.second_peak_mag)
+        self.assertEqual(test_event.delta_chi2_PSPL, 3.0)
 
     def test_link_events(self):
         target_list, events_list, corr_idx = create_event_set()

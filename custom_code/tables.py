@@ -109,6 +109,8 @@ class EventTable(EventRenderMixin, HTMXTable):
 
     class Meta(HTMXTable.Meta):
         model = Event
+        # Scrolls horizontally: this table has more columns than fit across the page
+        template_name = 'custom_code/event_table_scroll.html'
         fields = [
             'target', 'thumbnail', 'event_id', 'start_time', 'duration',
             'delta_chi2_PSPL', 'delta_BIC_PSPL',

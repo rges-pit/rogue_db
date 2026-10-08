@@ -6,11 +6,20 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 from astropy.time import Time
 from django.utils import timezone
+import warnings
+from erfa import ErfaWarning
 import datetime
 import numpy as np
 from custom_code import utils
 from custom_code.tasks import compute_periodogram
+import logging
 
+logger = logging.getLogger(__name__)
+
+def get_event_id(source, alert_id):
+    event_id = source.name + '_' + alert_id
+    logger.info('Event ID: ' + event_id)
+    return event_id
 
 class LightCurveBandSerializer(serializers.Serializer):
     """One passband's raw time series, as provided in an MSOS alert packet."""
@@ -71,16 +80,23 @@ class MSOSAlertSerializer(serializers.Serializer):
                 mag_now_passband='Roman_F146'
             ),
         )
+        self.target = t
+
+        if created:
+            logger.info('Ingested new source ' + t.name)
+        else:
+            logger.info('Alert for existing source ' + t.name)
 
         current_time = timezone.now()
 
         alert_data = {key: value for key, value in self.initial_data.items() if 'light_curve' not in key}
 
-        duration = 2.0*float(validated_data['metadata']['tE_ref'])
-        tstart = float(validated_data['metadata']['t0lens1']) - duration
-        event_id = str(int(validated_data['metadata']['EventID']))
+        # Note the t0 values in the MSOS alerts don't seem to represent the event peak
+        duration = 4.0*float(validated_data['metadata']['tE_ref'])
+        tstart = float(validated_data['metadata']['t0lens1']) - duration/2.0
+        event_id = get_event_id(t, validated_data['id'])
 
-        event, created = Event.objects.get_or_create(
+        e, created = Event.objects.get_or_create(
             event_id=event_id,
             defaults=dict(
                 target=t,
@@ -89,19 +105,31 @@ class MSOSAlertSerializer(serializers.Serializer):
                 peak_mag=0.0
             ),
         )
+        self.event = e
 
+        if created:
+            logger.info('New event ' + e.event_id)
+        else:
+            logger.info('Existing event ' + e.event_id)
+
+        # An alert is identified by its packet ID, source, origin and event; the rest goes in
+        # defaults so that it is used only when the alert is first recorded. Fields that change between runs
+        # (the ingest timestamp, and the peak magnitude, which is estimated and stored below)
+        # must not be part of the lookup, or a repeat ingest never finds the first and records
+        # the alert again.
         alert, created = RGESAlert.objects.get_or_create(
-            alert_id=event_id,
+            alert_id=validated_data['id'],
+            roman_id=validated_data['objname'],
+            event=e,
+            alert_origin='MSOS',    # Classifier name needed in alert packet
             defaults=dict(
-                roman_id=validated_data['objname'],
-                event=event,
+                target=t,
                 ra=s.ra.deg,
                 dec=s.dec.deg,
                 alert_neural_network_confidence=0.0,
                 alert_delta_chi2=0.0,
                 alert_classification='Microlensing',
                 ffp_candidate=True,
-                alert_origin='MSOS',    # Classifier name needed in alert packet
                 alert_notes='',
                 alert_t0=float(validated_data['metadata']['t0lens1']),
                 alert_u0=float(validated_data['metadata']['u0lens1']),
@@ -110,46 +138,63 @@ class MSOSAlertSerializer(serializers.Serializer):
                 alert_peak_mag=0.0,
                 alert_baseline_mag=float(validated_data['metadata']['Source_F146']),  # What about the other passbands?
                 alert_mag_passband='F146',
-                alert_timestamp=current_time, # Because there is no timestamp in the alert packet
+                alert_timestamp=current_time,  # Because there is no timestamp in the alert packet
                 alert_contents=alert_data,
             ),
         )
+        self.alert = alert
+
+        if created:
+            logger.info(f'Recorded new alert {alert.alert_id}')
+        else:
+            logger.info(f'Existing alert {alert.alert_id}')
 
         # Parse the lightcurve data into PhotometryReducedDatums
         lightcurves = self.convert_lightcurve_to_mag(validated_data)
 
-        # If no alert_peak_mag is given, estimate it from the lightcurve in F146
-        if alert.alert_peak_mag == 0.0:
-            peak_mag = estimate_peak_mag(event, lightcurves['F146'])
-            RGESAlert.objects.filter(pk=alert.pk).update(alert_peak_mag=peak_mag)
-            Event.objects.filter(pk=event.pk).update(peak_mag=peak_mag)
+        if len(lightcurves) > 0:
 
-        for passband in ['F087', 'F146', 'F213']:
-            lc = lightcurves[passband]
-            source_name = 'Roman_' + passband  # Replace with classifier ID
+            # If no alert_peak_mag is given, estimate it from the lightcurve in F146
+            if alert.alert_peak_mag == 0.0:
+                peak_mag = estimate_peak_mag(e, lightcurves['F146'])
+                RGESAlert.objects.filter(pk=alert.pk).update(alert_peak_mag=peak_mag)
+                Event.objects.filter(pk=e.pk).update(peak_mag=peak_mag)
 
-            # Bulk create due to large number of datapoints
-            reduced_datums = [
-                try_parse_reduced_datum({
-                    'target': t,
-                    'data_product': None,          # No actual file path available
-                    'data_type': 'photometry',
-                    'source_name': source_name,
-                    'source_location': 'Roman',      # Check this
-                    'timestamp': timezone.make_aware(Time(lc[i, 0], format='jd').datetime, datetime.timezone.utc),
-                    'value': {
-                        'mag': lc[i, 1],
-                        'mag_err': lc[i, 2],
-                        'bandpass': passband
-                    }
-                })
-                for i in range(len(lc))
-            ]
-            # ignore_conflicts to ingest just the new datapoints and avoid
-            # crashing if any are duplicates
-            PhotometryReducedDatum.objects.bulk_create(reduced_datums, ignore_conflicts=True)
+            # Supress ERFA warnings on conversion of timestamps >5yrs away from the last known
+            # leap second; simulated Roman lightcurves exceed this
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=ErfaWarning, message=".*dubious year.*")
 
-        compute_periodogram.enqueue(t.pk)
+                for passband in ['F087', 'F146', 'F213']:
+                    lc = lightcurves[passband]
+                    source_name = 'Roman_' + passband  # Replace with classifier ID
+
+                    # Bulk create due to large number of datapoints
+                    reduced_datums = [
+                        try_parse_reduced_datum({
+                            'target': t,
+                            'data_product': None,          # No actual file path available
+                            'data_type': 'photometry',
+                            'source_name': source_name,
+                            'source_location': 'Roman',      # Check this
+                            'timestamp': timezone.make_aware(Time(lc[i, 0], format='jd').datetime, datetime.timezone.utc),
+                            'value': {
+                                'mag': lc[i, 1],
+                                'mag_err': lc[i, 2],
+                                'bandpass': passband
+                            }
+                        })
+                        for i in range(len(lc))
+                    ]
+
+                    # ignore_conflicts to ingest just the new datapoints and avoid
+                    # crashing if any are duplicates
+                    PhotometryReducedDatum.objects.bulk_create(reduced_datums, ignore_conflicts=True)
+
+                    logger.info('Ingested timeseries photometry for ' + t.name)
+
+            compute_periodogram.enqueue(t.pk)
+            logger.info('Computed periodogram for ' + t.name)
 
         return alert
 
@@ -172,6 +217,8 @@ class MSOSAlertSerializer(serializers.Serializer):
                 ]
             lightcurves[passband] = np.array(lc)
 
+        logger.info('Parsed timeseries photometry')
+
         return lightcurves
 
 def estimate_peak_mag(lcevent, lightcurve):
@@ -184,3 +231,4 @@ def estimate_peak_mag(lcevent, lightcurve):
         & (lightcurve[:,0] <= lcevent.start_time + lcevent.duration))
 
     return lightcurve[idx,1].max()
+

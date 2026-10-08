@@ -10,6 +10,8 @@ from datetime import datetime, UTC
 from astropy.time import Time
 import json
 import corner
+import warnings
+from erfa import ErfaWarning
 import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
@@ -30,29 +32,33 @@ def get_full_lightcurve(target, bandpass=None):
         ).order_by("timestamp")
     datasets = {}
 
-    for rd in photometry_qs:
-        ts = Time(rd.timestamp).jd
-        # When filtering to one source_name, key the result by that same
-        # value -- rd.bandpass uses a different naming scheme (e.g. "F146"
-        # vs. source_name "Roman_F146"), so keying by it here left callers
-        # that filtered by bandpass unable to find their own data back out
-        # of the returned dict under the name they asked for.
-        passband = bandpass if bandpass else rd.bandpass
-        if passband in datasets.keys():
-            lc = datasets[passband]
-        else:
-            lc = []
+    # Catch warnings caused by timestamps >5yrs away from latest leap second
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ErfaWarning, message=".*dubious year.*")
 
-        # Append the datapoint to the corresponding dataset
-        try:
-            lc.append([ts, rd.brightness, rd.brightness_error])
-        except:
-            # Necessary to handle the datapoints where only a limit is available.
-            # Skipping these for now
+        for rd in photometry_qs:
+            ts = Time(rd.timestamp).jd
+            # When filtering to one source_name, key the result by that same
+            # value -- rd.bandpass uses a different naming scheme (e.g. "F146"
+            # vs. source_name "Roman_F146"), so keying by it here left callers
+            # that filtered by bandpass unable to find their own data back out
+            # of the returned dict under the name they asked for.
+            passband = bandpass if bandpass else rd.bandpass
+            if passband in datasets.keys():
+                lc = datasets[passband]
+            else:
+                lc = []
+
+            # Append the datapoint to the corresponding dataset
             try:
-                lc.append([ts, rd.brightness, 1.0])
-            except KeyError:
-                pass
+                lc.append([ts, rd.brightness, rd.brightness_error])
+            except:
+                # Necessary to handle the datapoints where only a limit is available.
+                # Skipping these for now
+                try:
+                    lc.append([ts, rd.brightness, 1.0])
+                except KeyError:
+                    pass
 
         datasets[passband] = lc
 
@@ -82,29 +88,33 @@ def get_reduced_data(event, source_name=None):
         ).order_by("timestamp")
     datasets = {}
 
-    # Select only those datapoints from the lightcurves that lie within the event window
-    for rd in photometry_qs:
-        ts = Time(rd.timestamp).jd
-        if ts >= event.start_time and ts <= event.start_time + event.duration:
-            # Identify different lightcurves from the filter label given
-            passband = rd.bandpass
-            if passband in datasets.keys():
-                lc = datasets[passband]
-            else:
-                lc = []
+    # Catch warnings caused by timestamps >5yrs away from latest leap second
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ErfaWarning, message=".*dubious year.*")
 
-            # Append the datapoint to the corresponding dataset
-            try:
-                lc.append([ts, rd.brightness, rd.brightness_error])
-            except:
-                # Necessary to handle the datapoints where only a limit is available.
-                # Skipping these for now
+        # Select only those datapoints from the lightcurves that lie within the event window
+        for rd in photometry_qs:
+            ts = Time(rd.timestamp).jd
+            if ts >= event.start_time and ts <= event.start_time + event.duration:
+                # Identify different lightcurves from the filter label given
+                passband = rd.bandpass
+                if passband in datasets.keys():
+                    lc = datasets[passband]
+                else:
+                    lc = []
+
+                # Append the datapoint to the corresponding dataset
                 try:
-                    lc.append([ts, rd.brightness, 1.0])
-                except KeyError:
-                    pass
+                    lc.append([ts, rd.brightness, rd.brightness_error])
+                except:
+                    # Necessary to handle the datapoints where only a limit is available.
+                    # Skipping these for now
+                    try:
+                        lc.append([ts, rd.brightness, 1.0])
+                    except KeyError:
+                        pass
 
-            datasets[passband] = lc
+                datasets[passband] = lc
 
     # Convert the accumulated lightcurves into numpy arrays:
     for passband, lc in datasets.items():
@@ -574,7 +584,7 @@ def store_pitkinflare_model_parameters(event, results):
                 BIC=results['BIC'],
                 fit_method=results['fit_method'],
                 tau=results['tau'],
-                tau_thresold=results['tau_threshold']
+                tau_threshold=results['tau_threshold']
             )
 
         else:
@@ -651,4 +661,11 @@ def store_event_statistics(lcevent, results):
     and no other values can be present
     """
 
+    # Update the event in the database
     Event.objects.filter(pk=lcevent.pk).update(**results)
+
+    # Update the event object in memory to avoid later overwrites
+    for name, value in results.items():
+        setattr(lcevent, name, value)
+
+    logger.info('Stored event statistics: ' + repr(results))

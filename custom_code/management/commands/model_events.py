@@ -6,6 +6,7 @@ from django.core.management.base import BaseCommand
 from django.db import connections
 from django.db.models import Q
 from astropy.time import Time
+from custom_code import event_functions
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,6 @@ def fit_target(target_pk):
     """
     from tom_targets.models import Target
     from custom_code.models import Event
-    from custom_code import data_utils
-    from custom_code import (pylima_fit_functions, general_fit_functions,
-            diagnostics, flare_fit_functions)
 
     try:
         target = Target.objects.get(pk=target_pk)
@@ -54,68 +52,7 @@ def fit_target(target_pk):
     if events.count() > 0:
         for e in events:
             try:
-                # Search for secondary peaks for the same source
-                diagnostics.second_peak_diagnostics(e, list(events))
-
-                # Straight line model fit
-                straightline_results = general_fit_functions.run_event_straightline_fit(e)
-                straightline_model = data_utils.store_straightline_model_parameters(
-                    e, straightline_results, 'Straight line'
-                )
-                data_utils.store_model_lightcurve(e, straightline_results, 'straight_line')
-
-                # Baseline model fit
-                baseline_results = general_fit_functions.run_baseline_fit(e)
-                baseline_model = data_utils.store_straightline_model_parameters(
-                    e, baseline_results, 'Baseline'
-                )
-                data_utils.store_baseline_diagnostics(e, baseline_results)
-
-                # Calculate coverage and skew
-                results = {}
-                results['coverage_fraction'] = general_fit_functions.calc_coverage(e)
-                results['symmetry'] = general_fit_functions.calc_symmetry(e)
-                data_utils.store_event_statistics(e, results)
-
-                # Fit microlensing models and calculate diagnostics
-                pylima_results = pylima_fit_functions.run_fit(e, verbose=False)
-                data_utils.store_pylima_model_lightcurves(e, pylima_results)
-                pspl_model, fspl_model = data_utils.store_microlensing_model_parameters(
-                    e, pylima_results
-                )
-                diagnostics.calc_mulens_diagnostics(
-                    e, pspl_model, fspl_model, straightline_model
-                )
-                best_mulens = diagnostics.get_best_mulens_model(pspl_model, fspl_model)
-                data_utils.generate_corner_plot(
-                    pspl_model, pylima_results['pspl'],
-                    target.name + '_' + str(e.event_id) + '_PSPL_corner_plot.png'
-                )
-                data_utils.generate_corner_plot(
-                    fspl_model, pylima_results['fspl'],
-                    target.name + '_' + str(e.event_id) + '_FSPL_corner_plot.png'
-                )
-
-                # Fit flare models and calculate diagnostics
-                davenport_results = flare_fit_functions.run_davenport_flare_fit(e)
-                davenport_flare = data_utils.store_davenportflare_model_parameters(e, davenport_results)
-                data_utils.store_model_lightcurve(
-                    e, davenport_results, 'davenport_flare'
-                )
-                data_utils.generate_corner_plot(
-                    davenport_flare, davenport_results,
-                    target.name + '_' + str(e.event_id) + '_davenport_corner_plot.png'
-                )
-                pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(e)
-                pitkin_flare = data_utils.store_pitkinflare_model_parameters(
-                    e, pitkin_results
-                )
-                data_utils.store_model_lightcurve(e, pitkin_results, 'pitkin_flare')
-                diagnostics.calc_flare_diagnostics(e, best_mulens, davenport_flare, pitkin_flare)
-                data_utils.generate_corner_plot(
-                    pitkin_flare, pitkin_results,
-                    target.name + '_' + str(e.event_id) + '_pitkin_corner_plot.png'
-                )
+                event_functions.run_event_modeling(e)
 
                 return target_pk, target.name, True, None
 

@@ -127,6 +127,10 @@ def plot_interactive_lightcurve(
     current_time = Time.now().jd - 2460000
     if show_current_time:
 
+        # No row/col here: given them, plotly replaces yref='paper' with the subplot's y axis,
+        # so the line's y0=0 to y1=1 became magnitudes 0 to 1 and autorange stretched the
+        # magnitude axis out to include them. As a paper-referenced shape it spans the full
+        # height of the figure (every panel) and plays no part in autoranging y.
         fig.add_shape(
             # Line Vertical
             dict(
@@ -135,6 +139,7 @@ def plot_interactive_lightcurve(
                 y0=0,
                 x1=current_time,
                 y1=1,
+                xref='x',
                 yref='paper',
                 layer='below',
                 line=dict(
@@ -143,14 +148,13 @@ def plot_interactive_lightcurve(
                     dash='dash',
                 )
             ),
-            row="all", col=1
         )
     fig.update_xaxes(autorange=True)
 
     ### Try to plot model if exist
     if model_datums.count() > 0:
         for rd in model_datums:
-            key_name = ''.join(rd.data_type.split('_')[3:])
+            key_name = ''.join(rd.data_type.split('_')[-1])
             fig.add_trace(go.Scatter(x=np.array(rd.value['lc_model_time']) - 2460000,
                                  y=np.array(rd.value['lc_model_magnitude']),
                                  mode='lines',
@@ -163,9 +167,7 @@ def plot_interactive_lightcurve(
 
     annotations = []
     if show_current_time:
-        # Same autorange caveat as the shape above: this annotation's x is in
-        # data coordinates too, so it's skipped along with the line for the
-        # zoomed-in event plot.
+        # Same autorange caveat as the shape above
         annotations.append(dict(
             x=current_time,
             xanchor="left",

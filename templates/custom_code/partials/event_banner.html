@@ -1,7 +1,7 @@
 {% load static tom_common_extras targets_extras %}
 <div class="row source-banner">
   <div class="col-sm-3">
-      <h3 style="color: var(--rges-purple-light)">{{ event.event_id }}</h3>
+      <h4 style="color: var(--rges-purple-light)">{{ event.event_id }}</h4>
   </div>
   <div class="col-sm-3">
       <h6>Source: <a href="{% url 'targets:detail' pk=target.id %}">{{ target.name }}</a><br/></h6>

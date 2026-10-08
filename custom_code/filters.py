@@ -65,6 +65,24 @@ class EventFilterSet(HTMXTableFilterSet):
     Filters for Event objects relating to the given target
     """
 
+    def general_search(self, queryset, name, value):
+        """
+        Search every field of the Event for the value, as the base implementation does, plus the
+        source's name and aliases.
+
+        The base implementation can't be used as it is: it tries a text lookup on each of the
+        model's fields except the forward relations, and so on the reverse ones too (an Event's
+        models and alerts), which don't support text lookups and raise a FieldError.
+        """
+        if not value:
+            return queryset
+
+        q_set = Q(target__name__icontains=value) | Q(target__aliases__name__icontains=value)
+        for field in Event._meta.get_fields():
+            if field.concrete and not field.is_relation:
+                q_set |= Q(**{f'{field.name}__icontains': value})
+        return queryset.filter(q_set).distinct()
+
     class Meta:
         model = Event
         fields = [
