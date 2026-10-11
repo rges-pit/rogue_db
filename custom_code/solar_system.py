@@ -1,11 +1,49 @@
 from custom_code.models import Event
 import requests
+import time
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 import numpy as np
 import logging
 
 logger = logging.getLogger(__name__)
+
+# JPL's services are external and now and then drop a request or are briefly unavailable. A
+# failed request is tried again after a delay that doubles each time, and then given up on.
+QUERY_ATTEMPTS = 3
+QUERY_RETRY_DELAY = 5.0     # seconds before the first retry
+QUERY_TIMEOUT = 30.0        # seconds to wait for a response, so that a stalled server can't hang the worker
+RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def get_with_retries(url, params, attempts=None, delay=None, timeout=None):
+    """
+    GET a URL, trying again if the connection fails or times out, or the server reports that it is
+    busy or down (HTTP 429, 500, 502, 503, 504).
+
+    Returns the response of the last attempt: for an HTTP error status that's the response itself,
+    which the caller checks as usual. Raises the connection error or timeout of the last attempt if
+    it failed that way.
+    """
+    attempts = QUERY_ATTEMPTS if attempts is None else attempts
+    delay = QUERY_RETRY_DELAY if delay is None else delay
+    timeout = QUERY_TIMEOUT if timeout is None else timeout
+
+    for attempt in range(1, attempts + 1):
+        try:
+            r = requests.get(url, params=params, timeout=timeout)
+            if r.status_code not in RETRY_STATUS_CODES or attempt == attempts:
+                return r
+            reason = f'HTTP {r.status_code}'
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as error:
+            if attempt == attempts:
+                raise
+            reason = type(error).__name__
+
+        wait = delay * 2 ** (attempt - 1)
+        logger.warning(f'Request to {url} failed ({reason}); trying again in {wait:g}s '
+                       f'(attempt {attempt} of {attempts})')
+        time.sleep(wait)
 
 def find_moving_objects_near_event(event, radius=2.0):
     """
@@ -20,14 +58,27 @@ def find_moving_objects_near_event(event, radius=2.0):
     # First get Roman's vector at the time of the Event.
     # Note the minimum time is Roman's launch date of August 30, 2026, at 7:26 a.m. EDT
     jd_event = event.start_time + event.duration/2.0
-    spacecraft_vector = query_horizons_for_roman(jd_event)
 
-    # Now we can query JPL's Small Bodies Identification Tool for any asteroids and comets
-    # close to our Target coordinates at this time
-    closest_name, closest_separation = query_sbident_for_event(
-        event.target.ra, event.target.dec, jd_event, spacecraft_vector,
-        fov_width=radius/3600.0
-    )
+    # JPL's services are external: if they can't be reached, even after trying again, there's
+    # nothing to record. That isn't a failure of this task, so it ends quietly, and the event is
+    # left without a moving object, as it is when none is found.
+    try:
+        spacecraft_vector = query_horizons_for_roman(jd_event)
+        if None in spacecraft_vector.values():
+            logger.warning('No position for Roman returned by JPL Horizons; skipping the moving '
+                           'object search for event ' + str(event.pk))
+            return
+
+        # Now we can query JPL's Small Bodies Identification Tool for any asteroids and comets
+        # close to our Target coordinates at this time
+        closest_name, closest_separation = query_sbident_for_event(
+            event.target.ra, event.target.dec, jd_event, spacecraft_vector,
+            fov_width=radius/3600.0
+        )
+    except requests.exceptions.RequestException as error:
+        logger.warning('JPL service unavailable; skipping the moving object search for event '
+                       + str(event.pk) + ': ' + repr(error))
+        return
 
     if closest_name:
         Event.objects.filter(pk=event.pk).update(
@@ -59,7 +110,7 @@ def query_horizons_for_roman(jd_event):
         'format': 'json'
     }
 
-    r = requests.get(horizons_url, params=payload)
+    r = get_with_retries(horizons_url, payload)
 
     if r.status_code == 200:
         content = r.json()
@@ -110,7 +161,7 @@ def query_sbident_for_event(ra, dec, jd_event, spacecraft_vector, fov_width=2.0/
         'req-elem': 'false',    # Orbital elements are not required;
     }
 
-    r = requests.get(ssd_url, params=payload)
+    r = get_with_retries(ssd_url, payload)
 
     if r.status_code == 200:
         content = r.json()

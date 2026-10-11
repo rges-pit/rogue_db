@@ -2,15 +2,16 @@ from dataclasses import dataclass
 
 from django import forms
 from django.db import models
-from django.db.models import Q
+from django.db.models import OuterRef, Q, Subquery
 from django.http import QueryDict
 from crispy_forms.layout import Layout, Row, Column
 
 import django_filters
+from django_filters.constants import EMPTY_VALUES
 
 from tom_common.htmx_table import HTMXTableFilterSet
 
-from .models import RGESAlert, Event, EventModel
+from .models import RGESAlert, Event, EventModel, SourceDiagnostics
 from .target_models import RogueTarget
 
 
@@ -181,6 +182,47 @@ CUTFILE_SOURCE_PARAMS = (
     _number('period', 'Period [d]'),
 )
 
+# The source parameters held in the SourceDiagnostics table rather than on the target.
+# A target has a series of diagnostics, each made at some time; a cutfile uses the latest one
+# before the date of the cutfile.
+DIAGNOSTIC_FIELDS = {
+    field.name for field in SourceDiagnostics._meta.concrete_fields
+} - {'id', 'target', 'created_at', 'updated_at'}
+
+# SourceDiagnostics, most recently created first
+LATEST_FIRST = ('-created_at', '-pk')
+
+
+def diagnostic_alias(field):
+    """The name of the annotation holding the latest value of a SourceDiagnostics field"""
+    return f'latest_{field}'
+
+
+def latest_diagnostic(field, as_of=None):
+    """
+    A subquery for the value of a SourceDiagnostics field in the most recently created entry
+    for the target of the EventModel it's used on. Entries created after as_of, if given, are
+    passed over: a cutfile finds what was known when it was made, so that running it again
+    after the diagnostics have been revised gives the same models. NULL if the target has no
+    such entry.
+    """
+    entries = SourceDiagnostics.objects.filter(target=OuterRef('event__target'))
+    if as_of is not None:
+        entries = entries.filter(created_at__lte=as_of)
+    return Subquery(entries.order_by(*LATEST_FIRST).values(field)[:1])
+
+
+def latest_diagnostics_by_target(target_ids, as_of=None):
+    """The most recently created SourceDiagnostics (up to as_of, if given) of each target, by target ID"""
+    entries = SourceDiagnostics.objects.filter(target__in=target_ids)
+    if as_of is not None:
+        entries = entries.filter(created_at__lte=as_of)
+    latest = {}
+    for entry in entries.order_by(*LATEST_FIRST):
+        latest.setdefault(entry.target_id, entry)
+    return latest
+
+
 # Event parameters, excluding the target and thumbnail image attribute
 _EVENT_EXCLUDED_FIELDS = {'id', 'target', 'thumbnail'}
 _EVENT_PARAM_LABELS = {
@@ -276,20 +318,33 @@ def _param_filters(group, lookup_prefix, params):
     filters = {}
     for param in params:
         path = lookup_prefix + param.name
+
+        # A source parameter held in SourceDiagnostics is filtered on an annotation of the latest
+        # entry's value, which the filter set adds when the filter is used (it alone knows the
+        # cutfile's moment). The filter is tagged with the field to annotate.
+        diagnostic_field = param.name if group == 'source' and param.name in DIAGNOSTIC_FIELDS else None
+        if diagnostic_field:
+            path = diagnostic_alias(diagnostic_field)
+
         if param.kind == 'text':
-            filters[f'{group}_{param.name}'] = django_filters.CharFilter(
+            new = {f'{group}_{param.name}': django_filters.CharFilter(
                 field_name=path, lookup_expr='icontains', label=param.label,
                 widget=forms.TextInput(attrs={'class': _INPUT_CLASS, 'aria-label': param.label}),
-            )
+            )}
         else:
+            new = {}
             for bound, lookup_expr in (('min', 'gte'), ('max', 'lte')):
-                filters[f'{group}_{param.name}_{bound}'] = django_filters.NumberFilter(
+                new[f'{group}_{param.name}_{bound}'] = django_filters.NumberFilter(
                     field_name=path, lookup_expr=lookup_expr, label=f'{param.label} {bound}',
                     widget=forms.NumberInput(attrs={
                         'class': _INPUT_CLASS, 'step': 'any', 'placeholder': bound,
                         'aria-label': f'{param.label} {bound}',
                     }),
                 )
+        for filter_ in new.values():
+            filter_.diagnostic_field = diagnostic_field
+        filters.update(new)
+
     for filter_ in filters.values():
         filter_.cutfile_group = group
     return filters
@@ -361,6 +416,17 @@ class _CutfileFilterSetBase(HTMXTableFilterSet):
         q_set = Q(event__target__name__icontains=value) | Q(event__target__aliases__name__icontains=value)
         return queryset.filter(q_set).distinct()
 
+    def with_latest_diagnostic(self, queryset, filter_, value):
+        """
+        For a filter on a source diagnostic that has a value, annotates the queryset with the latest
+        entry's value of it, up to the cutfile's moment, for the filter to apply to.
+        """
+        field = getattr(filter_, 'diagnostic_field', None)
+        alias = field and diagnostic_alias(field)
+        if field is None or value in EMPTY_VALUES or alias in queryset.query.annotations:
+            return queryset
+        return queryset.annotate(**{alias: latest_diagnostic(field, self.cutoff)})
+
     def filter_queryset(self, queryset):
         """
         Applies the filters that hold for every model, then restricts to the model types
@@ -374,6 +440,7 @@ class _CutfileFilterSetBase(HTMXTableFilterSet):
             filter_ = self.filters[name]
             group = getattr(filter_, 'cutfile_group', None)
             if group not in CUTFILE_MODEL_TYPES_BY_SLUG:
+                queryset = self.with_latest_diagnostic(queryset, filter_, value)
                 queryset = filter_.filter(queryset, value)
             elif group in by_type:
                 by_type[group].append((filter_, value))

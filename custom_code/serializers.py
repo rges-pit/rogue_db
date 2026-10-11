@@ -5,6 +5,7 @@ from tom_dataproducts.models import try_parse_reduced_datum, PhotometryReducedDa
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 from astropy.time import Time
+from django.db import transaction
 from django.utils import timezone
 import warnings
 from erfa import ErfaWarning
@@ -57,6 +58,11 @@ class MSOSAlertSerializer(serializers.Serializer):
     metadata = MSOSMetadataSerializer()
     light_curves = LightCurvesSerializer()
 
+    # One transaction for the whole ingest. The tasks queued as the Target and Event are saved (such
+    # as compute_source_diagnostics, which needs the lightcurve) are only put on the queue when the
+    # transaction commits. Without this each save commits by itself and the tasks are on the queue
+    # at once, and run before the photometry below has been stored.
+    @transaction.atomic
     def create(self, validated_data):
 
         s = SkyCoord(validated_data['ra'], validated_data['dec'], frame='icrs', unit=(u.deg, u.deg))
@@ -112,10 +118,7 @@ class MSOSAlertSerializer(serializers.Serializer):
             logger.info('Existing event ' + e.event_id)
 
         # An alert is identified by its packet ID, source, origin and event; the rest goes in
-        # defaults so that it is used only when the alert is first recorded. Fields that change between runs
-        # (the ingest timestamp, and the peak magnitude, which is estimated and stored below)
-        # must not be part of the lookup, or a repeat ingest never finds the first and records
-        # the alert again.
+        # defaults so that it is used only when the alert is first recorded.
         alert, created = RGESAlert.objects.get_or_create(
             alert_id=validated_data['id'],
             roman_id=validated_data['objname'],

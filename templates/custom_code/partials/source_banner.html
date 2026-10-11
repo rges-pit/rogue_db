@@ -13,32 +13,35 @@
       RA: {{ target.ra|deg_to_sexigesimal:"hms" }} = {{ target.ra|floatformat:5 }}&deg;<br/>
       Dec: {{ target.dec|deg_to_sexigesimal:"dms" }} = {{ target.dec|floatformat:5 }}&deg;<br/>
       l: {{ target.galactic_lng|floatformat:4 }}&deg; b: {{ target.galactic_lat|floatformat:4 }}&deg;<br/>
+      Baseline: {{ baseline_magnitude|floatformat:3 }} &plusmn; {{ baseline_mag_error|floatformat:3 }} mag ({{ baseline_mag_passband }})<br/>
+      {% if max_peak_periodogram %}
+        Max peak periodogram: {{max_peak_periodogram|floatformat:2}}<br/>
+      {% else %}
+        Max peak periodogram: - <br/>
+      {% endif %}
+      {% if period %}
+        Period: {{period|floatformat:3}} days<br/>
+      {% else %}
+        Period: - <br/>
+      {% endif %}
   </div>
   <div class="col-sm-3">
-    <h5>{{ target.classification }}</h5>
-    {% if 'Microlensing' in target.classification %}
-      t<sub>0</sub>: {{ target.t0|floatformat:3 }}<br/>
-      u<sub>0</sub>: {{ target.u0|floatformat:4 }}<br/>
-      t<sub>E</sub>: {{ target.tE|floatformat:2 }}<br/>
-      {% endif %}
-      {% if 'Microlensing FSPL' in target.classification %}
-      &rho;: {{ target.rho }}
-      {% endif %}
+    <h5>{{ classification }}</h5>
   </div>
     <div class="col-sm-3">
-    {% if target.nearest_flare_star|length > 0 %}
+    {% if nearest_flare_star|length > 0 %}
         <h6 style="color: var(--warning)">
-        Nearby known flare star: {{ target.nearest_flare_star }}<br/>
+        Nearby known flare star: {{ nearest_flare_star }}<br/>
         Separation: {{ flare_separation_arcsec|floatformat:4 }} arcsec
         {% else %}
         <h6 style="color: var(--warning)">No known flare star nearby</h6>
         </h6>
     {% endif %}
-    {% if target.nearest_variable_star|length > 0 %}
+    {% if nearest_variable_star|length > 0 %}
         <h6 style="color: var(--warning)">
-        Nearby known variable star: {{ target.nearest_variable_star }}<br/>
+        Nearby known variable star: {{ nearest_variable_star }}<br/>
         Separation: {{ variable_separation_arcsec|floatformat:4 }} arcsec<br/>
-        Type: {{ target.nearest_variable_type }}
+        Type: {{ nearest_variable_type }}
         </h6>
         {% else %}
         <h6 style="color: var(--warning)">No known variable star nearby</h6>

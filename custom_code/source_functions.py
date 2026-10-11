@@ -1,5 +1,10 @@
 from custom_code.models import SourceDiagnostics
 from .variable_stars import find_nearest_rges_variable_catalog, calc_periodogram
+from .diagnostics import calc_baseline_magnitude
+from custom_code import data_utils
+import logging
+
+logger = logging.getLogger(__name__)
 
 def run_source_diagnostics(target):
     diagnostics = {
@@ -17,10 +22,16 @@ def run_source_diagnostics(target):
         'max_peak_periodogram': 0.0,
         'period': 0.0
     }
-    diagnostics = find_nearest_rges_variable_catalog(target, diagnostics)
-    diagnostics = calc_periodogram(target, diagnostics)
 
-    SourceDiagnostics.objects.create(
-        target=target,
-        defaults=diagnostics
-    )
+    default_passband = 'Roman_F146'
+    datasets = data_utils.get_full_lightcurve(target, bandpass=default_passband)
+    lightcurve = datasets.get(default_passband)
+
+    diagnostics = find_nearest_rges_variable_catalog(target, diagnostics)
+    diagnostics = calc_periodogram(target, lightcurve, diagnostics)
+    diagnostics = calc_baseline_magnitude(lightcurve, default_passband, diagnostics)
+
+    entry = SourceDiagnostics.objects.create(target=target, **diagnostics)
+    logger.info('Computed source diagnostics for ' + target.name)
+
+    return entry

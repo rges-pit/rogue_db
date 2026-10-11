@@ -1,14 +1,16 @@
 from django.contrib.auth.models import User
 from django.http import QueryDict
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from custom_code.serializers import MSOSAlertSerializer
-from custom_code import tasks
+from custom_code import tasks, source_functions, solar_system
+import requests
+from django_tasks.signals import task_enqueued
 from collections import Counter
 from django_tasks.backends.database.models import DBTaskResult
 from unittest import mock
 from custom_code.models import (Event, EventModel, PSPLModel, PitkinFlareModel, StraightLineModel,
-                                DavenportFlareModel, RGESAlert)
+                                DavenportFlareModel, RGESAlert, SourceDiagnostics)
 from custom_code.filters import CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES
 from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum
@@ -749,7 +751,7 @@ class TestTaskQueuing(TestCase):
 
     def setUp(self):
         patches = {name: mock.patch(f'custom_code.signals.{name}') for name in
-                   ('check_target_for_variable_star', 'compute_periodogram',
+                   ('compute_source_diagnostics',
                     'check_event_for_moving_objects', 'make_event_lightcurve')}
         self.queued = {name: patch.start() for name, patch in patches.items()}
         for patch in patches.values():
@@ -801,14 +803,14 @@ class TestTaskQueuing(TestCase):
         self.assertEqual(self.counts(), self.only())
 
     def test_target_tasks(self):
-        target_tasks = ('check_target_for_variable_star', 'compute_periodogram')
+        target_tasks = ('compute_source_diagnostics',)
 
         target = Target.objects.create(name='QueueTarget', ra=10.0, dec=10.0)
         self.assertEqual(self.counts(), self.only(*target_tasks))
 
-        target.nearest_variable_star = 'V1234'
+        target.t0 = 2460000.5
         target.save()
-        target.save(update_fields=['nearest_variable_star'])
+        target.save(update_fields=['t0'])
         self.assertEqual(self.counts(), self.only())
 
         target.ra = 11.0
@@ -824,6 +826,92 @@ class TestTaskQueuing(TestCase):
         edited.ra = 13.0
         edited.save()
         self.assertEqual(self.counts(), self.only(*target_tasks))
+
+
+class TestJPLQueryRetries(TestCase):
+    """Requests to JPL's services are tried again if they fail, and then skipped without failing the task"""
+
+    class Response:
+        def __init__(self, status_code, content=None):
+            self.status_code, self.content = status_code, content or {}
+
+        def json(self):
+            return self.content
+
+    def setUp(self):
+        get = mock.patch('custom_code.solar_system.requests.get')
+        sleep = mock.patch('custom_code.solar_system.time.sleep')
+        self.get, self.sleep = get.start(), sleep.start()
+        self.addCleanup(get.stop)
+        self.addCleanup(sleep.stop)
+
+        self.target = Target.objects.create(name='JPLTarget', ra=270.0, dec=-30.0)
+        self.event = Event.objects.create(target=self.target, event_id='JPL_1', start_time=2461000.0, duration=2.0)
+
+    def test_retries_a_dropped_connection_with_a_growing_delay(self):
+        dropped = requests.exceptions.ConnectionError('Remote end closed connection without response')
+        self.get.side_effect = [dropped, dropped, self.Response(200)]
+
+        response = solar_system.get_with_retries('https://jpl.example/api', {'a': 1})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.get.call_count, 3)
+        self.assertEqual([call.args[0] for call in self.sleep.call_args_list], [5.0, 10.0])
+        # And never waits for ever for a response
+        self.assertTrue(all(call.kwargs['timeout'] for call in self.get.call_args_list))
+
+    def test_retries_timeouts_and_busy_servers_but_not_other_errors(self):
+        self.get.side_effect = [requests.exceptions.ReadTimeout(), self.Response(503), self.Response(200)]
+        self.assertEqual(solar_system.get_with_retries('https://jpl.example/api', {}).status_code, 200)
+        self.assertEqual(self.get.call_count, 3)
+
+        self.get.reset_mock()
+        self.get.side_effect = [self.Response(400)]
+        self.assertEqual(solar_system.get_with_retries('https://jpl.example/api', {}).status_code, 400)
+        self.assertEqual(self.get.call_count, 1)
+
+    def test_gives_up_after_the_last_attempt(self):
+        self.get.side_effect = requests.exceptions.ConnectionError('down')
+        with self.assertRaises(requests.exceptions.ConnectionError):
+            solar_system.get_with_retries('https://jpl.example/api', {})
+        self.assertEqual(self.get.call_count, solar_system.QUERY_ATTEMPTS)
+        self.assertEqual(self.sleep.call_count, solar_system.QUERY_ATTEMPTS - 1)   # none after the last
+
+        # A server that stays busy returns its last response, for the caller to deal with
+        self.get.reset_mock()
+        self.get.side_effect = [self.Response(503)] * solar_system.QUERY_ATTEMPTS
+        self.assertEqual(solar_system.get_with_retries('https://jpl.example/api', {}).status_code, 503)
+
+    def test_moving_object_search_skips_quietly_when_jpl_is_unreachable(self):
+        self.get.side_effect = requests.exceptions.ConnectionError('down')
+
+        with self.assertLogs('custom_code.solar_system', level='WARNING') as logs:
+            tasks.check_event_for_moving_objects.call(self.event.pk)    # no exception
+
+        self.assertEqual(self.get.call_count, solar_system.QUERY_ATTEMPTS)
+        self.assertTrue(any('skipping the moving object search' in line for line in logs.output))
+        self.event.refresh_from_db()
+        self.assertIsNone(self.event.nearest_moving_object)
+
+    def test_moving_object_search_skips_if_horizons_gives_no_position(self):
+        self.get.side_effect = [self.Response(500)] * solar_system.QUERY_ATTEMPTS
+
+        with self.assertLogs('custom_code.solar_system', level='WARNING'):
+            solar_system.find_moving_objects_near_event(self.event)
+
+        # The second service isn't asked about a position that isn't known
+        self.assertEqual(self.get.call_count, solar_system.QUERY_ATTEMPTS)
+
+    def test_moving_object_found_after_a_retry_is_stored(self):
+        vector = {'X': 1.0, 'Y': 2.0, 'Z': 3.0, 'VX': 0.1, 'VY': 0.2, 'VZ': 0.3}
+        self.get.side_effect = requests.exceptions.ConnectionError('down')
+        with mock.patch('custom_code.solar_system.query_horizons_for_roman', return_value=vector), \
+                mock.patch('custom_code.solar_system.query_sbident_for_event', return_value=('433 Eros', 1.5)):
+            solar_system.find_moving_objects_near_event(self.event)
+
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.nearest_moving_object, '433 Eros')
+        self.assertAlmostEqual(self.event.angular_separation_moving_object, 1.5 / 3600.0)
 
 
 class TestBackgroundTasks(TestCase):
@@ -857,8 +945,8 @@ class TestBackgroundTasks(TestCase):
                 mocked.assert_not_called()
 
 
-class TestIngestAlert(TestCase):
-    """Ingesting the same alert packet again must not record it again"""
+class AlertPacketMixin:
+    """A synthetic MSOS alert packet"""
 
     def packet(self):
         t = np.linspace(2460000.0, 2460010.0, 60)
@@ -870,11 +958,15 @@ class TestIngestAlert(TestCase):
             'light_curves': {'F087': band, 'F146': band, 'F213': band},
         }
 
+
+class TestIngestAlert(AlertPacketMixin, TestCase):
+    """Ingesting the same alert packet again must not record it again"""
+
     def ingest(self, data):
         serial = MSOSAlertSerializer(data=data)
         serial.is_valid(raise_exception=True)
         # Tasks are queued once the transaction commits, which a TestCase never does by itself
-        with self.captureOnCommitCallbacks(execute=True), mock.patch('custom_code.serializers.compute_periodogram'):
+        with self.captureOnCommitCallbacks(execute=True):
             serial.save()
         return serial
 
@@ -896,7 +988,7 @@ class TestIngestAlert(TestCase):
         # Each task was queued once per row, not again for the repeat ingest
         queued = Counter(DBTaskResult.objects.values_list('task_path', flat=True))
         self.assertEqual({path.split('.')[-1]: n for path, n in queued.items()}, {
-            'check_target_for_variable_star': 1, 'compute_periodogram': 1,
+            'compute_source_diagnostics': 1,
             'check_event_for_moving_objects': 1, 'make_event_lightcurve': 1,
         })
 
@@ -908,13 +1000,122 @@ class TestIngestAlert(TestCase):
         self.assertEqual(Event.objects.count(), 2)
 
 
+class TestIngestTaskOrdering(AlertPacketMixin, TransactionTestCase):
+    """
+    The tasks that need an alert's lightcurve (the source diagnostics, the event's lightcurve
+    plot) must not be queued until it has been stored. A TransactionTestCase, as the order
+    only shows when transactions really commit, which a TestCase never does.
+    """
+
+    def record_photometry_at_queuing(self):
+        """How many photometry rows were stored as each task was queued, by task name"""
+        seen = {}
+
+        def record(sender, task_result, **kwargs):
+            seen[task_result.task.func.__name__] = PhotometryReducedDatum.objects.count()
+
+        task_enqueued.connect(record)
+        self.addCleanup(task_enqueued.disconnect, record)
+        return seen
+
+    def test_without_the_transaction_tasks_are_queued_too_early(self):
+        # The control for the test below: the same ingest, minus the transaction decorating create()
+        seen = self.record_photometry_at_queuing()
+        serial = MSOSAlertSerializer(data=self.packet())
+        serial.is_valid(raise_exception=True)
+
+        MSOSAlertSerializer.create.__wrapped__(serial, serial.validated_data)
+
+        self.assertEqual(seen['compute_source_diagnostics'], 0)
+        self.assertEqual(seen['make_event_lightcurve'], 0)
+
+    def test_tasks_are_queued_once_the_photometry_is_stored(self):
+        seen = self.record_photometry_at_queuing()
+
+        serial = MSOSAlertSerializer(data=self.packet())
+        serial.is_valid(raise_exception=True)
+        serial.save()
+
+        self.assertEqual(PhotometryReducedDatum.objects.count(), 3 * 60)
+        self.assertEqual(set(seen), {'compute_source_diagnostics', 'check_event_for_moving_objects',
+                                     'make_event_lightcurve'})
+        for task_name, nphotometry in seen.items():
+            self.assertEqual(nphotometry, 3 * 60, task_name)
+
+    def test_nothing_is_queued_if_the_ingest_fails(self):
+        packet = self.packet()
+        packet['light_curves']['F146']['flux_err'] = packet['light_curves']['F146']['flux_err'][:-1]
+        queued = []
+        task_enqueued.connect(lambda sender, task_result, **kw: queued.append(task_result))
+
+        serial = MSOSAlertSerializer(data=packet)
+        serial.is_valid(raise_exception=True)
+        with self.assertRaises(Exception):
+            serial.save()
+
+        # Rolled back whole, rather than leaving a source and event without their data
+        self.assertEqual(Target.objects.filter(name='IngestTest').count(), 0)
+        self.assertEqual(Event.objects.count(), 0)
+        self.assertEqual(queued, [])
+
+
+class TestSourceDiagnostics(TestCase):
+    """run_source_diagnostics records a new SourceDiagnostics entry for a source"""
+
+    def setUp(self):
+        self.target, self.event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
+
+    def test_run_source_diagnostics(self):
+        entry = source_functions.run_source_diagnostics(self.target)
+
+        self.assertEqual(SourceDiagnostics.objects.get(target=self.target), entry)
+        self.assertAlmostEqual(entry.baseline_magnitude, 17.0)
+        self.assertEqual(entry.baseline_mag_passband, 'Roman_F146')
+        self.assertEqual(entry.nearest_variable_star, '')
+        # The periodogram of the 100 points
+        self.assertIsNotNone(entry.period)
+        self.assertIsNotNone(entry.max_peak_periodogram)
+
+    def test_each_run_adds_an_entry_and_the_latest_is_used(self):
+        source_functions.run_source_diagnostics(self.target)
+        PhotometryReducedDatum.objects.filter(target=self.target).update(brightness=18.0)
+        latest = source_functions.run_source_diagnostics(self.target)
+
+        self.assertEqual(SourceDiagnostics.objects.filter(target=self.target).count(), 2)
+        self.assertAlmostEqual(latest.baseline_magnitude, 18.0)
+        self.assertEqual(SourceDiagnostics.objects.filter(target=self.target).order_by('-created_at').first(), latest)
+
+    def test_source_without_photometry(self):
+        target = Target.objects.create(name='NoPhotometry', ra=10.0, dec=10.0)
+
+        entry = source_functions.run_source_diagnostics(target)
+
+        self.assertEqual(entry.baseline_magnitude, 0.0)
+        self.assertEqual(entry.baseline_mag_passband, '')
+        self.assertEqual(SourceDiagnostics.objects.filter(target=target).count(), 1)
+
+
+class TestBaselineMagnitude(TestCase):
+
+    def test_without_a_lightcurve(self):
+        for lightcurve in (None, np.empty((0, 3))):
+            result = diagnostics.calc_baseline_magnitude(lightcurve, 'Roman_F146', {'baseline_magnitude': 0.0})
+            self.assertEqual(result, {'baseline_magnitude': 0.0})
+
+    def test_with_a_lightcurve(self):
+        lightcurve = np.array([[1.0, 20.0, 0.1], [2.0, 21.0, 0.1], [3.0, 20.5, 0.1]])
+        result = diagnostics.calc_baseline_magnitude(lightcurve, 'Roman_F146', {})
+        self.assertEqual(result['baseline_magnitude'], 20.5)
+        self.assertEqual(result['baseline_mag_passband'], 'Roman_F146')
+
+
 class TestVariableStars(TestCase):
 
     def setUp(self):
         self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
-
-    def test_calc_periodogram(self):
-        diagnostics = {
+        self.datasets = data_utils.get_full_lightcurve(self.test_target, bandpass='Roman_F146')
+        self.lightcurve = data_utils.fetch_lightcurve(self.datasets)
+        self.diagnostics = {
             'classification': 'Microlensing PSPL',
             'category': 'Microlensing stellar/planet',
             'source_magnitude': 0.0,
@@ -929,10 +1130,23 @@ class TestVariableStars(TestCase):
             'max_peak_periodogram': 0.0,
             'period': 0.0
         }
-        diagnostics = variable_stars.calc_periodogram(self.test_target, diagnostics)
+
+    def test_calc_periodogram(self):
+        diagnostics = variable_stars.calc_periodogram(self.test_target, self.lightcurve, self.diagnostics)
 
         assert(diagnostics['max_peak_periodogram'] != 0.0)
         assert(diagnostics['period'] != 0.0)
+
+    def test_calc_baseline_magnitude(self):
+        results = diagnostics.calc_baseline_magnitude(
+            self.lightcurve,
+            'Roman_F146',
+            self.diagnostics
+        )
+
+        baseline = np.median(np.array([x.brightness for x in self.datums]))
+
+        self.assertAlmostEqual(results['baseline_magnitude'], baseline, 0.1)
 
 class TestMultiEventDiagnostics(TestCase):
 
@@ -996,7 +1210,9 @@ class TestCutfileSearch(TestCase):
             ('CutfileB', 200.0, 'Mira', 6.0, 5.0, 500.0, 0.5),
         ]
         for name, ra, variable_type, duration, tE, chisq, gradient in specs:
-            target = Target.objects.create(name=name, ra=ra, dec=10.0, nearest_variable_type=variable_type)
+            target = Target.objects.create(name=name, ra=ra, dec=10.0)
+            SourceDiagnostics.objects.create(
+                target=target, nearest_variable_type=variable_type, baseline_magnitude=20.0, period=ra / 100.0)
             event = Event.objects.create(target=target, event_id=name + '-1', start_time=2460000.0, duration=duration)
             PSPLModel.objects.create(event=event, model_type='PSPL microlensing', tE=tE, chisq=chisq)
             PitkinFlareModel.objects.create(event=event, model_type='Pitkin flare', t_peak=2460000.5, chisq=chisq)
@@ -1134,6 +1350,110 @@ class TestCutfileSearch(TestCase):
         event = Event.objects.get(event_id='CutfileA-1')
         PSPLModel.objects.create(event=event, model_type='PSPL microlensing', tE=0.1, chisq=1.0)
         self.assertEqual(self.search('model_type=pspl&as_of=2026-06-01T00:00:00Z'), before)
+
+    def make_diagnostics(self, name, created, **values):
+        """A SourceDiagnostics entry for a source, made at a given moment"""
+        target = Target.objects.get(name=name)
+        entry = SourceDiagnostics.objects.create(target=target, **values)
+        SourceDiagnostics.objects.filter(pk=entry.pk).update(created_at=created)
+        return entry
+
+    def test_source_parameters_use_the_latest_diagnostics(self):
+        utc = datetime.timezone.utc
+        # Both sources' entries from setUp are made now. A has an older one too, with another
+        # type and baseline; B has a newer one.
+        self.make_diagnostics('CutfileA', datetime.datetime(2025, 1, 1, tzinfo=utc),
+                              nearest_variable_type='Algol', baseline_magnitude=15.0)
+        self.make_diagnostics('CutfileB', datetime.datetime(2099, 1, 1, tzinfo=utc),
+                              nearest_variable_type='Cepheid', baseline_magnitude=10.0, period=2.0)
+
+        base = 'model_type=pspl&'
+        self.assertEqual(self.search(base + 'source_nearest_variable_type=rrlyr'), ['CutfileA'])
+        self.assertEqual(self.search(base + 'source_nearest_variable_type=algol'), [])
+        self.assertEqual(self.search(base + 'source_nearest_variable_type=mira'), [])
+        self.assertEqual(self.search(base + 'source_nearest_variable_type=cepheid'), ['CutfileB'])
+
+        # Numbers likewise, with the two bounds applying to the same entry
+        self.assertEqual(self.search(base + 'source_baseline_magnitude_min=19'), ['CutfileA'])
+        self.assertEqual(self.search(base + 'source_baseline_magnitude_max=12'), ['CutfileB'])
+        self.assertEqual(self.search(base + 'source_baseline_magnitude_min=19&source_baseline_magnitude_max=21'),
+                         ['CutfileA'])
+        self.assertEqual(self.search(base + 'source_baseline_magnitude_min=14&source_baseline_magnitude_max=16'), [])
+
+        # With the source's own position, and diagnostics criteria on different parameters
+        self.assertEqual(self.search(base + 'source_ra_max=150&source_nearest_variable_type=rrlyr'), ['CutfileA'])
+        self.assertEqual(self.search(base + 'source_period_min=1.5&source_nearest_variable_type=cepheid'),
+                         ['CutfileB'])
+
+    def test_latest_diagnostics_of_equal_age_is_the_last_made(self):
+        moment = datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc)
+        self.make_diagnostics('CutfileA', moment, nearest_variable_type='First')
+        self.make_diagnostics('CutfileA', moment, nearest_variable_type='Second')
+        self.assertEqual(self.search('model_type=pspl&source_nearest_variable_type=second'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=pspl&source_nearest_variable_type=first'), [])
+
+    def test_source_without_diagnostics(self):
+        target = Target.objects.create(name='CutfileC', ra=300.0, dec=10.0)
+        event = Event.objects.create(target=target, event_id='CutfileC-1', start_time=2460000.0, duration=1.0)
+        PSPLModel.objects.create(event=event, model_type='PSPL microlensing', tE=1.0, chisq=1.0)
+
+        # Found by anything that isn't about the diagnostics, but not by their thresholds
+        self.assertEqual(self.search('model_type=pspl'), ['CutfileA', 'CutfileB', 'CutfileC'])
+        self.assertEqual(self.search('model_type=pspl&source_ra_min=250'), ['CutfileC'])
+        self.assertEqual(self.search('model_type=pspl&source_baseline_magnitude_min=0'), ['CutfileA', 'CutfileB'])
+        self.assertEqual(self.search('model_type=pspl&source_nearest_variable_type=rr'), ['CutfileA'])
+
+    def test_source_parameters_as_of_a_moment_use_the_diagnostics_then(self):
+        utc = datetime.timezone.utc
+        EventModel.objects.update(created_at=datetime.datetime(2020, 1, 1, tzinfo=utc))
+        # A's diagnostics were revised in 2026 (setUp's entries are made now); B's were first made then
+        self.make_diagnostics('CutfileA', datetime.datetime(2025, 1, 1, tzinfo=utc),
+                              nearest_variable_type='Algol', baseline_magnitude=15.0)
+        SourceDiagnostics.objects.filter(target__name='CutfileB').update(
+            created_at=datetime.datetime(2026, 1, 1, tzinfo=utc))
+        before, after = 'as_of=2025-06-01T00:00:00Z', 'as_of=2026-06-01T00:00:00Z'
+        base = 'model_type=pspl&'
+
+        # In mid-2025 A was an Algol type with a baseline of 15, and B had no diagnostics
+        self.assertEqual(self.search(base + before + '&source_nearest_variable_type=algol'), ['CutfileA'])
+        self.assertEqual(self.search(base + before + '&source_nearest_variable_type=rrlyr'), [])
+        self.assertEqual(self.search(base + before + '&source_baseline_magnitude_max=16'), ['CutfileA'])
+        self.assertEqual(self.search(base + before), ['CutfileA', 'CutfileB'])   # no source criteria
+
+        # By mid-2026 both had the entries made then (A's from setUp is later still)
+        self.assertEqual(self.search(base + after + '&source_nearest_variable_type=algol'), ['CutfileA'])
+        self.assertEqual(self.search(base + after + '&source_nearest_variable_type=mira'), ['CutfileB'])
+
+        # And with no cutoff, the latest of all
+        self.assertEqual(self.search(base + 'source_nearest_variable_type=algol'), [])
+        self.assertEqual(self.search(base + 'source_nearest_variable_type=rrlyr'), ['CutfileA'])
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_export_source_uses_the_latest_diagnostics(self):
+        utc = datetime.timezone.utc
+        self.make_diagnostics('CutfileA', datetime.datetime(2025, 1, 1, tzinfo=utc),
+                              nearest_variable_type='Algol', baseline_magnitude=15.0)
+        self.client.force_login(User.objects.create_user('cutfile_user'))
+        url = reverse('cutfiles:list') + '?model_type=pspl&export=json'
+
+        sources = {r['source']['name']: r['source'] for r in self.client.get(url).json()['results']}
+        self.assertEqual(sources['CutfileA']['nearest_variable_type'], 'RRLyr')
+        self.assertEqual(sources['CutfileA']['baseline_magnitude'], 20.0)
+        self.assertEqual(sources['CutfileA']['ra'], 100.0)
+        self.assertEqual(sources['CutfileB']['nearest_variable_type'], 'Mira')
+
+        # A source with no diagnostics has no values for them
+        SourceDiagnostics.objects.filter(target__name='CutfileB').delete()
+        sources = {r['source']['name']: r['source'] for r in self.client.get(url).json()['results']}
+        self.assertIsNone(sources['CutfileB']['nearest_variable_type'])
+        self.assertEqual(sources['CutfileB']['ra'], 200.0)
+
+        # As of a moment, the entry then
+        EventModel.objects.update(created_at=datetime.datetime(2020, 1, 1, tzinfo=utc))
+        data = self.client.get(url + '&as_of=2025-06-01T00:00:00Z').json()
+        sources = {r['source']['name']: r['source'] for r in data['results']}
+        self.assertEqual(sources['CutfileA']['nearest_variable_type'], 'Algol')
+        self.assertEqual(sources['CutfileA']['baseline_magnitude'], 15.0)
 
     @override_settings(TOM_MFA_REQUIRED=None)
     def test_view_as_of(self):

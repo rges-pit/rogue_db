@@ -315,32 +315,6 @@ def store_microlensing_model_parameters(event, pylima_results):
     """Function to store the fitted model parameters in the TOM"""
 
     if 'best_model' in pylima_results.keys():
-
-        # Store the best-fit model parameters on the Target object
-        parameters = ['t0', 't0_error', 'u0', 'u0_error', 'tE', 'tE_error',
-                      'piEN', 'piEN_error', 'piEE', 'piEE_error',
-                      'source_magnitude', 'source_mag_error',
-                      'blend_magnitude', 'blend_mag_error',
-                      'baseline_magnitude', 'baseline_mag_error',
-                      'fit_covariance', 'chi2', 'red_chi2',
-                      'ks_test', 'ad_test', 'sw_test']
-
-        update_source = False
-        if update_source:
-            for key in parameters:
-                if key in pylima_results['best_model'].keys():
-                    if key == 'fit_covariance':
-                        payload = json.dumps(pylima_results['best_model']['fit_covariance'].tolist())
-                        data = {'covariance': payload}
-                    else:
-                        # Intercept NaN values as these are not well supported by Django FloatFields
-                        if np.isnan(pylima_results['best_model'][key]):
-                            data = 0.0
-                        else:
-                            data = pylima_results['best_model'][key]
-                    setattr(event.target, key, data)
-            event.target.save()
-
         # Fetch existing PSPL and FSPL models for this event, or create them,
         # and update them with the fitted parameters
         pspl_model = update_microlensing_model(event, pylima_results, 'pspl')

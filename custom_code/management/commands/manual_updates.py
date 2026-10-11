@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from custom_code.models import Event
+from custom_code.models import Event, SourceDiagnostics
 from custom_code import variable_stars
 from custom_code import serializers, data_utils
 from tom_targets.models import Target
@@ -19,9 +19,7 @@ class Command(BaseCommand):
         #qs = Target.objects.all()
         #for t in qs:
         #    variable_stars.calc_periodogram(t)
-        qs = Event.objects.all()
+        qs = SourceDiagnostics.objects.all()
         for e in qs:
-            datasets = data_utils.get_reduced_data(e, source_name='Roman_F146')
-            lightcurve = data_utils.fetch_lightcurve(datasets)
-            peak_mag = serializers.estimate_peak_mag(e, lightcurve)
-            Event.objects.filter(pk=e.pk).update(peak_mag=peak_mag)
+            e.baseline_mag_passband = 'Roman_F146'
+            e.save()

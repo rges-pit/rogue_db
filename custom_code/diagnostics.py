@@ -189,3 +189,20 @@ def link_events(events_qs, plot=False):
         event_cluster = cluster[i] - 1  # Offset for Python array indexing
         nlinked = len(clusters[event_cluster]) - 1  # Exclude the current event from the total
         Event.objects.filter(pk=e.pk).update(Nlinked_events=nlinked)
+
+def calc_baseline_magnitude(lightcurve, passband, diagnostics):
+    """
+    Function to estimate the baseline magnitude of the source, using a median on the assumption
+    that the majority of the points are at baseline
+    """
+
+    if lightcurve is None or len(lightcurve) == 0:
+        logger.info('Skipping baseline magnitude: no ' + passband + ' datapoints available')
+        return diagnostics
+
+    median_mag = np.median(lightcurve[:,1])
+    diagnostics['baseline_magnitude'] = median_mag
+    diagnostics['baseline_mag_error'] = (lightcurve[:,1] - median_mag).std()
+    diagnostics['baseline_mag_passband'] = passband
+
+    return diagnostics

@@ -191,7 +191,7 @@ class TargetTable(HTMXTable):
 
     class Meta(HTMXTable.Meta):
         model = Target
-        fields = ['selection', 'name', 'ra', 'dec', 'classification']
+        fields = ['selection', 'name', 'ra', 'dec']
 
     # Override to use Target-specific partial
     partial_template_name = "tom_targets/partials/target_table_partial.html"

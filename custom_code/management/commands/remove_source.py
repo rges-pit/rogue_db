@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from tom_targets.models import Target
-from custom_code.models import RGESAlert, Event, EventModel
+from custom_code.models import RGESAlert, Event, EventModel, SourceDiagnostics
 
 class Command(BaseCommand):
     help = 'Tool to delete a source and all associated alerts, events and event models'
@@ -14,14 +14,17 @@ class Command(BaseCommand):
 
         if t:
             events = Event.objects.filter(target=t)
+            sdiagnostics = SourceDiagnostics.objects.filter(target=t)
             alerts = RGESAlert.objects.filter(event__in=events)
             eventmodels = EventModel.objects.filter(event__in=events)
 
-            print('Removing 1 target with ' + str(events.count()) + ' events, '
+            print('Removing 1 target with ' +str(sdiagnostics.count()) + ' source diagnostics, '
+                  + str(events.count()) + ' events, '
                   + str(alerts.count()) + ' alerts and ' + str(eventmodels.count()) + ' event models')
 
             # Delete in order of reverse foreign key relationships to avoid orphans
             deleted_alerts_count, details = alerts.delete()
+            deleted_diagnostics_count, details = sdiagnostics.delete()
             deleted_eventmodels_count, details = eventmodels.delete()
             deleted_events_count, details = events.delete()
             deleted_target_count, details = t.delete()

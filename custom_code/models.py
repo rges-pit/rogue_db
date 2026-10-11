@@ -21,6 +21,7 @@ class SourceDiagnostics(models.Model):
     source_mag_error = models.FloatField(default=0)
     baseline_magnitude = models.FloatField(default=0)
     baseline_mag_error = models.FloatField(default=0)
+    baseline_mag_passband = models.CharField(max_length=50, default='')
     nearest_flare_star = models.CharField(max_length=60, default='', null=True, blank=True)
     angular_separation_flare_star = models.FloatField(default=0, null=True, blank=True)
     nearest_variable_star = models.CharField(max_length=60, default='', null=True, blank=True)

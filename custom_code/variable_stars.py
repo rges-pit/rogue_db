@@ -61,13 +61,10 @@ def find_nearest_rges_variable_catalog(target, diagnostics, radius=2):
 # def check_external_variable_catalog(target):
 # Future code to check an extended external catalog will go here
 
-def calc_periodogram(target, diagnostics):
+def calc_periodogram(target, lightcurve, diagnostics):
     """
     Function to calculate the Lomb-Scargle periodogram for a Source's full lightcurve
     """
-
-    datasets = data_utils.get_full_lightcurve(target, bandpass='Roman_F146')
-    lightcurve = datasets.get('Roman_F146')
 
     if lightcurve is None or len(lightcurve) < 10:
         logger.info(

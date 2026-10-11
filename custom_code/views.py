@@ -25,7 +25,7 @@ from .models import (RGESAlert, Event, EventModel, MODEL_TYPE_CLASSES,
                      DavenportFlareModel, PitkinFlareModel)
 from .filters import (
     RGESAlertFilterSet, EventModelFilterSet, CutfileFilterSet, EventFilterSet,
-    CUTFILE_SOURCE_PARAMS
+    CUTFILE_SOURCE_PARAMS, DIAGNOSTIC_FIELDS, latest_diagnostics_by_target
 )
 from .tables import RGESAlertTable, EventModelTable, EventTable, TargetEventTable, CutfileTable
 from .forms import (RGESAlertForm, PSPLModelForm, FSPLModelForm, WideBoundPlanetModelForm,
@@ -428,12 +428,25 @@ class TargetCutfileView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
                           .select_related('event__target'))
         models.sort(key=lambda model: (model.created_at, model.pk), reverse=True)
 
-        source_fields = ['id', 'name'] + [param.name for param in CUTFILE_SOURCE_PARAMS]
+        # A source's diagnostics are the latest entry's, up to the cutfile's moment, as in the search
+        diagnostics = latest_diagnostics_by_target(
+            {model.event.target_id for model in models if model.event and model.event.target_id},
+            filterset.cutoff,
+        )
+
+        def source_values(target):
+            entry = diagnostics.get(target.pk)
+            values = {'id': target.pk, 'name': target.name}
+            for param in CUTFILE_SOURCE_PARAMS:
+                holder = entry if param.name in DIAGNOSTIC_FIELDS else target
+                values[param.name] = _json_safe(getattr(holder, param.name, None))
+            return values
+
         results = []
         for model in models:
             event, target = model.event, model.event.target if model.event else None
             results.append({
-                'source': {name: _json_safe(getattr(target, name, None)) for name in source_fields} if target else None,
+                'source': source_values(target) if target else None,
                 'event': _field_values(event, exclude=('thumbnail',)) if event else None,
                 'model': _field_values(model, exclude=('corner_plot', 'eventmodel_ptr')),
             })
