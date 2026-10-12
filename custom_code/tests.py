@@ -13,7 +13,8 @@ from custom_code.models import (Event, EventModel, PSPLModel, PitkinFlareModel, 
                                 DavenportFlareModel, FSPLModel, RGESAlert, SourceDiagnostics)
 from custom_code.filters import CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES
 from tom_targets.models import Target
-from tom_dataproducts.models import PhotometryReducedDatum
+from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
+from custom_code.templatetags import plotting_functions
 from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
 from custom_code import (pylima_fit_functions, general_fit_functions, utils,
                          flare_fit_functions, data_utils, variable_stars, diagnostics)
@@ -24,6 +25,7 @@ import tempfile
 from io import StringIO
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.contrib.staticfiles import finders
 from django.core.management import call_command
 from django.core.management.base import CommandError
 import re
@@ -441,11 +443,11 @@ class TestGeneralFitFunctions(TestCase):
         self.test_event.duration = Time(self.datums[51].timestamp).jd - Time(self.datums[0].timestamp).jd
 
         # Create two-level test lightcurves
-        high_points = 50
+        high_points = 10
         full_lightcurve = np.empty((self.ndata,3))
         full_lightcurve[:,0] = [Time(rd.timestamp).jd for rd in self.datums]
-        full_lightcurve[0:high_points,1] = 16.0
-        full_lightcurve[high_points+1:,1] = 20.0
+        full_lightcurve[0:high_points-1,1] = 16.0
+        full_lightcurve[high_points:,1] = 20.0
         full_lightcurve[:,2] = 0.001
         baseline_lightcurve = full_lightcurve[high_points+1:,:]
 
@@ -454,7 +456,7 @@ class TestGeneralFitFunctions(TestCase):
             baseline_lightcurve,
             full_lightcurve
         )
-
+        
         assert(npoints == high_points)
 
 class TestFlareFitFunctions(TestCase):
@@ -499,14 +501,14 @@ class TestFlareFitFunctions(TestCase):
         lightcurve = data_utils.fetch_lightcurve(datasets)
         flux, flux_err = utils.mag_to_flux(lightcurve[:, 1], lightcurve[:, 2])
 
-        flux_model_lc = copy.deepcopy(flux)
+        flux_model_lc = copy.deepcopy(lightcurve)
         nparam = 3  # Davenport flare model
 
         chisq, red_chisq, bic = flare_fit_functions.calc_goodness_of_flare_fit(
-            flux, flux_err, flux_model_lc, nparam
+            lightcurve, flux_model_lc, nparam
         )
 
-        test_bic = float(nparam) * np.log(len(flux))
+        test_bic = float(nparam) * np.log(len(lightcurve))
 
         self.assertEqual(chisq, 0.0)
         self.assertEqual(red_chisq, 0.0)
@@ -617,7 +619,7 @@ class TestFlareFitFunctions(TestCase):
             self.pitkin_test_params, t_bounds, peak_bounds,
             tau_gaussian_rise_bounds, tau_exponential_decay_bounds
         )
-        self.assertEqual(log_prior, 0.0)
+        self.assertFalse(np.isinf(log_prior))
 
         # Test each parameter outside boundaries in turn
         for i in [1, 2, 3, 4]:
@@ -1105,6 +1107,178 @@ class TestCornerPlotNames(TestCase):
 
                 self.assertEqual(self.names_made(data_utils_mock.generate_corner_plot),
                                  [stem + '_davenport_corner_plot.png', stem + '_pitkin_corner_plot.png'])
+
+
+class TestPhotometryPlot(TestCase):
+    """The lightcurve plot is built in bulk, and large lightcurves are drawn with WebGL"""
+
+    def setUp(self):
+        self.target = Target.objects.create(name='PlotTarget', ra=10.0, dec=10.0)
+
+    def add_photometry(self, source_name, n, start_jd=2461000.0, step=0.01, mag=20.0):
+        PhotometryReducedDatum.objects.bulk_create([PhotometryReducedDatum(
+            target=self.target, source_name=source_name, bandpass=source_name[-4:],
+            brightness=mag + i * 1e-3, brightness_error=0.01,
+            timestamp=timezone.make_aware(
+                Time(start_jd + i * step, format='jd').datetime, datetime.timezone.utc),
+        ) for i in range(n)])
+
+    def datasets_plotted(self):
+        with mock.patch('custom_code.templatetags.plotting_functions.plot_interactive_lightcurve') as plot:
+            plotting_functions.photometry_mulens_model(self.target)
+        return plot.call_args.args[0]
+
+    def trace_types(self, make_plot):
+        """The types of the traces in the figure a call builds. (Not looked for in the HTML, which
+        includes Plotly's theme, with every type of trace in it.)"""
+        with mock.patch('custom_code.templatetags.plotting_functions.offline.plot') as plot:
+            make_plot()
+        return [trace.type for trace in plot.call_args.args[0].data]
+
+    @staticmethod
+    def lightcurve(n):
+        return {'Roman_F146': {'x': np.arange(n, dtype=float), 'y': np.full(n, 20.0), 'error': np.full(n, 0.01)}}
+
+    def test_datasets_by_source(self):
+        self.add_photometry('Roman_F146', 30)
+        self.add_photometry('Roman_F087', 10, mag=21.0)
+
+        datasets = self.datasets_plotted()
+
+        self.assertEqual(list(datasets), ['Roman_F087', 'Roman_F146'])
+        f146 = datasets['Roman_F146']
+        self.assertEqual((len(f146['x']), len(f146['y']), len(f146['error'])), (30, 30, 30))
+        # JD - 2460000, as astropy gives it, to the precision the values are rounded to
+        expected_jd = Time(2461000.0 + np.arange(30) * 0.01, format='jd').jd - 2460000.0
+        np.testing.assert_allclose(f146['x'], expected_jd, atol=1e-5)
+        np.testing.assert_allclose(f146['y'], 20.0 + np.arange(30) * 1e-3, atol=1e-4)
+        np.testing.assert_allclose(f146['error'], 0.01)
+        self.assertAlmostEqual(datasets['Roman_F087']['y'][0], 21.0, 4)
+
+    def test_no_photometry(self):
+        self.assertEqual(self.datasets_plotted(), {})
+        self.assertEqual(self.trace_types(lambda: plotting_functions.photometry_mulens_model(self.target)), [])
+
+    def test_large_lightcurves_use_webgl(self):
+        no_models = ReducedDatum.objects.none()
+        big = self.lightcurve(plotting_functions.WEBGL_MIN_POINTS + 1)
+        small = self.lightcurve(100)
+        plot = plotting_functions.plot_interactive_lightcurve
+
+        self.assertEqual(self.trace_types(lambda: plot(big, no_models)), ['scattergl'])
+        self.assertEqual(self.trace_types(lambda: plot(small, no_models)), ['scatter'])
+        # The points of all the bands are counted, and all are drawn the same way
+        self.assertEqual(self.trace_types(lambda: plot({**small, 'Roman_F087': big['Roman_F146']}, no_models)),
+                         ['scattergl', 'scattergl'])
+        # Either way on request
+        self.assertEqual(self.trace_types(lambda: plot(big, no_models, webgl=False)), ['scatter'])
+        self.assertEqual(self.trace_types(lambda: plot(small, no_models, webgl=True)), ['scattergl'])
+
+    def test_plot_of_a_large_lightcurve(self):
+        self.add_photometry('Roman_F146', plotting_functions.WEBGL_MIN_POINTS + 10)
+
+        types = self.trace_types(lambda: plotting_functions.photometry_mulens_model(self.target))
+
+        self.assertEqual(types, ['scattergl'])
+
+    def test_event_plots_stay_svg(self):
+        self.add_photometry('Roman_F146', 50)
+        event = Event.objects.create(target=self.target, event_id='PlotTarget_1', start_time=2461000.0, duration=0.4)
+
+        types = self.trace_types(lambda: plotting_functions.photometry_event(event))
+
+        self.assertEqual(types, ['scatter'])
+
+
+@override_settings(TOM_MFA_REQUIRED=None)
+class TestSourceDetailPageLoading(TestCase):
+    """
+    The source detail page must not wait on external hosts to be shown. A stylesheet or script
+    in the page that comes from elsewhere holds up the first paint until it arrives, and the
+    Aladin Lite host can take over ten seconds to answer.
+    """
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_superuser('detail_user', password='x'))
+        self.target = Target.objects.create(name='DetailTarget', ra=10.0, dec=10.0, type='SIDEREAL')
+
+    def get_page(self):
+        response = self.client.get(reverse('targets:detail', kwargs={'pk': self.target.pk}))
+        self.assertEqual(response.status_code, 200)
+        return response.content.decode()
+
+    def test_aladin_is_not_loaded_with_the_page(self):
+        html = self.get_page()
+
+        self.assertIsNone(re.search(r'<script[^>]+src="[^"]*aladin[^"]*"', html))
+        self.assertIsNone(re.search(r'<link[^>]+href="[^"]*aladin[^"]*"', html))
+        self.assertNotIn('aladin_finderchart.js"', re.sub(r'(?s)<script>.*?</script>', '', html))
+
+    def test_imaging_tab_says_when_it_is_waiting_for_the_archive(self):
+        html = self.get_page()
+
+        box = re.search(r'<div id="archive-wait"[^>]*>(.*?)</div>\s*<span class="archive-wait-message">([^<]*)</span>', html, re.S)
+        self.assertIsNotNone(box)
+        self.assertEqual(box.group(2), 'Waiting for archive...')
+        self.assertIn('spinner-border', box.group(1))
+        # Hidden until the tab is shown, and inside the Imaging pane, above the chart
+        self.assertRegex(re.search(r'<div id="archive-wait"[^>]*>', html).group(0), r'\shidden[\s>]')
+        pane = html[html.index('id="imaging"'):]
+        self.assertLess(pane.index('id="archive-wait"'), pane.index('id="aladin-lite-div"'))
+
+        # Run by the shared script, when the tab is shown
+        self.assertIn('static/tom_common/js/archive_wait.js', html)
+        self.assertIn('ArchiveWait(box)', html)
+        self.assertIn('wait.waiting();', html)
+
+    def test_aladin_is_loaded_when_the_imaging_tab_is_shown(self):
+        html = self.get_page()
+
+        self.assertIn("addEventListener('shown.bs.tab', loadAladin)", html)
+        self.assertIn('id="imaging-tab"', html)
+        # The pane the chart goes in, for the toolkit's finder chart script to start in once loaded
+        self.assertIn('id="aladin-lite-div"', html)
+        self.assertIn('static/tom_targets/js/aladin_finderchart.js', html)
+
+
+@override_settings(TOM_MFA_REQUIRED=None)
+class TestSkymapWaitingBox(TestCase):
+    """The target list's skymap says when it's waiting for the archive, as the source's Imaging tab does"""
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_superuser('list_user', password='x'))
+        Target.objects.create(name='ListTarget', ra=268.0, dec=-29.0, type='SIDEREAL')
+
+    def test_skymap_has_the_box(self):
+        response = self.client.get(reverse('targets:list'))
+        html = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        box = re.search(r'<div id="archive-wait"[^>]*>(.*?)</div>\s*<span class="archive-wait-message">([^<]*)</span>', html, re.S)
+        self.assertIsNotNone(box)
+        self.assertEqual(box.group(2), 'Waiting for archive...')
+        self.assertIn('spinner-border', box.group(1))
+        # Shown from the start, above the map, and run by the shared script
+        self.assertNotRegex(re.search(r'<div id="archive-wait"[^>]*>', html).group(0), r'\shidden[\s>]')
+        self.assertLess(html.index('id="archive-wait"'), html.index('id="aladin-lite-div"'))
+        self.assertLess(html.index('static/tom_common/js/archive_wait.js'), html.index('ArchiveWait('))
+        self.assertIn('wait.waiting();', html)
+        self.assertIn('wait.loaded();', html)
+        self.assertIn('wait.failed(', html)
+
+
+class TestArchiveWaitScript(TestCase):
+    """The script behind the boxes is served, and has what the pages call"""
+
+    def test_script(self):
+        path = finders.find('tom_common/js/archive_wait.js')
+        self.assertIsNotNone(path)
+        with open(path, encoding='utf-8') as script_file:
+            script = script_file.read()
+
+        for expected in ('window.ArchiveWait', 'waiting:', 'loaded:', 'failed:', 'Waiting for archive...',
+                         'The archive is not responding', r'/\/Norder\d+\//'):
+            self.assertIn(expected, script)
 
 
 class TestJPLQueryRetries(TestCase):

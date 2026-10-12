@@ -14,30 +14,51 @@ logger = logging.getLogger(__name__)
 
 register = template.Library()
 
+# A plot with more points than this is drawn with WebGL. As SVG every point (and its error bar) is
+# a separate element of the page, and a lightcurve of tens of thousands of points takes seconds to
+# draw, and again for every zoom and pan.
+WEBGL_MIN_POINTS = 5000
+
+UNIX_EPOCH_JD = 2440587.5   # The Julian Date of 1970-01-01 00:00 UTC
+JD_OFFSET = 2460000.0       # The plots show JD minus this
+
 @register.inclusion_tag('tom_dataproducts/partials/photometry_mulens_model.html')
 def photometry_mulens_model(mulens):
     """
     Renders a photometric plot for a target with a microlensing model.
     """
 
-    # Plot the timeseries photometry data from all telescopes. Points are
-    # grouped by source into one Scatter trace per source, since Plotly's
-    # error_y.array (and x/y) expects an array of values per trace, not a
-    # single point per trace.
-    qs = list(PhotometryReducedDatum.objects.filter(target=mulens))
+    # Plot the timeseries photometry data from all telescopes. P
+    #
+    # A target can have tens of thousands of points, so this is done in bulk.
+    rows = list(PhotometryReducedDatum.objects.filter(target=mulens).order_by('source_name').values_list(
+        'source_name', 'timestamp', 'brightness', 'brightness_error'
+    ))
 
-    # Converting timestamps to JD one row at a time (Time(rd.timestamp).jd in
-    # a loop) took ~2s for ~50,000 rows -- astropy's Time constructor has real
-    # per-call overhead. A single vectorized Time() call over every timestamp
-    # up front is ~20x faster, then results are split back out per source.
     datasets = {}
-    if qs:
-        jds = Time([rd.timestamp for rd in qs]).jd - 2460000.0
-        for rd, jd in zip(qs, jds):
-            dataset = datasets.setdefault(rd.source_name, {'x': [], 'y': [], 'error': []})
-            dataset['x'].append(jd)
-            dataset['y'].append(rd.brightness)
-            dataset['error'].append(rd.brightness_error)
+    if rows:
+        sources = np.array([row[0] for row in rows])
+
+        # UTC timestamps to JD - 2460000. A timestamp's Unix time is its UTC time of day, which is
+        # what a JD of UTC counts too, so this is the JD astropy gives, to well within a second.
+        jds = (
+            np.array([row[1].timestamp() for row in rows]) / 86400.0
+            + (UNIX_EPOCH_JD - JD_OFFSET)
+        )
+        # Limits and missing values come out as NaN, which the plot leaves out
+        mags = np.array([row[2] for row in rows], dtype=float)
+        errors = np.array([row[3] for row in rows], dtype=float)
+
+        # Rounded to the precision of the data (a second, and a ten-thousandth of a magnitude),
+        # as the rest of the digits only add to the size of what the browser is sent. The sources
+        # are in the order of their names, for a legend that's the same each time.
+        for source_name in dict.fromkeys(row[0] for row in rows):
+            selected = sources == source_name
+            datasets[source_name] = {
+                'x': np.round(jds[selected], 5),
+                'y': np.round(mags[selected], 4),
+                'error': np.round(errors[selected], 4),
+            }
 
 
     ### Try to plot models if available
@@ -69,11 +90,19 @@ def plot_interactive_lightcurve(
         datasets, model_datums,
         height=600, width=700,
         show_current_time=True,
-        show_residuals=False
+        show_residuals=False,
+        webgl=None
 ):
     """
     Function to produce an interactive lightcurve
+    Lightcurves with less than 5000 points are plotted with Plotly but this is slow for
+    larger datasets.  In this case, WegGL is used.
     """
+
+    npoints = sum(len(dataset['x']) for dataset in datasets.values())
+    if webgl is None:
+        webgl = npoints > WEBGL_MIN_POINTS
+    points_trace = go.Scattergl if webgl else go.Scatter
 
     # Layout with or without residuals
     plot_cols = 1
@@ -84,22 +113,22 @@ def plot_interactive_lightcurve(
 
         fig = make_subplots(
             rows=plot_rows, cols=plot_cols,
-            shared_xaxes=True,  # panels pan/zoom together on x
-            vertical_spacing=0.06,  # gap between the two panels
-            row_heights=[0.7, 0.3],  # top panel gets 70% of the height, bottom 30%
+            shared_xaxes=True,
+            vertical_spacing=0.06,
+            row_heights=[0.7, 0.3],
         )
     else:
         fig = make_subplots(
             rows=plot_rows, cols=plot_cols,
-            shared_xaxes=True,  # panels pan/zoom together on x
-            vertical_spacing=0.06,  # gap between the two panels
-            row_heights=[1.0],  # top panel gets 70% of the height, bottom 30%
+            shared_xaxes=True,
+            vertical_spacing=0.06,
+            row_heights=[1.0],
         )
 
     # Plot the main lightcurve
     for source_name, dataset in datasets.items():
         fig.add_trace(
-            go.Scatter(
+            points_trace(
                 x=dataset['x'], y=dataset['y'], mode='markers', name=source_name,
                 error_y=dict(type='data', array=dataset['error'], visible=True),
             ),
@@ -127,10 +156,6 @@ def plot_interactive_lightcurve(
     current_time = Time.now().jd - 2460000
     if show_current_time:
 
-        # No row/col here: given them, plotly replaces yref='paper' with the subplot's y axis,
-        # so the line's y0=0 to y1=1 became magnitudes 0 to 1 and autorange stretched the
-        # magnitude axis out to include them. As a paper-referenced shape it spans the full
-        # height of the figure (every panel) and plays no part in autoranging y.
         fig.add_shape(
             # Line Vertical
             dict(
@@ -199,10 +224,6 @@ def plot_interactive_lightcurve(
     else:
         fig.update_xaxes(title_text="HJD-2460000",  row=1, col=1)
 
-    # include_plotlyjs=False: the library is loaded once globally in
-    # base.html instead of every plot embedding its own ~730KB copy --
-    # see the comment there for why that's also required for correctness
-    # when this output gets swapped in via htmx rather than a full page load.
     return offline.plot(fig, output_type='div', show_link=False, include_plotlyjs=False)
 
 @register.inclusion_tag('tom_dataproducts/partials/photometry_mulens_model.html')

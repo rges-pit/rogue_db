@@ -4,9 +4,6 @@
 {% block title %}Target {{ object.name }}{% endblock %}
 {% block additional_css %}
 <link rel="stylesheet" href="{% static 'tom_targets/css/main.css' %}">
-{% if object.type == 'SIDEREAL' %}
-<link rel="stylesheet" href="//aladin.u-strasbg.fr/AladinLite/api/v2/latest/aladin.min.css">
-{% endif %}
 {% endblock %}
 {% block content %}
 <script>
@@ -78,6 +75,10 @@
         </div>
         {% if object.type == 'SIDEREAL' %}
           <div class="tab-pane" id="imaging">
+          <div id="archive-wait" class="d-flex align-items-center gap-3 border rounded p-3 mb-3" style="max-width: 300px;" role="status" aria-live="polite" hidden>
+            <div class="spinner-border spinner-border-sm flex-shrink-0" aria-hidden="true"></div>
+            <span class="archive-wait-message">Waiting for archive...</span>
+          </div>
           {% aladin_finderchart object %}
           </div>
         {% endif %}
@@ -113,7 +114,58 @@
 {% endblock %}
 {% block extra_javascript %}
 {% if object.type == 'SIDEREAL' %}
-<script src="//aladin.cds.unistra.fr/AladinLite/api/v3/3.8.2/aladin.js" charset="utf-8" defer></script>
-<script src="{% static 'tom_targets/js/aladin_finderchart.js' %}" defer></script>
+<script src="{% static 'tom_common/js/archive_wait.js' %}"></script>
+<script>
+(function () {
+  const tab = document.getElementById('imaging-tab');
+  const box = document.getElementById('archive-wait');
+  if (!tab || !box) return;
+
+  // The "Waiting for archive..." box, which also goes by itself when a survey image has arrived
+  const wait = ArchiveWait(box);
+
+  const ALADIN_CSS = 'https://aladin.cds.unistra.fr/AladinLite/api/v2/latest/aladin.min.css';
+  const ALADIN_JS = 'https://aladin.cds.unistra.fr/AladinLite/api/v3/3.8.2/aladin.js';
+  const FINDERCHART_JS = "{% static 'tom_targets/js/aladin_finderchart.js' %}";
+  let started = false;
+
+  function addScript(src) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.charset = 'utf-8';
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('Could not load ' + src));
+      document.body.appendChild(script);
+    });
+  }
+
+  function loadAladin() {
+    if (started) return;
+    started = true;
+    wait.waiting();
+
+    // The toolkit's own spinner, in the chart's place, is no longer needed. (It's a Bootstrap d-flex,
+    // which is display:flex !important, so it takes an important style to hide.)
+    const own = document.getElementById('aladin-spinner');
+    if (own) own.style.setProperty('display', 'none', 'important');
+
+    const style = document.createElement('link');
+    style.rel = 'stylesheet';
+    style.href = ALADIN_CSS;
+    document.head.appendChild(style);
+
+    // Aladin Lite first: the finder chart script needs it to be there
+    addScript(ALADIN_JS).then(() => addScript(FINDERCHART_JS)).then(() => {
+      wait.loaded();   // the chart is starting, and now asks the archive for its images
+    }).catch(() => {
+      started = false;   // try again the next time the tab is shown
+      wait.failed('The archive could not be reached. Select this tab again to retry.');
+    });
+  }
+
+  tab.addEventListener('shown.bs.tab', loadAladin);
+})();
+</script>
 {% endif %}
 {% endblock %}
