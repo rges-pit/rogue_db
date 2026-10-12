@@ -38,5 +38,7 @@ class CustomCodeConfig(AppConfig):
         # TargetTable
         from tom_targets.views import TargetListView
         from custom_code.tables import TargetTable
+        from custom_code.filters import RogueTargetFilterSet
         TargetListView.table_class = TargetTable
+        TargetListView.filterset_class = RogueTargetFilterSet
         TargetListView.paginate_by = 8

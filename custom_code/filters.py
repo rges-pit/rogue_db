@@ -10,9 +10,118 @@ import django_filters
 from django_filters.constants import EMPTY_VALUES
 
 from tom_common.htmx_table import HTMXTableFilterSet
+from tom_targets.filters import TargetFilterSet
 
 from .models import RGESAlert, Event, EventModel, SourceDiagnostics
 from .target_models import RogueTarget
+
+
+def remove_field_from_layout(container, field_name):
+    """
+    Remove a field from a crispy forms layout, along with any row or column it leaves empty.
+    """
+    kept = []
+    for item in container.fields:
+        if item == field_name:
+            continue
+        if hasattr(item, 'fields'):
+            remove_field_from_layout(item, field_name)
+            if not item.fields:
+                continue
+        kept.append(item)
+    container.fields = kept
+
+
+def classification_choices():
+    """
+    The classifications there are, for a menu: the values in the source diagnostics. (From all the
+    entries, rather than only each source's latest: it's a menu of what a source can be classified
+    as, and for a classification that no source has any more, choosing it finds none.)
+    """
+    classifications = (
+        SourceDiagnostics.objects.exclude(classification='')
+        .order_by('classification').values_list('classification', flat=True).distinct()
+    )
+    return [(classification, classification) for classification in classifications]
+
+
+def find_row_with(container, field_name):
+    """
+    The crispy forms row (a layout object whose items are columns) that has a column for the field,
+    or None.
+    """
+    for item in container.fields:
+        if not hasattr(item, 'fields'):
+            continue
+        if any(hasattr(column, 'fields') and field_name in column.fields for column in item.fields):
+            return item
+        found = find_row_with(item, field_name)
+        if found is not None:
+            return found
+    return None
+
+
+class RogueTargetFilterSet(TargetFilterSet):
+    """
+    The filters of the target list.
+    """
+
+    # Search on source classification, based on the latest entry in the SourceDiagnostics
+    classification = django_filters.ChoiceFilter(
+        choices=classification_choices,
+        method='filter_classification',
+        label='Type',
+        widget=forms.Select(attrs={
+            'hx-get': "",  # triggered GET goes to the source URL by default
+            'hx-trigger': "change",  # make the AJAX call when the selection changes
+            'hx-target': "div.table-container",
+            'hx-swap': "innerHTML",
+            'hx-indicator': ".progress",
+            'hx-include': "closest form",  # include the other filters in this FilterSet
+        }),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.filters['target_cone_search'].label = 'Cone Search'
+        self.filters['targetlist__name'].label = 'Group'
+
+    def filter_classification(self, queryset, name, value):
+        """The sources whose latest source diagnostics classify them as the value"""
+        if not value:
+            return queryset
+        return queryset.annotate(
+            latest_classification=latest_diagnostic('classification', target='pk')
+        ).filter(latest_classification=value)
+
+    @property
+    def form(self):
+        if not hasattr(self, '_form'):
+            super().form
+            layout = self._form.helper.layout
+            remove_field_from_layout(layout, 'cone_search')
+
+            # Cone search form
+            menus = find_row_with(layout, 'type')
+            if menus is not None and find_row_with(layout, 'target_cone_search') is not None:
+                remove_field_from_layout(layout, 'target_cone_search')
+                menus.fields.append(Column('target_cone_search', css_class='form-group col-md-6'))
+                menus.css_class = ((menus.css_class or '') + ' g-2').strip()
+
+            # The classification menu where the toolkit's type menu is
+            for column in (menus.fields if menus is not None else []):
+                column.fields = ['classification' if name == 'type' else name for name in column.fields]
+        return self._form
+
+    def filter_cone_search(self, queryset, name, value):
+        """
+        As the toolkit's, but a value that isn't a cone search (a target's name with no radius, say)
+        finds nothing, rather than being an error, as does the name of a target that isn't there.
+        """
+        try:
+            return super().filter_cone_search(queryset, name, value)
+        except (ValueError, TypeError):
+            return queryset.none()
 
 
 class RGESAlertFilterSet(HTMXTableFilterSet):
@@ -198,15 +307,16 @@ def diagnostic_alias(field):
     return f'latest_{field}'
 
 
-def latest_diagnostic(field, as_of=None):
+def latest_diagnostic(field, as_of=None, target='event__target'):
     """
     A subquery for the value of a SourceDiagnostics field in the most recently created entry
-    for the target of the EventModel it's used on. Entries created after as_of, if given, are
-    passed over: a cutfile finds what was known when it was made, so that running it again
-    after the diagnostics have been revised gives the same models. NULL if the target has no
-    such entry.
+    for a target: that of the EventModel it's used on (as the lookup 'event__target', which is what
+    this is for by default), or the target itself, used on a queryset of targets, with target='pk'.
+    Entries created after as_of, if given, are passed over: a cutfile finds what was known when it
+    was made, so that running it again after the diagnostics have been revised gives the same
+    models. NULL if the target has no such entry.
     """
-    entries = SourceDiagnostics.objects.filter(target=OuterRef('event__target'))
+    entries = SourceDiagnostics.objects.filter(target=OuterRef(target))
     if as_of is not None:
         entries = entries.filter(created_at__lte=as_of)
     return Subquery(entries.order_by(*LATEST_FIRST).values(field)[:1])

@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User
 from django.http import QueryDict
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from custom_code.serializers import MSOSAlertSerializer
 from custom_code import tasks, source_functions, solar_system, event_functions
@@ -11,7 +11,8 @@ from django_tasks.backends.database.models import DBTaskResult
 from unittest import mock
 from custom_code.models import (Event, EventModel, PSPLModel, PitkinFlareModel, StraightLineModel,
                                 DavenportFlareModel, FSPLModel, RGESAlert, SourceDiagnostics)
-from custom_code.filters import CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES
+from custom_code.filters import (CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES,
+                                 RogueTargetFilterSet, find_row_with)
 from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 from custom_code.templatetags import plotting_functions
@@ -1279,6 +1280,151 @@ class TestArchiveWaitScript(TestCase):
         for expected in ('window.ArchiveWait', 'waiting:', 'loaded:', 'failed:', 'Waiting for archive...',
                          'The archive is not responding', r'/\/Norder\d+\//'):
             self.assertIn(expected, script)
+
+
+@override_settings(TOM_MFA_REQUIRED=None)
+class TestTargetListFilters(TestCase):
+    """The target list has one cone search, around a target, in its Advanced section"""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser('filter_user', password='x')
+        self.client.force_login(self.user)
+        # A and B are 3.6" apart, C is far away
+        for name, ra, dec in [('ConeA', 268.0, -29.0), ('ConeB', 268.001, -29.0), ('ConeC', 10.0, 10.0)]:
+            Target.objects.create(name=name, ra=ra, dec=dec, type='SIDEREAL')
+
+    def filters_form(self):
+        """The form of the target list's filters, as the list view builds it"""
+        request = RequestFactory().get('/targets/')
+        request.user = self.user
+        return RogueTargetFilterSet(None, queryset=Target.objects.all(), request=request).form
+
+    def found(self, **params):
+        response = self.client.get(reverse('targets:list'), params, headers={'HX-Request': 'true'})
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        return [name for name in ('ConeA', 'ConeB', 'ConeC') if '>' + name + '<' in content]
+
+    def test_the_filters_are_the_projects(self):
+        response = self.client.get(reverse('targets:list'))
+
+        self.assertIsInstance(response.context['filter'], RogueTargetFilterSet)
+
+    def test_only_the_target_cone_search_is_in_the_form(self):
+        html = self.client.get(reverse('targets:list')).content.decode()
+
+        self.assertIn('name="target_cone_search"', html)
+        self.assertNotIn('name="cone_search"', html)
+        self.assertNotIn('RA, Dec, Radius', html)
+        # Labelled as the cone search, there being no other
+        self.assertRegex(html, r'(?s)<label[^>]*for="id_target_cone_search"[^>]*>\s*Cone Search\s*</label>')
+        self.assertNotIn('Cone Search (Target)', html)
+        # The rest of the Advanced section is as it was, but for the toolkit's type menu, of sidereal
+        # or not, being the classification
+        self.assertIn('Advanced', html)
+        self.assertIn('name="classification"', html)
+        self.assertNotIn('name="type"', html)
+        self.assertIn('name="targetlist__name"', html)
+
+    def test_cone_search_is_on_the_row_of_the_menus(self):
+        html = self.client.get(reverse('targets:list')).content.decode()
+
+        # In the rendered page: the type and group menus and the cone search, in the one row
+        advanced = html[html.index('id="advancedFilters"'):]
+        rows = re.findall(r'<div\s+class="row[^"]*"\s*>(.*?)(?=<div\s+class="row|$)', advanced, re.S)
+        row = rows[0]
+        names = re.findall(r'name="(classification|targetlist__name|target_cone_search)"', row)
+        self.assertEqual(names, ['classification', 'targetlist__name', 'target_cone_search'])
+        self.assertEqual(sum('target_cone_search' in other for other in rows), 1)
+
+    def test_layout_of_the_row(self):
+        layout = self.filters_form().helper.layout
+
+        row = find_row_with(layout, 'classification')
+        columns = {column.fields[0]: column.css_class for column in row.fields}
+        self.assertEqual(list(columns), ['classification', 'targetlist__name', 'target_cone_search'])
+        # The menus a quarter of the row each, and the cone search the half that's left of it: wider
+        # than it was in a row of its own, which it took half of in a column that was a third
+        self.assertIn('col-md-3', columns['classification'])
+        self.assertIn('col-md-3', columns['targetlist__name'])
+        self.assertIn('col-md-6', columns['target_cone_search'])
+        self.assertIn('g-2', row.css_class)
+        self.assertIsNone(find_row_with(layout, 'cone_search'))
+        self.assertIsNone(find_row_with(layout, 'type'))
+
+    def test_menus_are_labelled_briefly(self):
+        # So that they stay on one line in their columns, and the row's inputs line up
+        form = self.filters_form()
+
+        self.assertEqual(form.fields['classification'].label, 'Type')
+        self.assertEqual(form.fields['targetlist__name'].label, 'Group')
+        self.assertEqual(form.fields['target_cone_search'].label, 'Cone Search')
+
+    def make_diagnostics(self, name, classification, created=None):
+        entry = SourceDiagnostics.objects.create(target=Target.objects.get(name=name), classification=classification)
+        if created is not None:
+            SourceDiagnostics.objects.filter(pk=entry.pk).update(created_at=created)
+        return entry
+
+    def test_the_type_menu_is_of_classifications(self):
+        self.make_diagnostics('ConeA', 'Microlensing PSPL')
+        self.make_diagnostics('ConeB', 'Flare')
+        self.make_diagnostics('ConeC', 'Flare')
+        self.make_diagnostics('ConeC', '')    # unclassified is not a choice
+
+        form = self.filters_form()
+
+        self.assertEqual(list(form.fields['classification'].choices),
+                         [('', '---------'), ('Flare', 'Flare'), ('Microlensing PSPL', 'Microlensing PSPL')])
+        # The menu on the page, with the choices as the options
+        html = self.client.get(reverse('targets:list')).content.decode()
+        menu = re.search(r'<select name="classification".*?</select>', html, re.S).group(0)
+        self.assertEqual(re.findall(r'<option value="([^"]*)"', menu), ['', 'Flare', 'Microlensing PSPL'])
+
+    def test_a_source_is_found_by_its_latest_classification(self):
+        utc = datetime.timezone.utc
+        # A was a flare, and has since been reclassified; B has always been
+        self.make_diagnostics('ConeA', 'Flare', datetime.datetime(2025, 1, 1, tzinfo=utc))
+        self.make_diagnostics('ConeA', 'Microlensing PSPL', datetime.datetime(2026, 1, 1, tzinfo=utc))
+        self.make_diagnostics('ConeB', 'Flare', datetime.datetime(2025, 6, 1, tzinfo=utc))
+        # C has no diagnostics at all
+
+        self.assertEqual(self.found(classification='Flare'), ['ConeB'])
+        self.assertEqual(self.found(classification='Microlensing PSPL'), ['ConeA'])
+        self.assertEqual(self.found(), ['ConeA', 'ConeB', 'ConeC'])
+
+    def test_of_two_entries_of_the_same_moment_the_last_made_is_the_latest(self):
+        moment = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        self.make_diagnostics('ConeA', 'Flare', moment)
+        self.make_diagnostics('ConeA', 'Microlensing PSPL', moment)
+
+        self.assertEqual(self.found(classification='Microlensing PSPL'), ['ConeA'])
+        self.assertEqual(self.found(classification='Flare'), [])
+
+    def test_the_toolkits_type_filter_still_works_in_a_query_string(self):
+        self.assertEqual(self.found(type='SIDEREAL'), ['ConeA', 'ConeB', 'ConeC'])
+        self.assertEqual(self.found(type='NON_SIDEREAL'), [])
+
+    def test_classification_with_a_cone_search(self):
+        self.make_diagnostics('ConeA', 'Microlensing PSPL')
+        self.make_diagnostics('ConeB', 'Flare')
+
+        self.assertEqual(self.found(target_cone_search='ConeA, 0.01', classification='Flare'), ['ConeB'])
+        self.assertEqual(self.found(target_cone_search='ConeA, 0.01', classification='Microlensing PSPL'), ['ConeA'])
+
+    def test_cone_search_around_a_target(self):
+        self.assertEqual(self.found(target_cone_search='ConeA, 0.01'), ['ConeA', 'ConeB'])
+        self.assertEqual(self.found(target_cone_search='ConeA, 0.0001'), ['ConeA'])
+        self.assertEqual(self.found(target_cone_search='ConeC, 1'), ['ConeC'])
+        self.assertEqual(self.found(), ['ConeA', 'ConeB', 'ConeC'])
+
+    def test_a_value_that_is_not_a_cone_search_finds_nothing(self):
+        for value in ['NoSuchTarget, 1', 'ConeA', 'ConeA, abc', ',', 'ConeA, 1, 2']:
+            with self.subTest(value=value):
+                self.assertEqual(self.found(target_cone_search=value), [])
+
+    def test_the_coordinate_cone_search_still_works_in_a_query_string(self):
+        self.assertEqual(self.found(cone_search='268.0, -29.0, 0.01'), ['ConeA', 'ConeB'])
 
 
 class TestJPLQueryRetries(TestCase):
