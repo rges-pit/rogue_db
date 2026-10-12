@@ -33,9 +33,6 @@
         <div class="row">
           {# Necessary wrapper so that the skymap displays correctly #}
           <div class="col-12">
-            {# Aladin skymap -- initialized once on page load (Moon/Sun computed here). #}
-            {# On HTMX filter updates, only the target markers are updated via OOB swap #}
-            {# into the aladin-targets-data div below (see target_table_partial.html). #}
             {% aladin_skymap skymap_objects %}
 
             {# Placeholder for OOB target data updates from HTMX #}

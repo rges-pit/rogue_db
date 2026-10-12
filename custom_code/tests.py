@@ -456,7 +456,7 @@ class TestGeneralFitFunctions(TestCase):
             baseline_lightcurve,
             full_lightcurve
         )
-        
+
         assert(npoints == high_points)
 
 class TestFlareFitFunctions(TestCase):
