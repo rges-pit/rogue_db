@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand
 from custom_code.models import Event
 from tom_targets.models import Target
 from custom_code import flare_fit_functions, data_utils
+from custom_code.event_functions import event_file_stem
 
 import logging
 
@@ -30,7 +31,7 @@ class Command(BaseCommand):
             data_utils.store_model_lightcurve(event, davenport_results, 'davenport_flare')
             data_utils.generate_corner_plot(
                 davenport_flare, davenport_results,
-                target.name + '_' + str(event.event_id) + '_davenport_corner_plot.png'
+                event_file_stem(event) + '_davenport_corner_plot.png'
             )
 
             # Pitkin flare model fit
@@ -41,5 +42,5 @@ class Command(BaseCommand):
             data_utils.store_model_lightcurve(event, pitkin_results, 'pitkin_flare')
             data_utils.generate_corner_plot(
                 pitkin_flare, pitkin_results,
-                target.name + '_' + str(event.event_id) + '_pitkin_corner_plot.png'
+                event_file_stem(event) + '_pitkin_corner_plot.png'
             )

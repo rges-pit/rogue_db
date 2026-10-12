@@ -3,14 +3,14 @@ from django.http import QueryDict
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from custom_code.serializers import MSOSAlertSerializer
-from custom_code import tasks, source_functions, solar_system
+from custom_code import tasks, source_functions, solar_system, event_functions
 import requests
 from django_tasks.signals import task_enqueued
 from collections import Counter
 from django_tasks.backends.database.models import DBTaskResult
 from unittest import mock
 from custom_code.models import (Event, EventModel, PSPLModel, PitkinFlareModel, StraightLineModel,
-                                DavenportFlareModel, RGESAlert, SourceDiagnostics)
+                                DavenportFlareModel, FSPLModel, RGESAlert, SourceDiagnostics)
 from custom_code.filters import CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES
 from tom_targets.models import Target
 from tom_dataproducts.models import PhotometryReducedDatum
@@ -19,6 +19,13 @@ from custom_code import (pylima_fit_functions, general_fit_functions, utils,
                          flare_fit_functions, data_utils, variable_stars, diagnostics)
 import datetime
 import importlib
+import posixpath
+import tempfile
+from io import StringIO
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+from django.core.management import call_command
+from django.core.management.base import CommandError
 import re
 from django.apps import apps as django_apps
 from astropy.time import Time
@@ -826,6 +833,278 @@ class TestTaskQueuing(TestCase):
         edited.ra = 13.0
         edited.save()
         self.assertEqual(self.counts(), self.only(*target_tasks))
+
+
+class TestEventThumbnailSurvivesModeling(TestCase):
+    """
+    The thumbnail is made by a background task while the process that ingested the alert goes on
+    modeling the event, with the Event instance it loaded before the thumbnail existed. The
+    diagnostics that save that instance must write only what they calculated: a full save writes the
+    old, empty thumbnail back over the new one.
+    """
+
+    THUMBNAIL = 'event_thumbnails/2026/10/11/made_by_the_task.png'
+
+    def setUp(self):
+        target = Target.objects.create(name='ThumbTarget', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(target=target, event_id='THUMB_1', start_time=2460000.0, duration=2.0)
+        # The task finishes while the ingest still holds its own copy, which has no thumbnail
+        Event.objects.filter(pk=self.event.pk).update(thumbnail=self.THUMBNAIL)
+        self.assertFalse(self.event.thumbnail)
+
+    def assertThumbnailKept(self, **expected):
+        stored = Event.objects.get(pk=self.event.pk)
+        self.assertEqual(stored.thumbnail.name, self.THUMBNAIL)
+        for name, value in expected.items():
+            self.assertAlmostEqual(getattr(stored, name), value, msg=name)
+
+    def test_goodness_of_fit_comparisons(self):
+        straight_line = StraightLineModel(model_type='Straight line', chisq=100.0, BIC=110.0)
+        davenport = DavenportFlareModel(model_type='Davenport flare', chisq=60.0, BIC=70.0)
+        cases = [
+            (PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0), straight_line,
+             dict(delta_chi2_PSPL=-60.0, delta_BIC_PSPL=-65.0)),
+            (FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0), straight_line,
+             dict(delta_chi2_FSPL=-70.0, delta_BIC_FSPL=-75.0)),
+            (PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0), davenport,
+             dict(delta_chi2_PSPL_bestflare=-20.0, delta_BIC_PSPL_bestflare=-25.0)),
+            (FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0), davenport,
+             dict(delta_chi2_FSPL_bestflare=-30.0, delta_BIC_FSPL_bestflare=-35.0)),
+        ]
+        for model1, model2, expected in cases:
+            with self.subTest(model=model1.model_type, against=model2.model_type):
+                diagnostics.compare_model_goodness_of_fit(self.event, model1, model2)
+                self.assertThumbnailKept(**expected)
+
+    def test_flare_model_comparisons(self):
+        davenport = DavenportFlareModel(model_type='Davenport flare', chisq=60.0, BIC=70.0)
+        pitkin = PitkinFlareModel(model_type='Pitkin flare', chisq=80.0, BIC=90.0)
+        for mulens, expected in [
+            (PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0),
+             dict(delta_chi2_PSPL_bestflare=-20.0, delta_BIC_PSPL_bestflare=-25.0)),
+            (FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0),
+             dict(delta_chi2_FSPL_bestflare=-30.0, delta_BIC_FSPL_bestflare=-35.0)),
+        ]:
+            with self.subTest(model=mulens.model_type):
+                diagnostics.compare_flare_models(self.event, mulens, davenport, pitkin)
+                self.assertThumbnailKept(**expected)
+
+    def test_baseline_diagnostics(self):
+        data_utils.store_baseline_diagnostics(self.event, {
+            'frac_below_baseline': 0.4, 'max_excursion_below_baseline': -0.3, 'Npoint_above_3sigma': 7,
+        })
+        self.assertThumbnailKept(frac_below_baseline=0.4, max_excursion_below_baseline=-0.3, Npoint_above_3sigma=7)
+
+
+class TestRemoveSource(TestCase):
+    """The remove_source command removes a source's image files with the source"""
+
+    def setUp(self):
+        self.media = tempfile.TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        settings_override = override_settings(MEDIA_ROOT=self.media.name)
+        settings_override.enable()
+        self.addCleanup(settings_override.disable)
+
+        self.target = Target.objects.create(name='RemoveMe', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(target=self.target, event_id='RemoveMe_1', start_time=2460000.0, duration=2.0)
+        self.other = Target.objects.create(name='KeepMe', ra=20.0, dec=10.0)
+        self.other_event = Event.objects.create(target=self.other, event_id='KeepMe_1', start_time=2460000.0, duration=2.0)
+
+        # The source's thumbnails: the one its event uses, and those left by earlier ingests
+        self.used = self.save_file('event_thumbnails/2026/10/11/RemoveMe_1_lc.png')
+        self.leftover = [
+            self.save_file('event_thumbnails/2026/10/10/RemoveMe_RemoveMe_1_lc.png'),
+            self.save_file('event_thumbnails/2026/10/08/RemoveMe_1_lc_abCd123.png'),
+            self.save_file('event_thumbnails/2026/09/18/RemoveMe_8004_lc.png'),   # from an event ID since replaced
+        ]
+        # Others', and similar names that aren't this source's thumbnails
+        self.kept = [
+            self.save_file('event_thumbnails/2026/10/11/KeepMe_1_lc.png'),
+            self.save_file('event_thumbnails/2026/10/11/RemoveMe2_RemoveMe2_1_lc.png'),     # another source, named alike
+            self.save_file('event_thumbnails/2026/10/11/RemoveMe_notes.txt'),
+            self.save_file('event_thumbnails/2026/10/11/RemoveMe_9_lc.jpg'),
+        ]
+        Event.objects.filter(pk=self.event.pk).update(thumbnail=self.used)
+        Event.objects.filter(pk=self.other_event.pk).update(thumbnail=self.kept[0])
+
+        # The corner plots of its models, likewise
+        self.used_plot = self.save_file('eventmodel_plots/2026/10/11/RemoveMe_1_PSPL_corner_plot.png')
+        self.leftover_plots = [
+            self.save_file('eventmodel_plots/2026/10/10/RemoveMe_1_PSPL_corner_plot_Xy12abc.png'),
+            self.save_file('eventmodel_plots/2026/09/18/RemoveMe_8004_davenport_corner_plot.png'),
+        ]
+        self.kept_plots = [
+            self.save_file('eventmodel_plots/2026/10/11/KeepMe_1_PSPL_corner_plot.png'),
+            self.save_file('eventmodel_plots/2026/10/11/RemoveMe2_1_PSPL_corner_plot.png'),
+            self.save_file('eventmodel_plots/2026/10/11/RemoveMe_1_lc.png'),   # not a corner plot
+        ]
+        self.model = PSPLModel.objects.create(
+            event=self.event, model_type='PSPL microlensing', corner_plot=self.used_plot)
+        self.other_model = PSPLModel.objects.create(
+            event=self.other_event, model_type='PSPL microlensing', corner_plot=self.kept_plots[0])
+
+        self.removed = [self.used] + self.leftover + [self.used_plot] + self.leftover_plots
+        self.not_removed = self.kept + self.kept_plots
+
+    def save_file(self, name):
+        return default_storage.save(name, ContentFile(b'png'))
+
+    def exists(self, names):
+        return [default_storage.exists(name) for name in names]
+
+    def run_command(self, *args):
+        out = StringIO()
+        call_command('remove_source', 'RemoveMe', *args, stdout=out)
+        return out.getvalue()
+
+    def test_dry_run_removes_nothing(self):
+        output = self.run_command('--dry-run')
+
+        self.assertIn('4 thumbnail files (1 used by rows, 3 left by earlier ingests)', output)
+        self.assertIn('3 corner plot files (1 used by rows, 2 left by earlier ingests)', output)
+        for name in [self.used, self.used_plot] + self.leftover + self.leftover_plots:
+            self.assertIn('would remove ' + name, output)
+        self.assertNotIn('KeepMe', output)
+        self.assertEqual(self.exists(self.removed + self.not_removed), [True] * 14)
+        self.assertTrue(Target.objects.filter(name='RemoveMe').exists())
+        self.assertTrue(PSPLModel.objects.filter(pk=self.model.pk).exists())
+
+    def test_removes_the_source_and_its_images(self):
+        output = self.run_command()
+
+        self.assertIn('4 thumbnail files', output)
+        self.assertIn('3 corner plot files', output)
+        self.assertEqual(self.exists(self.removed), [False] * 7)
+        self.assertFalse(Target.objects.filter(name='RemoveMe').exists())
+        self.assertFalse(Event.objects.filter(pk=self.event.pk).exists())
+        self.assertFalse(PSPLModel.objects.filter(pk=self.model.pk).exists())
+
+        # Nothing of any other source, nor the files that only look similar
+        self.assertEqual(self.exists(self.not_removed), [True] * 7)
+        self.assertTrue(Event.objects.filter(pk=self.other_event.pk).exists())
+        self.assertTrue(PSPLModel.objects.filter(pk=self.other_model.pk).exists())
+
+    def test_a_source_without_images(self):
+        Event.objects.filter(pk=self.event.pk).update(thumbnail=None)
+        EventModel.objects.filter(pk=self.model.pk).update(corner_plot=None)
+        for name in self.removed:
+            default_storage.delete(name)
+
+        output = self.run_command()
+
+        self.assertIn('0 thumbnail files', output)
+        self.assertIn('0 corner plot files', output)
+        self.assertFalse(Target.objects.filter(name='RemoveMe').exists())
+
+    def test_unknown_source(self):
+        with self.assertRaises(CommandError):
+            call_command('remove_source', 'NoSuchSource', stdout=StringIO())
+
+
+class TestEventThumbnailName(TestCase):
+    """The lightcurve thumbnail's name has the source's name once"""
+
+    def setUp(self):
+        self.media = tempfile.TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        settings_override = override_settings(MEDIA_ROOT=self.media.name)
+        settings_override.enable()
+        self.addCleanup(settings_override.disable)
+
+    def make_event(self, source_name, event_id):
+        target = Target.objects.create(name=source_name, ra=10.0, dec=10.0)
+        event = Event.objects.create(target=target, event_id=event_id, start_time=2461000.0, duration=1.0)
+        # The thumbnail is of the F146 lightcurve during the event
+        PhotometryReducedDatum.objects.bulk_create([PhotometryReducedDatum(
+            target=target, source_name='Roman_F146', bandpass='F146', brightness=20.0 + 0.01 * i,
+            brightness_error=0.01,
+            timestamp=timezone.make_aware(Time(2461000.0 + i * 0.05, format='jd').datetime, datetime.timezone.utc),
+        ) for i in range(10)])
+        return event
+
+    def test_event_file_stem(self):
+        for source, event_id, expected in [
+            ('RMDC26_072622', 'RMDC26_072622_72622', 'RMDC26_072622_72622'),   # IDs of events made from alerts
+            ('RMDC26_072622', '8004', 'RMDC26_072622_8004'),                   # plain IDs
+            ('RMDC26_072622', 8004, 'RMDC26_072622_8004'),
+            ('Src', 'Src', 'Src_Src'),
+            ('Src', 'SrcOther_1', 'Src_SrcOther_1'),                           # only a whole name before the _ counts
+        ]:
+            with self.subTest(source=source, event_id=event_id):
+                event = Event(target=Target(name=source), event_id=event_id)
+                self.assertEqual(event_functions.event_file_stem(event), expected)
+
+    def test_thumbnail_name(self):
+        for source, event_id, expected in [
+            ('RMDC26_072622', 'RMDC26_072622_72622', 'RMDC26_072622_72622_lc.png'),
+            ('RMDC26_070222', '1840', 'RMDC26_070222_1840_lc.png'),
+        ]:
+            with self.subTest(event_id=event_id):
+                event = self.make_event(source, event_id)
+
+                event_functions.generate_event_lightcurves(event)
+
+                stored = Event.objects.get(pk=event.pk).thumbnail.name
+                self.assertEqual(posixpath.basename(stored), expected)
+                self.assertTrue(default_storage.exists(stored))
+
+
+class TestCornerPlotNames(TestCase):
+    """The corner plots' names have the source's name once, whichever way the fits are run"""
+
+    CASES = [
+        ('RMDC26_072622', 'RMDC26_072622_72622', 'RMDC26_072622_72622'),   # IDs of events made from alerts
+        ('RMDC26_070222', '1840', 'RMDC26_070222_1840'),
+    ]
+
+    def make_event(self, source_name, event_id):
+        target = Target.objects.create(name=source_name, ra=10.0, dec=10.0)
+        return Event.objects.create(target=target, event_id=event_id, start_time=2461000.0, duration=1.0)
+
+    def names_made(self, corner_plot_mock):
+        return [call.args[2] for call in corner_plot_mock.call_args_list]
+
+    def test_event_modeling(self):
+        for source, event_id, stem in self.CASES:
+            with self.subTest(event_id=event_id):
+                event = self.make_event(source, event_id)
+                with mock.patch.multiple(
+                        'custom_code.event_functions', data_utils=mock.DEFAULT, diagnostics=mock.DEFAULT,
+                        general_fit_functions=mock.DEFAULT, pylima_fit_functions=mock.DEFAULT,
+                        flare_fit_functions=mock.DEFAULT) as mocks:
+                    mocks['data_utils'].store_microlensing_model_parameters.return_value = (mock.Mock(), mock.Mock())
+
+                    event_functions.run_event_modeling(event)
+
+                self.assertEqual(self.names_made(mocks['data_utils'].generate_corner_plot), [
+                    stem + '_PSPL_corner_plot.png', stem + '_FSPL_corner_plot.png',
+                    stem + '_davenport_corner_plot.png', stem + '_pitkin_corner_plot.png',
+                ])
+
+    def test_microlensing_command(self):
+        for source, event_id, stem in self.CASES:
+            with self.subTest(event_id=event_id):
+                self.make_event(source, event_id)
+                with mock.patch('custom_code.management.commands.fit_microlensing_model.data_utils') as data_utils_mock, \
+                        mock.patch('custom_code.management.commands.fit_microlensing_model.pylima_fit_functions'):
+                    data_utils_mock.store_microlensing_model_parameters.return_value = (mock.Mock(), mock.Mock())
+
+                    call_command('fit_microlensing_model', source)
+
+                self.assertEqual(self.names_made(data_utils_mock.generate_corner_plot),
+                                 [stem + '_PSPL_corner_plot.png', stem + '_FSPL_corner_plot.png'])
+
+    def test_flare_command(self):
+        for source, event_id, stem in self.CASES:
+            with self.subTest(event_id=event_id):
+                self.make_event(source, event_id)
+                with mock.patch('custom_code.management.commands.fit_flare_models.data_utils') as data_utils_mock, \
+                        mock.patch('custom_code.management.commands.fit_flare_models.flare_fit_functions'):
+                    call_command('fit_flare_models', source)
+
+                self.assertEqual(self.names_made(data_utils_mock.generate_corner_plot),
+                                 [stem + '_davenport_corner_plot.png', stem + '_pitkin_corner_plot.png'])
 
 
 class TestJPLQueryRetries(TestCase):

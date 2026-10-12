@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand
 from custom_code.models import Event
 from tom_targets.models import Target
 from custom_code import pylima_fit_functions, data_utils
+from custom_code.event_functions import event_file_stem
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,12 +33,12 @@ class Command(BaseCommand):
             # Generate corner plots
             data_utils.generate_corner_plot(
                 pspl_model, pylima_results['pspl'],
-                target.name + '_' + str(event.event_id) + '_PSPL_corner_plot.png'
+                event_file_stem(event) + '_PSPL_corner_plot.png'
             )
 
             data_utils.generate_corner_plot(
                 fspl_model, pylima_results['fspl'],
-                target.name + '_' + str(event.event_id) + '_FSPL_corner_plot.png'
+                event_file_stem(event) + '_FSPL_corner_plot.png'
             )
 
         else:

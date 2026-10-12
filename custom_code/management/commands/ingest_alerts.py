@@ -27,24 +27,26 @@ class Command(BaseCommand):
         file_list = glob.glob(path.join(options['data_dir'], '*.json'))
 
         for file_path in file_list:
-            with open(file_path, 'r') as file:
-                data = json.load(file)
-                logger.info('Received alert ' + path.basename(file_path))
+            # Avoid any cutfiles in the same directory
+            if 'cutfile' not in file_path:
+                with open(file_path, 'r') as file:
+                    data = json.load(file)
+                    logger.info('Received alert ' + path.basename(file_path))
 
-                # Parse the alert packet and create all necessary Targets, Events and RGESAlerts
-                # Then validated and check for duplication
-                serial = MSOSAlertSerializer(data=data)
-                serial.is_valid(raise_exception=True)
-                try:
-                    serial.save()
-                    logger.info('Completed alert ingest')
+                    # Parse the alert packet and create all necessary Targets, Events and RGESAlerts
+                    # Then validated and check for duplication
+                    serial = MSOSAlertSerializer(data=data)
+                    serial.is_valid(raise_exception=True)
+                    try:
+                        serial.save()
+                        logger.info('Completed alert ingest')
 
-                except IntegrityError:
-                    logger.warning('Duplicate alert not ingested')
+                    except IntegrityError:
+                        logger.warning('Duplicate alert not ingested')
 
-                # Now fit the standard set of models to the event
-                event_functions.run_event_modeling(serial.event)
+                    # Now fit the standard set of models to the event
+                    event_functions.run_event_modeling(serial.event)
 
-                logger.info('Completed ingest of alert ' + path.basename(file_path))
+                    logger.info('Completed ingest of alert ' + path.basename(file_path))
 
         logger.info('Alert ingest completed')

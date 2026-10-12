@@ -54,23 +54,25 @@ def compare_model_goodness_of_fit(event, model1, model2):
     delta_chisq = model1.chisq - model2.chisq
     delta_bic = model1.BIC - model2.BIC
 
-    # Store these parameters on the Event
+    # Store these parameters on the Event. Saving just the fields set here: the instance may be
+    # out of date (the thumbnail, for one, is made by a background task while this runs), and a
+    # full save would write every field, undoing whatever has been stored since it was loaded.
     if model1.model_type == 'PSPL microlensing' and model2.model_type == 'Straight line':
         event.delta_chi2_PSPL = delta_chisq
         event.delta_BIC_PSPL = delta_bic
-        event.save()
+        event.save(update_fields=['delta_chi2_PSPL', 'delta_BIC_PSPL'])
     elif model1.model_type == 'FSPL microlensing' and model2.model_type == 'Straight line':
         event.delta_chi2_FSPL = delta_chisq
         event.delta_BIC_FSPL = delta_bic
-        event.save()
+        event.save(update_fields=['delta_chi2_FSPL', 'delta_BIC_FSPL'])
     elif model1.model_type == 'PSPL microlensing' and model2.model_type == 'Davenport flare':
         event.delta_chi2_PSPL_bestflare = delta_chisq
         event.delta_BIC_PSPL_bestflare = delta_bic
-        event.save()
+        event.save(update_fields=['delta_chi2_PSPL_bestflare', 'delta_BIC_PSPL_bestflare'])
     elif model1.model_type == 'FSPL microlensing' and model2.model_type == 'Davenport flare':
         event.delta_chi2_FSPL_bestflare = delta_chisq
         event.delta_BIC_FSPL_bestflare = delta_bic
-        event.save()
+        event.save(update_fields=['delta_chi2_FSPL_bestflare', 'delta_BIC_FSPL_bestflare'])
 
 def compare_flare_models(event, mulens_model, davenport_model, pitkin_model):
     """
@@ -95,11 +97,11 @@ def compare_flare_models(event, mulens_model, davenport_model, pitkin_model):
     if mulens_model.model_type == 'PSPL microlensing':
         event.delta_chi2_PSPL_bestflare = delta_chisq
         event.delta_BIC_PSPL_bestflare = delta_bic
-        event.save()
+        event.save(update_fields=['delta_chi2_PSPL_bestflare', 'delta_BIC_PSPL_bestflare'])
     elif mulens_model.model_type == 'FSPL microlensing':
         event.delta_chi2_FSPL_bestflare = delta_chisq
         event.delta_BIC_FSPL_bestflare = delta_bic
-        event.save()
+        event.save(update_fields=['delta_chi2_FSPL_bestflare', 'delta_BIC_FSPL_bestflare'])
 
 def calc_npoints_above_baseline(lcevent, baseline_lightcurve, event_lightcurve):
     """

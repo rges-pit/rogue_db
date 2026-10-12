@@ -587,7 +587,10 @@ def store_baseline_diagnostics(lcevent, results):
         lcevent.frac_below_baseline = results['frac_below_baseline']
         lcevent.max_excursion_below_baseline = results['max_excursion_below_baseline']
         lcevent.Npoint_above_3sigma = results['Npoint_above_3sigma']
-        lcevent.save()
+
+        # Only these fields: see compare_model_goodness_of_fit
+        lcevent.save(update_fields=['frac_below_baseline', 'max_excursion_below_baseline',
+                                    'Npoint_above_3sigma'])
 
         logger.info('Stored diagostics from baseline lightcurve fit for ' + lcevent.target.name)
 

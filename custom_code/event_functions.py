@@ -12,6 +12,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def event_file_stem(lcevent):
+    """
+    The start of the names of an event's files: its source's name and its event ID. The IDs of
+    events made from alerts already begin with the source's name (see get_event_id), and the
+    name isn't repeated.
+    """
+    name, event_id = lcevent.target.name, str(lcevent.event_id)
+    if event_id.startswith(name + '_'):
+        return event_id
+    return name + '_' + event_id
+
+
 def generate_event_lightcurves(lcevent):
     """
     Function to create a thumbnail image of the lightcurve segment of an
@@ -48,7 +60,7 @@ def generate_event_lightcurves(lcevent):
         fig.savefig(buf, format='png')
         plt.close(fig)
 
-        filename = lcevent.target.name + '_' + lcevent.event_id + '_lc.png'
+        filename = event_file_stem(lcevent) + '_lc.png'
         # save=False: FieldFile.save() with save=True calls instance.save()
         # with no update_fields, which wouldn't satisfy on_event_saved's
         # update_fields guard and would spuriously re-trigger the moving-object
@@ -101,11 +113,11 @@ def run_event_modeling(lcevent):
     best_mulens = diagnostics.get_best_mulens_model(pspl_model, fspl_model)
     data_utils.generate_corner_plot(
         pspl_model, pylima_results['pspl'],
-        lcevent.target.name + '_' + str(lcevent.event_id) + '_PSPL_corner_plot.png'
+        event_file_stem(lcevent) + '_PSPL_corner_plot.png'
     )
     data_utils.generate_corner_plot(
         fspl_model, pylima_results['fspl'],
-        lcevent.target.name + '_' + str(lcevent.event_id) + '_FSPL_corner_plot.png'
+        event_file_stem(lcevent) + '_FSPL_corner_plot.png'
     )
 
     # Fit flare models and calculate diagnostics
@@ -116,7 +128,7 @@ def run_event_modeling(lcevent):
     )
     data_utils.generate_corner_plot(
         davenport_flare, davenport_results,
-        lcevent.target.name + '_' + str(lcevent.event_id) + '_davenport_corner_plot.png'
+        event_file_stem(lcevent) + '_davenport_corner_plot.png'
     )
     pitkin_results = flare_fit_functions.run_pitkin_flare_model_fit(lcevent)
     pitkin_flare = data_utils.store_pitkinflare_model_parameters(
@@ -126,7 +138,7 @@ def run_event_modeling(lcevent):
     diagnostics.calc_flare_diagnostics(lcevent, best_mulens, davenport_flare, pitkin_flare)
     data_utils.generate_corner_plot(
         pitkin_flare, pitkin_results,
-        lcevent.target.name + '_' + str(lcevent.event_id) + '_pitkin_corner_plot.png'
+        event_file_stem(lcevent) + '_pitkin_corner_plot.png'
     )
 
     logger.info('Completed modeling for ' + lcevent.target.name + ', event ' + lcevent.event_id)
