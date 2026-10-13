@@ -138,6 +138,18 @@ def run_fit(lcevent, bandpass=None, verbose=False):
         'model_telescope_fspl': model_telescope_fspl
     }
 
+def get_alert_parameters(lcevent):
+    """
+    The t0, u0 and tE of an event's most recent alert, which a fit of the event starts from, as floats;
+    or None if it has no alert, or its alert gave no t0.
+    """
+    alert = lcevent.alerts.order_by('-created_at', '-pk').first()
+    if alert is None or not alert.alert_t0:
+        return None
+
+    return tuple(float(value or 0.0) for value in (alert.alert_t0, alert.alert_u0, alert.alert_tE))
+
+
 def set_parameter_boundaries(lcevent, mulens_model_fit, verbose=False,
                              use_boundaries=True, prior_model_params={}):
     """
@@ -151,14 +163,10 @@ def set_parameter_boundaries(lcevent, mulens_model_fit, verbose=False,
         mulens_model_fit    pyLIMA model fit object
     """
 
-    # Estimate initial-guess parameters based on the Target's parameters,
-    # which are set from the alert information
-    if len(prior_model_params) == 0 and lcevent.target.t0:
-        mulens_model_fit.model_parameters_guess = [
-            lcevent.target.t0,
-            lcevent.target.u0,
-            lcevent.target.tE
-        ]
+    # Estimate initial-guess parameters based on the event's alert
+    alert_parameters = get_alert_parameters(lcevent)
+    if len(prior_model_params) == 0 and alert_parameters:
+        mulens_model_fit.model_parameters_guess = list(alert_parameters)
     elif len(prior_model_params) > 0:
         mulens_model_fit.model_parameters_guess = [
             prior_model_params['t0'],
@@ -176,11 +184,12 @@ def set_parameter_boundaries(lcevent, mulens_model_fit, verbose=False,
 
     # Establish boundaries for the optimization process
     if use_boundaries:
-        if lcevent.target.t0:
-            trange = max(2.0 * lcevent.target.tE, 2.0)
+        if alert_parameters:
+            alert_t0, alert_u0, alert_tE = alert_parameters
+            trange = max(2.0 * alert_tE, 2.0)
             mulens_model_fit.fit_parameters["t0"][1] = [
-                lcevent.target.t0 - trange/2.0,
-                lcevent.target.t0 + trange/2.0,
+                alert_t0 - trange/2.0,
+                alert_t0 + trange/2.0,
             ]
         else:
             mulens_model_fit.fit_parameters["t0"][1] = [0.0, 10.0]

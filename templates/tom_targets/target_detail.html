@@ -1,6 +1,6 @@
 {% extends 'tom_common/base.html' %}
 {% load comments django_bootstrap5 tom_common_extras targets_extras observation_extras dataproduct_extras static cache plotting_functions view_layouts %}
-{% load dataservices_extras %}
+{% load dataservices_extras static_versions %}
 {% block title %}Target {{ object.name }}{% endblock %}
 {% block additional_css %}
 <link rel="stylesheet" href="{% static 'tom_targets/css/main.css' %}">
@@ -74,7 +74,7 @@
         </div>
         {% if object.type == 'SIDEREAL' %}
           <div class="tab-pane" id="imaging">
-          <div id="archive-wait" class="d-flex align-items-center gap-3 border rounded p-3 mb-3" style="max-width: 300px;" role="status" aria-live="polite" hidden>
+          <div id="archive-wait" class="d-flex align-items-center gap-3 border rounded p-3 mb-3" style="max-width: 300px; display: none !important;" role="status" aria-live="polite" hidden>
             <div class="spinner-border spinner-border-sm flex-shrink-0" aria-hidden="true"></div>
             <span class="archive-wait-message">Waiting for archive...</span>
           </div>
@@ -125,7 +125,7 @@
 {% endblock %}
 {% block extra_javascript %}
 {% if object.type == 'SIDEREAL' %}
-<script src="{% static 'tom_common/js/archive_wait.js' %}"></script>
+<script src="{% versioned_static 'tom_common/js/archive_wait.js' %}"></script>
 <script>
 (function () {
   const tab = document.getElementById('imaging-tab');

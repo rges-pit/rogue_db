@@ -31,7 +31,7 @@ def photometry_mulens_model(mulens):
     # Plot the timeseries photometry data from all telescopes. P
     #
     # A target can have tens of thousands of points, so this is done in bulk.
-    rows = list(PhotometryReducedDatum.objects.filter(target=mulens).order_by('source_name').values_list(
+    rows = list(PhotometryReducedDatum.objects.filter(target=mulens).order_by('source_name', 'timestamp').values_list(
         'source_name', 'timestamp', 'brightness', 'brightness_error'
     ))
 

@@ -77,11 +77,6 @@ class MSOSAlertSerializer(serializers.Serializer):
                 permissions='PUBLIC',
                 galactic_lng=g.l.deg,
                 galactic_lat=g.b.deg,
-                t0=float(validated_data['metadata']['t0lens1']),
-                u0=float(validated_data['metadata']['u0lens1']),
-                tE=float(validated_data['metadata']['tE_ref']),
-                source_magnitude=float(validated_data['metadata']['Source_F146']),
-                baseline_magnitude=float(validated_data['metadata']['Source_F146']),
                 mag_now_passband='Roman_F146'
             ),
         )

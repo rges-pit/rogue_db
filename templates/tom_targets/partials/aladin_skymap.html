@@ -1,4 +1,4 @@
-{% load static %}
+{% load static static_versions %}
 <!-- embedding Aladin Lite example code found at: https://aladin.cds.unistra.fr/AladinLite/doc/  -->
 {# Aladin Lite and the survey images come from servers in Strasbourg, which can be slow. #}
 {# Until the archive response, we display a wait message. #}
@@ -8,7 +8,7 @@
 </div>
 <div id="aladin-lite-div" style="width:auto; height:700px; margin:auto; margin-top: 20px;" ></div>
 
-<script src="{% static 'tom_common/js/archive_wait.js' %}"></script>
+<script src="{% versioned_static 'tom_common/js/archive_wait.js' %}"></script>
 <script type="text/javascript">
 (async function loadAladin() {
     const wait = ArchiveWait(document.getElementById('archive-wait'));

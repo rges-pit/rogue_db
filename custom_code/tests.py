@@ -31,6 +31,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.contrib.staticfiles import finders
 from django.core.management import call_command
+from django.template import Context, Template
 from django.core.management.base import CommandError
 import re
 from django.apps import apps as django_apps
@@ -52,8 +53,6 @@ def create_test_target_with_photometry(name='TestObject'):
     """
     t = Target.objects.create(
         name=name,
-        classification='Microlensing PSPL',
-        category='Microlensing stellar/planet',
         ra = 265.5,
         dec = 17.5
     )
@@ -89,8 +88,6 @@ def create_test_target_with_gaussian():
     """
     t = Target.objects.create(
         name='TestObject2',
-        classification='Microlensing PSPL',
-        category='Microlensing stellar/planet',
         ra = 265.5,
         dec = 17.5
     )
@@ -161,8 +158,6 @@ def create_event_set(nevents=100):
     for i in range(0, nevents, 1):
         t = Target.objects.create(
             name='test_target' + str(i),
-            classification='Microlensing PSPL',
-            category='Microlensing stellar/planet',
             ra=ra[i],
             dec=dec[i]
         )
@@ -364,6 +359,76 @@ class TestDataUtils(TestCase):
 
         # It's a picture: no periodogram is stored as data
         self.assertFalse(ReducedDatum.objects.filter(data_type__startswith='periodogram').exists())
+
+class TestFitStartingValues(TestCase):
+    """
+    A fit of an event's microlensing model starts from the t0, u0 and tE of its alert. (They used to
+    be copied onto the source, which no longer has them.)
+    """
+
+    class Fit:
+        """Enough of a pyLIMA fit for set_parameter_boundaries to set its guess and boundaries"""
+        class model:
+            @staticmethod
+            def model_type():
+                return 'PSPL'
+
+        def __init__(self):
+            self.fit_parameters = {name: [0.0, [None, None]] for name in ('t0', 'u0', 'tE', 'rho')}
+
+    def setUp(self):
+        self.target, self.event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
+
+    def make_alert(self, t0, u0, tE, **kwargs):
+        return RGESAlert.objects.create(
+            alert_id=1, roman_id='ROMAN-X', event=self.event, alert_t0=t0, alert_u0=u0, alert_tE=tE, **kwargs)
+
+    def test_guess_and_boundaries_from_the_alert(self):
+        self.make_alert(2460010.0, 0.25, 8.0)
+        fit = self.Fit()
+
+        pylima_fit_functions.set_parameter_boundaries(self.event, fit)
+
+        self.assertEqual(fit.model_parameters_guess, [2460010.0, 0.25, 8.0])
+        # t0 within twice the timescale of the alert's, centred on it
+        self.assertEqual(fit.fit_parameters['t0'][1], [2460010.0 - 8.0, 2460010.0 + 8.0])
+        self.assertEqual(fit.fit_parameters['tE'][1], [0.0, 100.0])
+        self.assertEqual(fit.fit_parameters['u0'][1], [-2.0, 2.0])
+
+    def test_the_most_recent_alert_is_used(self):
+        older = self.make_alert(2460001.0, 0.1, 2.0)
+        RGESAlert.objects.filter(pk=older.pk).update(created_at=datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc))
+        self.make_alert(2460020.0, 0.3, 3.0)
+
+        self.assertEqual(pylima_fit_functions.get_alert_parameters(self.event), (2460020.0, 0.3, 3.0))
+
+    def test_without_an_alert(self):
+        fit = self.Fit()
+
+        pylima_fit_functions.set_parameter_boundaries(self.event, fit)
+
+        self.assertIsNone(pylima_fit_functions.get_alert_parameters(self.event))
+        self.assertEqual(fit.model_parameters_guess, [0.0, 0.0, 0.0])
+        self.assertEqual(fit.fit_parameters['t0'][1], [0.0, 10.0])
+
+    def test_with_prior_model_parameters_they_are_the_guess(self):
+        self.make_alert(2460010.0, 0.25, 8.0)
+        fit = self.Fit()
+
+        pylima_fit_functions.set_parameter_boundaries(
+            self.event, fit, prior_model_params={'t0': 2460011.0, 'u0': 0.2, 'tE': 7.0})
+
+        self.assertEqual(fit.model_parameters_guess, [2460011.0, 0.2, 7.0])
+
+    def test_an_alert_without_a_timescale_still_gives_a_boundary(self):
+        self.make_alert(2460010.0, None, None)
+        fit = self.Fit()
+
+        pylima_fit_functions.set_parameter_boundaries(self.event, fit)
+
+        self.assertEqual(fit.model_parameters_guess, [2460010.0, 0.0, 0.0])
+        self.assertEqual(fit.fit_parameters['t0'][1], [2460010.0 - 1.0, 2460010.0 + 1.0])
+
 
 class TestPyLIMAUtils(TestCase):
 
@@ -840,9 +905,9 @@ class TestTaskQueuing(TestCase):
         target = Target.objects.create(name='QueueTarget', ra=10.0, dec=10.0)
         self.assertEqual(self.counts(), self.only(*target_tasks))
 
-        target.t0 = 2460000.5
+        target.distance = 2460000.5   # (any field that isn't its position)
         target.save()
-        target.save(update_fields=['t0'])
+        target.save(update_fields=['distance'])
         self.assertEqual(self.counts(), self.only())
 
         target.ra = 11.0
@@ -1260,8 +1325,11 @@ class TestSourceDetailPageLoading(TestCase):
         self.assertIsNotNone(box)
         self.assertEqual(box.group(2), 'Waiting for archive...')
         self.assertIn('spinner-border', box.group(1))
-        # Hidden until the tab is shown, and inside the Imaging pane, above the chart
-        self.assertRegex(re.search(r'<div id="archive-wait"[^>]*>', html).group(0), r'\shidden[\s>]')
+        # Hidden until the tab is shown, and inside the Imaging pane, above the chart. (Hidden with an
+        # !important style as well as the attribute: the box is a d-flex, which the attribute doesn't beat.)
+        opening = re.search(r'<div id="archive-wait"[^>]*>', html).group(0)
+        self.assertRegex(opening, r'\shidden[\s>]')
+        self.assertIn('display: none !important', opening)
         pane = html[html.index('id="imaging"'):]
         self.assertLess(pane.index('id="archive-wait"'), pane.index('id="aladin-lite-div"'))
 
@@ -1306,6 +1374,42 @@ class TestSkymapWaitingBox(TestCase):
         self.assertIn('wait.failed(', html)
 
 
+class TestVersionedStatic(TestCase):
+    """A static script's URL changes when the file does, so that a browser doesn't go on using an old one"""
+
+    def render(self, template='{% load static_versions %}{% versioned_static "tom_common/js/archive_wait.js" %}'):
+        return Template(template).render(Context({}))
+
+    def test_url_has_the_time_the_file_was_changed(self):
+        path = finders.find('tom_common/js/archive_wait.js')
+
+        url = self.render()
+
+        self.assertEqual(url, '/static/tom_common/js/archive_wait.js?v=%d' % os.path.getmtime(path))
+
+    def test_url_changes_with_the_file(self):
+        path = finders.find('tom_common/js/archive_wait.js')
+        before = self.render()
+        original = os.stat(path)
+        self.addCleanup(os.utime, path, (original.st_atime, original.st_mtime))
+
+        os.utime(path, (original.st_atime, original.st_mtime + 100))
+
+        self.assertNotEqual(self.render(), before)
+
+    def test_a_file_that_is_not_there_has_no_version(self):
+        self.assertEqual(self.render('{% load static_versions %}{% versioned_static "no/such/file.js" %}'),
+                         '/static/no/such/file.js')
+
+    def test_the_pages_that_use_the_script_ask_for_it_by_a_versioned_url(self):
+        for name in ('templates/tom_targets/target_detail.html', 'templates/tom_targets/partials/aladin_skymap.html'):
+            with open(name, encoding='utf-8') as template_file:
+                template = template_file.read()
+            with self.subTest(template=name):
+                self.assertIn("{% versioned_static 'tom_common/js/archive_wait.js' %}", template)
+                self.assertNotIn("{% static 'tom_common/js/archive_wait.js' %}", template)
+
+
 class TestArchiveWaitScript(TestCase):
     """The script behind the boxes is served, and has what the pages call"""
 
@@ -1318,6 +1422,31 @@ class TestArchiveWaitScript(TestCase):
         for expected in ('window.ArchiveWait', 'waiting:', 'loaded:', 'failed:', 'Waiting for archive...',
                          'The archive is not responding', r'/\/Norder\d+\//'):
             self.assertIn(expected, script)
+
+    def test_survey_images_are_looked_for_however_they_are_loaded(self):
+        # Aladin Lite loads some pictures with fetch and some as an <img>, and which it uses can differ with
+        # the browser, so there's the browser's own record of what it has loaded as well as a wrapper on fetch
+        with open(finders.find('tom_common/js/archive_wait.js'), encoding='utf-8') as script_file:
+            script = script_file.read()
+
+        self.assertIn('window.fetch = wrapper', script)
+        self.assertIn('new PerformanceObserver', script)
+        self.assertIn("observer.observe({type: 'resource'})", script)
+        # ...with what it saw written to the console, to say why the box is still there if it is
+        self.assertIn('console.debug', script)
+        self.assertIn('survey image arrived', script)
+
+    def test_the_box_is_hidden_with_an_important_style(self):
+        # The box is a Bootstrap d-flex (display:flex !important), which beats the hidden attribute, so
+        # that alone left it on the page after the archive had answered. Only an !important of its own,
+        # as an inline style has, hides it.
+        with open(finders.find('tom_common/js/archive_wait.js'), encoding='utf-8') as script_file:
+            script = script_file.read()
+
+        self.assertIn("box.style.setProperty('display', 'none', 'important')", script)
+        self.assertIn("box.style.removeProperty('display')", script)
+        # ...and every hiding and showing of it goes through that, rather than the attribute alone
+        self.assertEqual(len(re.findall(r'box\.hidden\s*=', script)), 1)
 
 
 @override_settings(TOM_MFA_REQUIRED=None)
