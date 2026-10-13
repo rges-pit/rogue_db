@@ -4,7 +4,7 @@ from custom_code import data_utils
 from custom_code.models import Event
 from custom_code import data_utils
 from custom_code import (pylima_fit_functions, general_fit_functions,
-            diagnostics, flare_fit_functions)
+            diagnostics, flare_fit_functions, utils)
 from django.core.files.base import ContentFile
 import numpy as np
 import matplotlib.pyplot as plt
@@ -65,7 +65,7 @@ def generate_event_lightcurves(lcevent):
         # with no update_fields, which wouldn't satisfy on_event_saved's
         # update_fields guard and would spuriously re-trigger the moving-object
         # check. .update() persists the field without going through post_save.
-        lcevent.thumbnail.save(filename, ContentFile(buf.getvalue()), save=False)
+        utils.replace_image_file(lcevent.thumbnail, filename, ContentFile(buf.getvalue()))
         Event.objects.filter(pk=lcevent.pk).update(thumbnail=lcevent.thumbnail.name)
 
 def run_event_modeling(lcevent):

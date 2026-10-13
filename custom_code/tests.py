@@ -1,7 +1,7 @@
 from django.contrib.auth.models import User
 from django.http import QueryDict
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from custom_code.serializers import MSOSAlertSerializer
 from custom_code import tasks, source_functions, solar_system, event_functions
 import requests
@@ -21,6 +21,9 @@ from custom_code import (pylima_fit_functions, general_fit_functions, utils,
                          flare_fit_functions, data_utils, variable_stars, diagnostics)
 import datetime
 import importlib
+import os
+import matplotlib
+import matplotlib.figure
 import posixpath
 import tempfile
 from io import StringIO
@@ -342,6 +345,25 @@ class TestDataUtils(TestCase):
         for dname, data in datasets.items():
             assert(data[0,0] >= self.event.start_time)
             assert(data[0,-1] <= self.event.start_time + self.event.duration)
+
+    def test_generate_periodogram(self):
+        """
+        Function to test that a periodogram is drawn and kept, as a picture, with the source
+        """
+        frequency = np.linspace(0.001, 10.0, 100)
+        power = np.ones(100)
+
+        with tempfile.TemporaryDirectory() as media, override_settings(MEDIA_ROOT=media):
+            data_utils.generate_periodogram(self.target, power, frequency)
+
+            stored = type(self.target).objects.get(pk=self.target.pk).periodogram
+            self.assertTrue(stored.name.startswith('periodograms/'))
+            self.assertIn(self.target.name + '_periodogram', stored.name)
+            with default_storage.open(stored.name) as image:
+                self.assertEqual(image.read(8), b'\x89PNG\r\n\x1a\n')
+
+        # It's a picture: no periodogram is stored as data
+        self.assertFalse(ReducedDatum.objects.filter(data_type__startswith='periodogram').exists())
 
 class TestPyLIMAUtils(TestCase):
 
@@ -947,8 +969,20 @@ class TestRemoveSource(TestCase):
         self.other_model = PSPLModel.objects.create(
             event=self.other_event, model_type='PSPL microlensing', corner_plot=self.kept_plots[0])
 
-        self.removed = [self.used] + self.leftover + [self.used_plot] + self.leftover_plots
-        self.not_removed = self.kept + self.kept_plots
+        # And its periodogram: the picture the source refers to, and one left from before
+        self.used_periodogram = self.save_file('periodograms/2026/10/11/RemoveMe_periodogram.png')
+        self.leftover_periodograms = [self.save_file('periodograms/2026/10/08/RemoveMe_periodogram_Zq8xK1m.png')]
+        self.kept_periodograms = [
+            self.save_file('periodograms/2026/10/11/KeepMe_periodogram.png'),
+            self.save_file('periodograms/2026/10/11/RemoveMe2_periodogram.png'),   # another source, named alike
+            self.save_file('periodograms/2026/10/11/RemoveMe_periodogram.txt'),
+        ]
+        Target.objects.filter(pk=self.target.pk).update(periodogram=self.used_periodogram)
+        Target.objects.filter(pk=self.other.pk).update(periodogram=self.kept_periodograms[0])
+
+        self.removed = ([self.used] + self.leftover + [self.used_plot] + self.leftover_plots
+                        + [self.used_periodogram] + self.leftover_periodograms)
+        self.not_removed = self.kept + self.kept_plots + self.kept_periodograms
 
     def save_file(self, name):
         return default_storage.save(name, ContentFile(b'png'))
@@ -966,10 +1000,11 @@ class TestRemoveSource(TestCase):
 
         self.assertIn('4 thumbnail files (1 used by rows, 3 left by earlier ingests)', output)
         self.assertIn('3 corner plot files (1 used by rows, 2 left by earlier ingests)', output)
-        for name in [self.used, self.used_plot] + self.leftover + self.leftover_plots:
+        self.assertIn('2 periodogram files (1 used by rows, 1 left by earlier ingests)', output)
+        for name in self.removed:
             self.assertIn('would remove ' + name, output)
         self.assertNotIn('KeepMe', output)
-        self.assertEqual(self.exists(self.removed + self.not_removed), [True] * 14)
+        self.assertEqual(self.exists(self.removed + self.not_removed), [True] * (len(self.removed) + len(self.not_removed)))
         self.assertTrue(Target.objects.filter(name='RemoveMe').exists())
         self.assertTrue(PSPLModel.objects.filter(pk=self.model.pk).exists())
 
@@ -978,19 +1013,21 @@ class TestRemoveSource(TestCase):
 
         self.assertIn('4 thumbnail files', output)
         self.assertIn('3 corner plot files', output)
-        self.assertEqual(self.exists(self.removed), [False] * 7)
+        self.assertIn('2 periodogram files', output)
+        self.assertEqual(self.exists(self.removed), [False] * len(self.removed))
         self.assertFalse(Target.objects.filter(name='RemoveMe').exists())
         self.assertFalse(Event.objects.filter(pk=self.event.pk).exists())
         self.assertFalse(PSPLModel.objects.filter(pk=self.model.pk).exists())
 
         # Nothing of any other source, nor the files that only look similar
-        self.assertEqual(self.exists(self.not_removed), [True] * 7)
+        self.assertEqual(self.exists(self.not_removed), [True] * len(self.not_removed))
         self.assertTrue(Event.objects.filter(pk=self.other_event.pk).exists())
         self.assertTrue(PSPLModel.objects.filter(pk=self.other_model.pk).exists())
 
     def test_a_source_without_images(self):
         Event.objects.filter(pk=self.event.pk).update(thumbnail=None)
         EventModel.objects.filter(pk=self.model.pk).update(corner_plot=None)
+        Target.objects.filter(pk=self.target.pk).update(periodogram=None)
         for name in self.removed:
             default_storage.delete(name)
 
@@ -998,6 +1035,7 @@ class TestRemoveSource(TestCase):
 
         self.assertIn('0 thumbnail files', output)
         self.assertIn('0 corner plot files', output)
+        self.assertIn('0 periodogram files', output)
         self.assertFalse(Target.objects.filter(name='RemoveMe').exists())
 
     def test_unknown_source(self):
@@ -1425,6 +1463,228 @@ class TestTargetListFilters(TestCase):
 
     def test_the_coordinate_cone_search_still_works_in_a_query_string(self):
         self.assertEqual(self.found(cone_search='268.0, -29.0, 0.01'), ['ConeA', 'ConeB'])
+
+
+class TestPicturesAreReplaced(TestCase):
+    """
+    A source, event or model has one picture of each kind, and calculating it again replaces it: the
+    old file is removed, and the new one doesn't get a random suffix to its name for the storage not
+    having overwritten the old one. (Pictures used to pile up, one more for every calculation.)
+    """
+
+    def setUp(self):
+        self.media = tempfile.TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        settings_override = override_settings(MEDIA_ROOT=self.media.name)
+        settings_override.enable()
+        self.addCleanup(settings_override.disable)
+
+        self.target = Target.objects.create(name='ReplaceMe', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(
+            target=self.target, event_id='ReplaceMe_1', start_time=2461000.0, duration=1.0)
+
+    def files_under(self, directory):
+        """The names of all the files in a folder of the media, and its folders"""
+        found = []
+        for root, directories, files in os.walk(os.path.join(self.media.name, directory)):
+            found.extend(os.path.relpath(os.path.join(root, name), self.media.name) for name in files)
+        return sorted(found)
+
+    def png(self, text=b'x'):
+        return ContentFile(b'\x89PNG\r\n\x1a\n' + text)
+
+    def test_replace_image_file(self):
+        field = self.event.thumbnail
+
+        # The first picture
+        utils.replace_image_file(field, 'ReplaceMe_lc.png', self.png(b'first'))
+        first = field.name
+        self.assertTrue(first.startswith('event_thumbnails/') and first.endswith('/ReplaceMe_lc.png'))
+        self.assertEqual(self.files_under('event_thumbnails'), [first])
+
+        # Replaced the same day: the same name, with no suffix, and the one file
+        utils.replace_image_file(field, 'ReplaceMe_lc.png', self.png(b'second'))
+        self.assertEqual(field.name, first)
+        self.assertEqual(self.files_under('event_thumbnails'), [first])
+        with default_storage.open(first) as image:
+            self.assertTrue(image.read().endswith(b'second'))
+
+    def test_a_picture_from_an_earlier_day_is_removed(self):
+        old = default_storage.save('event_thumbnails/2020/01/01/ReplaceMe_lc.png', self.png(b'old'))
+        Event.objects.filter(pk=self.event.pk).update(thumbnail=old)
+        event = Event.objects.get(pk=self.event.pk)
+        self.assertEqual(self.files_under('event_thumbnails'), [old])
+
+        utils.replace_image_file(event.thumbnail, 'ReplaceMe_lc.png', self.png(b'new'))
+
+        # One file, and it's the new one, which is where the event now says its picture is
+        self.assertEqual(self.files_under('event_thumbnails'), [event.thumbnail.name])
+        self.assertNotEqual(event.thumbnail.name, old)
+        self.assertNotIn('2020/01/01', event.thumbnail.name)
+        self.assertNotRegex(event.thumbnail.name, r'_[A-Za-z0-9]{7}\.png$')   # no suffix
+
+    def test_a_picture_that_has_gone_is_no_problem(self):
+        Event.objects.filter(pk=self.event.pk).update(thumbnail='event_thumbnails/2020/01/01/gone.png')
+        event = Event.objects.get(pk=self.event.pk)
+
+        utils.replace_image_file(event.thumbnail, 'ReplaceMe_lc.png', self.png())
+
+        self.assertEqual(self.files_under('event_thumbnails'), [event.thumbnail.name])
+
+    def test_each_kind_of_picture_is_replaced_when_it_is_calculated_again(self):
+        # Thumbnail
+        PhotometryReducedDatum.objects.bulk_create([PhotometryReducedDatum(
+            target=self.target, source_name='Roman_F146', bandpass='F146', brightness=20.0, brightness_error=0.01,
+            timestamp=timezone.make_aware(Time(2461000.0 + i * 0.05, format='jd').datetime, datetime.timezone.utc),
+        ) for i in range(10)])
+        for _ in range(3):
+            event_functions.generate_event_lightcurves(Event.objects.get(pk=self.event.pk))
+        thumbnails = self.files_under('event_thumbnails')
+        self.assertEqual(thumbnails, [Event.objects.get(pk=self.event.pk).thumbnail.name])
+
+        # Periodogram
+        frequency = np.linspace(0.001, 10.0, 100)
+        for _ in range(3):
+            data_utils.generate_periodogram(Target.objects.get(pk=self.target.pk), np.ones(100), frequency)
+        self.assertEqual(self.files_under('periodograms'), [Target.objects.get(pk=self.target.pk).periodogram.name])
+
+        # Corner plot
+        model = PSPLModel.objects.create(event=self.event, model_type='PSPL microlensing')
+        results = {'samples': np.random.default_rng(3).normal(size=(200, 2)), 'sample_columns': [0, 1],
+                   'parameter_labels': ['a', 'b']}
+        for _ in range(3):
+            data_utils.generate_corner_plot(EventModel.objects.get(pk=model.pk), results, 'ReplaceMe_PSPL_corner_plot.png')
+        self.assertEqual(self.files_under('eventmodel_plots'), [EventModel.objects.get(pk=model.pk).corner_plot.name])
+        self.assertNotRegex(thumbnails[0], r'_[A-Za-z0-9]{7}\.png$')
+
+
+class TestPeriodogramImage(TestCase):
+    """
+    The periodogram is calculated and drawn once, as a picture kept with the source. (It isn't stored
+    as data to plot again: there's a point for every frequency on a fine grid, over half a million
+    for a long lightcurve, and most sources have nothing in them.)
+    """
+
+    PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
+
+    def setUp(self):
+        self.media = tempfile.TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        settings_override = override_settings(MEDIA_ROOT=self.media.name)
+        settings_override.enable()
+        self.addCleanup(settings_override.disable)
+
+        self.target = Target.objects.create(name='PeriodicTarget', ra=10.0, dec=10.0)
+
+    def lightcurve(self, n=400, period=2.5):
+        t = np.sort(np.random.default_rng(1).uniform(0.0, 100.0, n))
+        return np.column_stack([t, 20.0 + 0.1 * np.sin(2 * np.pi * t / period), np.full(n, 0.01)])
+
+    def assertIsPNG(self, name):
+        with default_storage.open(name) as image:
+            self.assertEqual(image.read(8), self.PNG_SIGNATURE)
+
+    def test_calc_periodogram_draws_it_and_keeps_the_picture_with_the_source(self):
+        diagnostics_found = variable_stars.calc_periodogram(self.target, self.lightcurve(), {})
+
+        # The periodogram's peak is that of the signal
+        self.assertAlmostEqual(diagnostics_found['period'], 2.5, delta=0.05)
+        self.assertGreater(diagnostics_found['max_peak_periodogram'], 0.5)
+
+        stored = Target.objects.get(pk=self.target.pk).periodogram
+        self.assertTrue(stored.name.startswith('periodograms/'))
+        self.assertIn('PeriodicTarget_periodogram', stored.name)
+        self.assertTrue(stored.name.endswith('.png'))
+        self.assertIsPNG(stored.name)
+
+    def test_the_picture_has_a_log_frequency_axis_and_is_not_cut_off(self):
+        drawn = []
+        real_close = data_utils.plt.close
+        real_savefig = matplotlib.figure.Figure.savefig
+        saved_with = {}
+
+        def savefig(figure, *args, **kwargs):
+            saved_with.update(kwargs)
+            return real_savefig(figure, *args, **kwargs)
+
+        with mock.patch.object(data_utils.plt, 'close', side_effect=lambda figure: (drawn.append(figure), real_close(figure))), \
+                mock.patch.object(matplotlib.figure.Figure, 'savefig', autospec=True, side_effect=savefig):
+            data_utils.generate_periodogram(self.target, np.ones(50), np.linspace(0.001, 10.0, 50))
+
+        axes = drawn[0].axes[0]
+        self.assertEqual(axes.get_xscale(), 'log')
+        self.assertEqual(axes.get_xlabel(), 'Frequency [1/day]')
+        self.assertEqual(axes.get_ylabel(), 'Power')
+        # The tick labels of the y axis, and the x label, are otherwise cut off
+        self.assertEqual(saved_with.get('bbox_inches'), 'tight')
+
+    def test_the_periodogram_is_not_kept_as_data(self):
+        variable_stars.calc_periodogram(self.target, self.lightcurve(), {})
+
+        self.assertFalse(ReducedDatum.objects.filter(data_type__startswith='periodogram').exists())
+
+    def test_nothing_is_drawn_for_a_short_lightcurve(self):
+        diagnostics_found = variable_stars.calc_periodogram(self.target, self.lightcurve(n=9), {})
+
+        self.assertEqual(diagnostics_found, {})
+        self.assertFalse(Target.objects.get(pk=self.target.pk).periodogram)
+        self.assertEqual(variable_stars.calc_periodogram(self.target, None, {}), {})
+
+    def test_calculating_it_again_replaces_the_picture(self):
+        variable_stars.calc_periodogram(self.target, self.lightcurve(period=2.5), {})
+        first = Target.objects.get(pk=self.target.pk).periodogram.name
+        with default_storage.open(first) as image:
+            first_picture = image.read()
+
+        diagnostics_found = variable_stars.calc_periodogram(self.target, self.lightcurve(period=7.0), {})
+
+        # The same file, with the new picture in it, and no other
+        second = Target.objects.get(pk=self.target.pk).periodogram.name
+        self.assertEqual(second, first)
+        self.assertIsPNG(second)
+        with default_storage.open(second) as image:
+            self.assertNotEqual(image.read(), first_picture)
+        self.assertEqual(default_storage.listdir(os.path.dirname(second))[1], [os.path.basename(second)])
+        self.assertAlmostEqual(diagnostics_found['period'], 7.0, delta=0.2)
+
+
+@override_settings(TOM_MFA_REQUIRED=None)
+class TestPeriodogramTab(TestCase):
+    """The Periodogram tab of the source detail page shows the picture"""
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_superuser('periodogram_user', password='x'))
+        self.target = Target.objects.create(name='TabTarget', ra=10.0, dec=10.0, type='SIDEREAL')
+
+    def get_pane(self):
+        html = self.client.get(reverse('targets:detail', kwargs={'pk': self.target.pk})).content.decode()
+        self.assertIn('id="periodogram-tab"', html)
+        start = html.index('id="periodogram"')
+        return html[start:html.index('id="manage-data"', start)], html
+
+    def test_the_picture_is_shown(self):
+        Target.objects.filter(pk=self.target.pk).update(periodogram='periodograms/2026/10/12/TabTarget_periodogram.png')
+
+        pane, html = self.get_pane()
+
+        self.assertIn('<img src="/data/periodograms/2026/10/12/TabTarget_periodogram.png"', pane)
+        self.assertIn('alt="Source periodogram"', pane)
+        self.assertNotIn('No periodogram available', pane)
+
+    def test_without_a_periodogram(self):
+        pane, html = self.get_pane()
+
+        self.assertIn('No periodogram available', pane)
+        self.assertNotIn('<img', pane)
+
+    def test_the_picture_is_part_of_the_page(self):
+        # Not loaded separately: there's nothing to fetch but the picture itself
+        pane, html = self.get_pane()
+
+        self.assertNotIn('hx-get', pane)
+        self.assertNotIn('target-periodogram', html)
+        with self.assertRaises(NoReverseMatch):
+            reverse('target-periodogram:tab')
 
 
 class TestJPLQueryRetries(TestCase):

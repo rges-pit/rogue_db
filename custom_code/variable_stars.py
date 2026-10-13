@@ -1,5 +1,4 @@
 from custom_code.models import VariableStar, SourceDiagnostics
-from custom_code.target_models import RogueTarget
 from custom_code import data_utils
 from astropy.coordinates import SkyCoord
 from astropy import units as u
@@ -81,5 +80,7 @@ def calc_periodogram(target, lightcurve, diagnostics):
 
     diagnostics['max_peak_periodogram'] = max_peak
     diagnostics['period'] = period
+
+    data_utils.generate_periodogram(target, power, frequency)
 
     return diagnostics

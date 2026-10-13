@@ -4,6 +4,8 @@ import logging
 from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, EventModel,
                                 DavenportFlareModel, PitkinFlareModel,
                                 Event)
+from tom_targets.models import Target
+from custom_code import utils
 from django.core.files.base import ContentFile
 import io
 from datetime import datetime, UTC
@@ -310,6 +312,30 @@ def store_model_lightcurve(event, results, model_type):
             rd.save()
             logger.info('Updated existing ' + model_type + ' lightcurve model datum for ' + event.target.name)
 
+def generate_periodogram(source, power, frequency):
+    """
+    Function to draw the periodogram for a source, and keep the picture with the source. The picture
+    of an earlier calculation is replaced.
+    """
+
+    fig, ax = plt.subplots(1, 1, figsize=(6,5))
+    ax.plot(frequency, power, 'k-', linewidth=0.5)
+    # The frequencies run over decades, a fine grid of them over half a million, and what there
+    # is to see is at the low frequencies, the long periods, at the left
+    ax.set_xscale('log')
+    ax.set_xlabel('Frequency [1/day]')
+    ax.set_ylabel('Power')
+
+    # bbox_inches='tight': the tick labels of the y axis and the x label are otherwise cut off
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(fig)
+
+    file_name = source.name + '_periodogram.png'
+    utils.replace_image_file(source.periodogram, file_name, ContentFile(buf.getvalue()))
+    Target.objects.filter(pk=source.pk).update(periodogram=source.periodogram.name)
+
+    logger.info('Created periodogram picture for ' + source.name)
 
 def store_microlensing_model_parameters(event, pylima_results):
     """Function to store the fitted model parameters in the TOM"""
@@ -618,7 +644,7 @@ def generate_corner_plot(emodel, results, file_name):
         fig.savefig(buf, format='png')
         plt.close(fig)
 
-        emodel.corner_plot.save(file_name, ContentFile(buf.getvalue()), save=False)
+        utils.replace_image_file(emodel.corner_plot, file_name, ContentFile(buf.getvalue()))
         EventModel.objects.filter(pk=emodel.pk).update(corner_plot=emodel.corner_plot.name)
 
     elif emodel and emodel.corner_plot:

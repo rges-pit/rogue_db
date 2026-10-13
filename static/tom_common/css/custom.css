@@ -254,6 +254,14 @@ li {
   margin-top: 4px;
 }
 
+.periodogram-plot {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--bs-border-radius);
+  margin-top: 4px;
+}
+
 .table {
   border-radius: var(--bs-border-radius);
   overflow: hidden;

@@ -50,6 +50,7 @@ class RogueTarget(BaseTarget):
     nearest_variable_type = models.CharField(max_length=30, default='', null=True, blank=True)
     max_peak_periodogram = models.FloatField(null=True, blank=True)
     period = models.FloatField(null=True, blank=True)
+    periodogram = models.ImageField(upload_to='periodograms/%Y/%m/%d/', null=True, blank=True)
 
     class Meta:
         verbose_name = "target"

@@ -1,5 +1,38 @@
 import numpy as np
 
+
+def replace_image_file(file_field, filename, content):
+    """
+    Save content as the picture of an image field of an instance (its FieldFile, such as an event's
+    thumbnail), in place of the picture the field already has. A source, event or model has one picture
+    of each kind, and calculating it again replaces it.
+
+    Saving the new one beside the old doesn't do that: the storage doesn't overwrite a file, but adds
+    a random suffix to the name of a new one if it's taken, so every calculation left a file behind
+    that nothing referred to. The old file is removed here: one of the same name (from earlier the
+    same day, as the name has the date in it) before the new one is saved, so that it gets the name
+    without a suffix; and one under another name (from an earlier day) after, so that if saving fails
+    the field is left with the picture it had.
+
+    The instance isn't saved (save=False): the caller does, in the way that suits it.
+
+    :param file_field: the FieldFile, e.g. event.thumbnail
+    :param filename: the name for the file, without the field's upload_to directory
+    :param content: a File, such as django.core.files.base.ContentFile, of the picture
+    """
+    storage = file_field.storage
+    old_name = file_field.name or None
+
+    new_name = file_field.field.generate_filename(file_field.instance, filename)
+    if storage.exists(new_name):
+        storage.delete(new_name)
+
+    file_field.save(filename, content, save=False)
+
+    if old_name and old_name != file_field.name and storage.exists(old_name):
+        storage.delete(old_name)
+
+
 def get_zeropoint():
     """
     Function to set the photometric zeropoint used to convert between magnitudes and flux

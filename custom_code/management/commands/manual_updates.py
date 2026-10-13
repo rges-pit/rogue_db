@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from custom_code.models import Event, SourceDiagnostics
-from custom_code import variable_stars
+from custom_code import variable_stars, source_functions
 from custom_code import serializers, data_utils
 from tom_targets.models import Target
 from django.db.models import F
@@ -16,10 +16,11 @@ class Command(BaseCommand):
         #updated = Event.objects.update(duration=F('duration') * 2)
         #updated = Target.objects.update(mag_now_passband='Roman F146')
         #print(f'Updated {updated} targets')
-        #qs = Target.objects.all()
-        #for t in qs:
-        #    variable_stars.calc_periodogram(t)
-        qs = SourceDiagnostics.objects.all()
-        for e in qs:
-            e.baseline_mag_passband = 'Roman_F146'
-            e.save()
+        qs = Target.objects.all()
+        for t in qs:
+            source_functions.run_source_diagnostics(t)
+
+        #qs = SourceDiagnostics.objects.all()
+        #for e in qs:
+        #    e.baseline_mag_passband = 'Roman_F146'
+        #    e.save()
