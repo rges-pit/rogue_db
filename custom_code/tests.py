@@ -747,6 +747,41 @@ class TestFlareFitFunctions(TestCase):
         self.assertTrue(self.test_event.start_time <= results['t_peak'] <= tmax)
 
 @override_settings(TOM_MFA_REQUIRED=None)
+class TestEventAlertsPanel(TestCase):
+    """The alert parameters on the event page are styled as the event and model parameters are"""
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_user('alerts_user'))
+        target = Target.objects.create(name='AlertsPanelTarget', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(target=target, event_id='EVP_1', start_time=2460000.0, duration=2.0)
+
+    def get_panel(self):
+        response = self.client.get(reverse('events:alerts'), {'event': self.event.pk},
+                                   headers={'HX-Request': 'true'})
+        self.assertEqual(response.status_code, 200)
+        return response.content.decode()
+
+    def test_one_group_of_values_per_alert(self):
+        for alert_id, origin in ((1, 'MSOS'), (2, 'Aethra')):
+            RGESAlert.objects.create(alert_id=alert_id, roman_id='ROMAN-EVP_1', event=self.event,
+                                     alert_origin=origin, alert_t0=2460001.5, alert_tE=12.0)
+        html = self.get_panel()
+
+        self.assertIn('event-params-panel', html)
+        self.assertEqual(html.count('event-params-group"'), 2)
+        self.assertIn('MSOS alert parameters', html)
+        self.assertIn('Aethra alert parameters', html)
+        self.assertIn('2460001.50000', html)
+        self.assertNotIn('<table', html)
+
+    def test_no_alerts(self):
+        html = self.get_panel()
+
+        self.assertIn('No alerts for this event yet', html)
+        self.assertNotIn('<table', html)
+
+
+@override_settings(TOM_MFA_REQUIRED=None)
 class TestGeneralSearch(TestCase):
     """The general search box on the Events and Alerts pages"""
 
@@ -948,36 +983,56 @@ class TestEventThumbnailSurvivesModeling(TestCase):
         for name, value in expected.items():
             self.assertAlmostEqual(getattr(stored, name), value, msg=name)
 
-    def test_goodness_of_fit_comparisons(self):
+    def test_straight_line_comparisons(self):
         straight_line = StraightLineModel(model_type='Straight line', chisq=100.0, BIC=110.0)
-        davenport = DavenportFlareModel(model_type='Davenport flare', chisq=60.0, BIC=70.0)
         cases = [
-            (PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0), straight_line,
+            (PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0),
              dict(delta_chi2_PSPL=-60.0, delta_BIC_PSPL=-65.0)),
-            (FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0), straight_line,
+            (FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0),
              dict(delta_chi2_FSPL=-70.0, delta_BIC_FSPL=-75.0)),
-            (PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0), davenport,
-             dict(delta_chi2_PSPL_bestflare=-20.0, delta_BIC_PSPL_bestflare=-25.0)),
-            (FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0), davenport,
-             dict(delta_chi2_FSPL_bestflare=-30.0, delta_BIC_FSPL_bestflare=-35.0)),
         ]
-        for model1, model2, expected in cases:
-            with self.subTest(model=model1.model_type, against=model2.model_type):
-                diagnostics.compare_model_goodness_of_fit(self.event, model1, model2)
+        for mulens, expected in cases:
+            with self.subTest(model=mulens.model_type):
+                diagnostics.compare_mulens_with_straightline(self.event, mulens, straight_line)
                 self.assertThumbnailKept(**expected)
 
     def test_flare_model_comparisons(self):
-        davenport = DavenportFlareModel(model_type='Davenport flare', chisq=60.0, BIC=70.0)
-        pitkin = PitkinFlareModel(model_type='Pitkin flare', chisq=80.0, BIC=90.0)
-        for mulens, expected in [
-            (PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0),
-             dict(delta_chi2_PSPL_bestflare=-20.0, delta_BIC_PSPL_bestflare=-25.0)),
-            (FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0),
-             dict(delta_chi2_FSPL_bestflare=-30.0, delta_BIC_FSPL_bestflare=-35.0)),
-        ]:
-            with self.subTest(model=mulens.model_type):
-                diagnostics.compare_flare_models(self.event, mulens, davenport, pitkin)
-                self.assertThumbnailKept(**expected)
+        pspl = PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0)
+        fspl = FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0)
+        # The better flare model, by reduced chisq, is the one the microlensing models are compared with
+        davenport = DavenportFlareModel(model_type='Davenport flare', chisq=60.0, BIC=70.0, red_chisq=1.1)
+        pitkin = PitkinFlareModel(model_type='Pitkin flare', chisq=80.0, BIC=90.0, red_chisq=1.9)
+
+        diagnostics.compare_flare_models(self.event, pspl, fspl, davenport, pitkin)
+
+        self.assertThumbnailKept(
+            delta_chi2_PSPL_bestflare=-20.0, delta_BIC_PSPL_bestflare=-25.0,
+            delta_chi2_FSPL_bestflare=-30.0, delta_BIC_FSPL_bestflare=-35.0,
+        )
+        self.assertEqual(Event.objects.get(pk=self.event.pk).bestflare_model_type.strip(), 'Davenport')
+
+    def test_best_flare_model_is_the_lower_reduced_chisq(self):
+        pspl = PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0)
+        fspl = FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0)
+        davenport = DavenportFlareModel(model_type='Davenport flare', chisq=60.0, BIC=70.0, red_chisq=2.5)
+        pitkin = PitkinFlareModel(model_type='Pitkin flare', chisq=80.0, BIC=90.0, red_chisq=1.5)
+
+        diagnostics.compare_flare_models(self.event, pspl, fspl, davenport, pitkin)
+
+        self.assertThumbnailKept(delta_chi2_PSPL_bestflare=-40.0, delta_BIC_PSPL_bestflare=-45.0)
+        self.assertEqual(Event.objects.get(pk=self.event.pk).bestflare_model_type.strip(), 'Pitkin')
+
+    def test_microlensing_diagnostics(self):
+        pspl = PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0, red_chisq=1.4)
+        fspl = FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0, red_chisq=1.2)
+        straight_line = StraightLineModel(model_type='Straight line', chisq=100.0, BIC=110.0)
+
+        diagnostics.calc_mulens_diagnostics(self.event, pspl, fspl, straight_line)
+
+        self.assertThumbnailKept(
+            delta_chi2_PSPL=-60.0, delta_BIC_PSPL=-65.0, delta_chi2_FSPL=-70.0, delta_BIC_FSPL=-75.0,
+        )
+        self.assertEqual(Event.objects.get(pk=self.event.pk).bestmulens_model_type.strip(), 'FSPL')
 
     def test_baseline_diagnostics(self):
         data_utils.store_baseline_diagnostics(self.event, {

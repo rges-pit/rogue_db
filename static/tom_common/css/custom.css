@@ -222,6 +222,11 @@ li {
   padding-bottom: 4px;
 }
 
+/* A value that is wider than the others (a timestamp) takes two columns */
+.event-params-cell--wide {
+  grid-column: span 2;
+}
+
 /* Spans the full grid width so the cell sits alone on its own row --
    used for blend parameters, which can hold several sub-values and reads
    better as one wide line at the end of the table than sharing a column. */

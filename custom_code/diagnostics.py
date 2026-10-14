@@ -12,39 +12,37 @@ def calc_mulens_diagnostics(event, pspl_model, fspl_model, straightline_model):
     Function to compare the results of PyLIMA model fits for PSPL and FSPL
     for a single event
     """
+    best_mulens = get_best_event_model(pspl_model, fspl_model)
+    if best_mulens:
+        event.bestmulens_model_type = str(best_mulens.model_type).replace('microlensing','').strip()
+        event.save(update_fields=['bestmulens_model_type'])
+
     if pspl_model and straightline_model:
-        compare_model_goodness_of_fit(event, pspl_model, straightline_model)
+        compare_mulens_with_straightline(event, pspl_model, straightline_model)
 
     if fspl_model and straightline_model:
-        compare_model_goodness_of_fit(event, fspl_model, straightline_model)
+        compare_mulens_with_straightline(event, fspl_model, straightline_model)
 
-def get_best_mulens_model(pspl_model, fspl_model):
+def get_best_event_model(model1, model2):
     """
     Function returns the microlensing model with the lowest reduced chisq.
     """
 
-    if pspl_model and fspl_model:
-        if pspl_model.red_chisq <= fspl_model.red_chisq:
-            best_model = pspl_model
+    if model1 and model2:
+        if getattr(model1, 'red_chisq') <= getattr(model2, 'red_chisq'):
+            best_model = model1
         else:
-            best_model = fspl_model
+            best_model = model2
+    elif model1 and not model2:
+        best_model = model1
+    elif model2 and not model1:
+        best_model = model2
     else:
         best_model = None
 
     return best_model
 
-def calc_flare_diagnostics(event, best_mulens, davenport_model, pitkin_model):
-    """
-    Function to compare the flare model fits with the best fitting microlensing model
-    """
-
-    if best_mulens and davenport_model:
-        compare_model_goodness_of_fit(event, best_mulens, davenport_model)
-
-    if best_mulens and pitkin_model:
-        compare_model_goodness_of_fit(event, best_mulens, pitkin_model)
-
-def compare_model_goodness_of_fit(event, model1, model2):
+def compare_mulens_with_straightline(event, model1, model2):
     """
     Function to compare the goodness-of-fit parameters for the two models given.
     The models are order so that the straight line model is always second
@@ -65,16 +63,8 @@ def compare_model_goodness_of_fit(event, model1, model2):
         event.delta_chi2_FSPL = delta_chisq
         event.delta_BIC_FSPL = delta_bic
         event.save(update_fields=['delta_chi2_FSPL', 'delta_BIC_FSPL'])
-    elif model1.model_type == 'PSPL microlensing' and model2.model_type == 'Davenport flare':
-        event.delta_chi2_PSPL_bestflare = delta_chisq
-        event.delta_BIC_PSPL_bestflare = delta_bic
-        event.save(update_fields=['delta_chi2_PSPL_bestflare', 'delta_BIC_PSPL_bestflare'])
-    elif model1.model_type == 'FSPL microlensing' and model2.model_type == 'Davenport flare':
-        event.delta_chi2_FSPL_bestflare = delta_chisq
-        event.delta_BIC_FSPL_bestflare = delta_bic
-        event.save(update_fields=['delta_chi2_FSPL_bestflare', 'delta_BIC_FSPL_bestflare'])
 
-def compare_flare_models(event, mulens_model, davenport_model, pitkin_model):
+def compare_flare_models(event, pspl_model, fspl_model, davenport_model, pitkin_model):
     """
     Function to compare the results of fitting different flare models to this event,
     and to calculate the diagnostics comparing the flare models with microlensing models
@@ -86,22 +76,22 @@ def compare_flare_models(event, mulens_model, davenport_model, pitkin_model):
         pitkin_model      EventModel        results of Pitkin model fit
     """
 
-    if davenport_model.chisq <= pitkin_model.chisq:
-        best_flare = davenport_model
-    else:
-        best_flare = pitkin_model
+    best_flare = get_best_event_model(davenport_model, pitkin_model)
+    if not best_flare:
+        return
+    event.bestflare_model_type = str(best_flare.model_type).replace('flare','').strip()
 
-    delta_chisq = mulens_model.chisq - best_flare.chisq
-    delta_bic = mulens_model.BIC - best_flare.BIC
-
-    if mulens_model.model_type == 'PSPL microlensing':
-        event.delta_chi2_PSPL_bestflare = delta_chisq
-        event.delta_BIC_PSPL_bestflare = delta_bic
-        event.save(update_fields=['delta_chi2_PSPL_bestflare', 'delta_BIC_PSPL_bestflare'])
-    elif mulens_model.model_type == 'FSPL microlensing':
-        event.delta_chi2_FSPL_bestflare = delta_chisq
-        event.delta_BIC_FSPL_bestflare = delta_bic
-        event.save(update_fields=['delta_chi2_FSPL_bestflare', 'delta_BIC_FSPL_bestflare'])
+    if pspl_model:
+        event.delta_chi2_PSPL_bestflare = pspl_model.chisq - best_flare.chisq
+        event.delta_BIC_PSPL_bestflare = pspl_model.BIC - best_flare.BIC
+    if fspl_model:
+        event.delta_chi2_FSPL_bestflare = fspl_model.chisq - best_flare.chisq
+        event.delta_BIC_FSPL_bestflare = fspl_model.BIC - best_flare.BIC
+    event.save(update_fields=[
+        'delta_chi2_PSPL_bestflare', 'delta_BIC_PSPL_bestflare',
+        'delta_chi2_FSPL_bestflare', 'delta_BIC_FSPL_bestflare',
+        'bestflare_model_type'
+    ])
 
 def calc_npoints_above_baseline(lcevent, baseline_lightcurve, event_lightcurve):
     """

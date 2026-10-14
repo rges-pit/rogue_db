@@ -110,7 +110,7 @@ def run_event_modeling(lcevent):
     diagnostics.calc_mulens_diagnostics(
         lcevent, pspl_model, fspl_model, straightline_model
     )
-    best_mulens = diagnostics.get_best_mulens_model(pspl_model, fspl_model)
+    best_mulens = diagnostics.get_best_event_model(pspl_model, fspl_model)
     data_utils.generate_corner_plot(
         pspl_model, pylima_results['pspl'],
         event_file_stem(lcevent) + '_PSPL_corner_plot.png'
@@ -135,7 +135,7 @@ def run_event_modeling(lcevent):
         lcevent, pitkin_results
     )
     data_utils.store_model_lightcurve(lcevent, pitkin_results, 'pitkin_flare')
-    diagnostics.calc_flare_diagnostics(lcevent, best_mulens, davenport_flare, pitkin_flare)
+    diagnostics.compare_flare_models(lcevent, pspl_model, fspl_model, davenport_flare, pitkin_flare)
     data_utils.generate_corner_plot(
         pitkin_flare, pitkin_results,
         event_file_stem(lcevent) + '_pitkin_corner_plot.png'

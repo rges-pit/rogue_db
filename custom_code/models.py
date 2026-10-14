@@ -65,6 +65,8 @@ class Event(models.Model):
     delta_BIC_PSPL_bestflare = models.FloatField(null=True, blank=True)
     delta_chi2_FSPL_bestflare = models.FloatField(null=True, blank=True)
     delta_BIC_FSPL_bestflare = models.FloatField(null=True, blank=True)
+    bestmulens_model_type = models.CharField(max_length=30, null=True, blank=True)
+    bestflare_model_type = models.CharField(max_length=30, null=True, blank=True)
     DIA_centroid_shift = models.FloatField(null=True, blank=True)
     PSF_centroid_shift = models.FloatField(null=True, blank=True)
     Nlinked_events = models.IntegerField(default=0, null=True, blank=True)

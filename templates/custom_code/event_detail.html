@@ -85,14 +85,18 @@
                 <div class="event-params-value">{{event.frac_below_baseline|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Max below baseline</div>
+                <div class="event-params-key">Max below base [mag]</div>
                 <div class="event-params-value">{{event.max_excursion_below_baseline|floatformat:3}}</div>
               </div>
             </div>
           </div>
 
           <div class="event-params-group">
-            <div class="event-params-grid">
+            <div class="event-params-grid ">
+              <div class="event-params-cell">
+                <div class="event-params-key">Best &mu;lens</div>
+                <div class="event-params-value">{{event.bestmulens_model_type}}</div>
+              </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;&chi;&sup2; PSPL</div>
                 <div class="event-params-value">{{event.delta_chi2_PSPL|floatformat:3}}</div>
@@ -109,18 +113,36 @@
                 <div class="event-params-key">&Delta;BIC FSPL</div>
                 <div class="event-params-value">{{event.delta_BIC_FSPL|floatformat:3}}</div>
               </div>
+            </div>
+          </div>
+
+          <div class="event-params-group">
+            <div class="event-params-grid ">
+              <div class="event-params-cell">
+                <div class="event-params-key">Best flare</div>
+                <div class="event-params-value">{{event.bestflare_model_type}}</div>
+              </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;&chi;&sup2; PSPL best flare</div>
                 <div class="event-params-value">{{event.delta_chi2_PSPL_bestflare|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
+                <div class="event-params-key">&Delta;BIC PSPL best flare</div>
+                <div class="event-params-value">{{event.delta_BIC_PSPL|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
                 <div class="event-params-key">&Delta;&chi;&sup2; FSPL best flare</div>
                 <div class="event-params-value">{{event.delta_chi2_FSPL_bestflare|floatformat:3}}</div>
+              </div>
+              <div class="event-params-cell">
+                <div class="event-params-key">&Delta;BIC FSPL best flare</div>
+                <div class="event-params-value">{{event.delta_BIC_FSPL|floatformat:3}}</div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
       <div class="row">
         <div class="col-md dashboard-panel" id="event-model-parameters-col">
           <div class="htmx-indicator text-center my-4" id="event-model-parameters-progress">
