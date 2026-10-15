@@ -1,4 +1,5 @@
 from django.contrib.auth.models import User
+from django.db import IntegrityError, transaction
 from django.http import QueryDict
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import NoReverseMatch, reverse
@@ -21,7 +22,12 @@ from custom_code import (pylima_fit_functions, general_fit_functions, utils,
                          flare_fit_functions, data_utils, variable_stars, diagnostics)
 import datetime
 import importlib
+import json
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
 import os
+import subprocess
+import sys
 import matplotlib
 import matplotlib.figure
 import posixpath
@@ -73,7 +79,7 @@ def create_test_target_with_photometry(name='TestObject'):
     PhotometryReducedDatum.objects.bulk_create(datums)
     e = Event.objects.create(
         target=t,
-        event_id='test_event',
+        event_id='test_event' if name == 'TestObject' else 'test_event_' + name,   # Unique, as the database requires
         start_time=jd_start_time + ((20*interval) / (24.0 * 60.0)),
         duration=240 / (24.0 * 60.0),  # Units of days
         peak_mag=16.0
@@ -380,8 +386,10 @@ class TestFitStartingValues(TestCase):
         self.target, self.event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
 
     def make_alert(self, t0, u0, tE, **kwargs):
+        # Each alert has its own ID, as the database requires
+        alert_id = RGESAlert.objects.count() + 1
         return RGESAlert.objects.create(
-            alert_id=1, roman_id='ROMAN-X', event=self.event, alert_t0=t0, alert_u0=u0, alert_tE=tE, **kwargs)
+            alert_id=alert_id, roman_id='ROMAN-X', event=self.event, alert_t0=t0, alert_u0=u0, alert_tE=tE, **kwargs)
 
     def test_guess_and_boundaries_from_the_alert(self):
         self.make_alert(2460010.0, 0.25, 8.0)
@@ -483,7 +491,7 @@ class TestPyLIMAUtils(TestCase):
         test_tel = telescopes.Telescope(name='NONE',
                                        camera_filter='I',
                                        pixel_scale=1,
-                                       lightcurve=np.empty())
+                                       lightcurve=np.empty(0))
 
         model_fit = create_test_model_fit(test_event, pspl_model)
 
@@ -1043,6 +1051,39 @@ class TestEventThumbnailSurvivesModeling(TestCase):
             'frac_below_baseline': 0.4, 'max_excursion_below_baseline': -0.3, 'Npoint_above_3sigma': 7,
         })
         self.assertThumbnailKept(frac_below_baseline=0.4, max_excursion_below_baseline=-0.3, Npoint_above_3sigma=7)
+
+
+class TestIngestAlertsWorkers(TestCase):
+    """
+    The workers of ingest_alerts are new interpreters (macOS starts them by "spawn"). Each imports the
+    command's module to find the function it is to run before its initializer sets Django up, so that
+    module mustn't import models at the top.
+    """
+
+    MODULE = 'custom_code.management.commands.ingest_alerts'
+
+    def test_module_imports_before_django_is_set_up(self):
+        result = subprocess.run(
+            [sys.executable, '-c', 'import ' + self.MODULE],
+            capture_output=True, text=True, env=os.environ, cwd=os.getcwd(),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr[-1500:])
+
+    def test_spawned_worker_runs_the_ingest_function(self):
+        from custom_code.management.commands import ingest_alerts
+
+        # A file that isn't there: the worker gets as far as opening it, past the imports of
+        # models, and says so, rather than dying as the pool does when its workers can't start.
+        # Nothing is ingested, so the database isn't touched.
+        with ProcessPoolExecutor(
+            max_workers=1, mp_context=multiprocessing.get_context('spawn'),
+            initializer=ingest_alerts._init_worker,
+        ) as executor:
+            future = executor.submit(ingest_alerts.ingest_alert_and_model_event, '/nowhere/alert.json')
+
+            with self.assertRaises(FileNotFoundError):
+                future.result(timeout=120)
 
 
 class TestRemoveSource(TestCase):
@@ -2097,6 +2138,90 @@ class TestIngestAlert(AlertPacketMixin, TestCase):
         self.ingest(other)
         self.assertEqual(RGESAlert.objects.count(), 2)
         self.assertEqual(Event.objects.count(), 2)
+
+
+class TestIngestUniqueness(AlertPacketMixin, TestCase):
+    """
+    The ingest looks an event and an alert up by their identity, and makes them if they aren't there.
+    With two ingests running at once (parallel workers) both can find nothing and go on to make
+    one, which only the database can prevent.
+    """
+
+    def setUp(self):
+        self.target = Target.objects.create(name='UniqueTarget', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(
+            target=self.target, event_id='UniqueTarget_1', start_time=2460000.0, duration=2.0)
+        self.alert = RGESAlert.objects.create(
+            alert_id=1, roman_id='UniqueTarget', event=self.event, alert_origin='MSOS')
+
+    def test_an_event_id_is_used_once(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Event.objects.create(target=self.target, event_id='UniqueTarget_1', start_time=1.0, duration=1.0)
+
+        # ...and the ingest, having lost the race to make it, finds the one that won
+        found, created = Event.objects.get_or_create(event_id='UniqueTarget_1', defaults=dict(target=self.target))
+        self.assertFalse(created)
+        self.assertEqual(found.pk, self.event.pk)
+
+    def test_an_alert_is_recorded_once(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            RGESAlert.objects.create(alert_id=1, roman_id='UniqueTarget', event=self.event, alert_origin='MSOS')
+
+        # Different in any of the four is a different alert
+        self.assertEqual(RGESAlert.objects.count(), 1)
+        RGESAlert.objects.create(alert_id=2, roman_id='UniqueTarget', event=self.event, alert_origin='MSOS')
+        RGESAlert.objects.create(alert_id=1, roman_id='UniqueTarget', event=self.event, alert_origin='Aethra')
+        other = Event.objects.create(target=self.target, event_id='UniqueTarget_2', start_time=1.0, duration=1.0)
+        RGESAlert.objects.create(alert_id=1, roman_id='UniqueTarget', event=other, alert_origin='MSOS')
+        self.assertEqual(RGESAlert.objects.count(), 4)
+
+    def test_events_without_an_id_are_not_the_same_event(self):
+        Event.objects.create(target=self.target, start_time=1.0, duration=1.0)
+        Event.objects.create(target=self.target, start_time=2.0, duration=1.0)
+
+        self.assertEqual(Event.objects.filter(event_id=None).count(), 2)
+
+
+class TestIngestAlertsCommand(AlertPacketMixin, TestCase):
+    """The function each worker of ingest_alerts runs, for one alert file"""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.alert_file = os.path.join(self.directory.name, 'alert.json')
+        with open(self.alert_file, 'w') as f:
+            json.dump(self.packet(), f)
+
+    def ingest(self):
+        from custom_code.management.commands import ingest_alerts
+        with mock.patch.object(event_functions, 'run_event_modeling') as modeling:
+            result = ingest_alerts.ingest_alert_and_model_event(self.alert_file)
+        return result, modeling
+
+    def test_an_alert_ingested_before_is_modeled_again(self):
+        first, first_modeling = self.ingest()
+        second, second_modeling = self.ingest()
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+        self.assertEqual(RGESAlert.objects.count(), 1)
+        self.assertEqual(Event.objects.count(), 1)
+        self.assertEqual(PhotometryReducedDatum.objects.count(), 3 * 60)
+        # The event modeled is the one that's in the database
+        event = Event.objects.get()
+        self.assertEqual(first_modeling.call_args.args, (event,))
+        self.assertEqual(second_modeling.call_args.args, (event,))
+
+    def test_a_failed_ingest_is_not_modeled(self):
+        from custom_code.management.commands import ingest_alerts
+        from django.db.utils import IntegrityError
+
+        with mock.patch.object(MSOSAlertSerializer, 'save', side_effect=IntegrityError('clash')), \
+                mock.patch.object(event_functions, 'run_event_modeling') as modeling:
+            with self.assertRaises(IntegrityError):
+                ingest_alerts.ingest_alert_and_model_event(self.alert_file)
+
+        modeling.assert_not_called()
 
 
 class TestIngestTaskOrdering(AlertPacketMixin, TransactionTestCase):

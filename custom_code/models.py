@@ -79,6 +79,14 @@ class Event(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        constraints = [
+            # What the ingest looks an event up by: without this two ingests running at once can
+            # each make the event, and then neither can find "the" event again
+            models.UniqueConstraint(fields=['event_id'], name='unique_event_id'),
+        ]
+
+
 class RGESAlert(models.Model):
     """
     A discovery alert received from an RGES-PIT detection pipeline
@@ -242,6 +250,12 @@ class RGESAlert(models.Model):
 
     class Meta:
         verbose_name = "rges_alert"
+        constraints = [
+            # What the ingest looks an alert up by, as for the event's ID
+            models.UniqueConstraint(
+                fields=['alert_id', 'roman_id', 'event', 'alert_origin'], name='unique_alert'
+            ),
+        ]
         permissions = (
             ('view_alert', 'View Alert'),
             ('add_alert', 'Add Alert'),

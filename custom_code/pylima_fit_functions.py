@@ -541,7 +541,7 @@ def generate_model_lightcurve(pevent, model_params, verbose):
         model_telescope = telescopes.Telescope(name='NONE',
                                                camera_filter='I',
                                                pixel_scale=1,
-                                               lightcurve=np.empty())
+                                               lightcurve=np.empty(0))
 
     return model_telescope
 
