@@ -1,8 +1,10 @@
+import re
 from dataclasses import dataclass
 
 from django import forms
 from django.db import models
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import CharField, OuterRef, Q, Subquery
+from django.db.models.functions import Cast
 from django.http import QueryDict
 from crispy_forms.layout import Layout, Row, Column
 
@@ -60,6 +62,9 @@ def find_row_with(container, field_name):
             return found
     return None
 
+# A plain decimal number, such as a coordinate in degrees: 268, -29.33, .5
+NUMBER = re.compile(r'^[+-]?(\d+\.?\d*|\.\d+)$')
+
 
 class RogueTargetFilterSet(TargetFilterSet):
     """
@@ -85,6 +90,29 @@ class RogueTargetFilterSet(TargetFilterSet):
         super().__init__(*args, **kwargs)
         self.filters['target_cone_search'].label = 'Cone Search'
         self.filters['targetlist__name'].label = 'Group'
+
+    def general_search(self, queryset, name, value):
+        """
+        The general search box: sources where the text is in the name, an alias, or the RA or Dec in
+        degrees, as the table shows them (266.89 is in 266.8993392941, and 267 isn't).
+
+        The text of a coordinate has no trailing zero (an RA of 268 is "268"), so a number typed
+        with one (268.0) also finds the coordinates that are that number.
+        """
+        if not value:
+            return queryset
+        value = value.strip()
+        q_set = (
+            Q(name__icontains=value) | Q(aliases__name__icontains=value)
+            | Q(ra_text__icontains=value) | Q(dec_text__icontains=value)
+        )
+        if NUMBER.match(value):
+            number = float(value)
+            q_set |= Q(ra=number) | Q(dec=number)
+
+        return queryset.annotate(
+            ra_text=Cast('ra', CharField()), dec_text=Cast('dec', CharField())
+        ).filter(q_set).distinct()
 
     def filter_classification(self, queryset, name, value):
         """The sources whose latest source diagnostics classify them as the value"""

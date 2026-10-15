@@ -13,7 +13,7 @@ from custom_code.models import (Event, EventModel, PSPLModel, PitkinFlareModel, 
                                 DavenportFlareModel, FSPLModel, RGESAlert, SourceDiagnostics)
 from custom_code.filters import (CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES,
                                  RogueTargetFilterSet, find_row_with)
-from tom_targets.models import Target
+from tom_targets.models import Target, TargetName
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 from custom_code.templatetags import plotting_functions
 from custom_code.solar_system import query_horizons_for_roman, parse_sbident_response
@@ -480,6 +480,10 @@ class TestPyLIMAUtils(TestCase):
         """
 
         test_event, pspl_model = create_test_pylima_event()
+        test_tel = telescopes.Telescope(name='NONE',
+                                       camera_filter='I',
+                                       pixel_scale=1,
+                                       lightcurve=np.empty())
 
         model_fit = create_test_model_fit(test_event, pspl_model)
 
@@ -487,12 +491,12 @@ class TestPyLIMAUtils(TestCase):
             test_event, model_fit, True
         )
 
-        model_lc = pylima_fit_functions.generate_model_lightcurve(
+        model_tel = pylima_fit_functions.generate_model_lightcurve(
             test_event, model_params, True
         )
 
-        assert(type(model_lc), type(np.zeros(2)))
-        assert(len(model_lc.lightcurve) >= len(test_event.telescopes[0].lightcurve))
+        assert(type(model_tel) is type(test_tel))
+        assert(len(model_tel.lightcurve) >= len(test_event.telescopes[0].lightcurve))
 
 class TestGeneralFitFunctions(TestCase):
 
@@ -1526,6 +1530,58 @@ class TestTargetListFilters(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         return [name for name in ('ConeA', 'ConeB', 'ConeC') if '>' + name + '<' in content]
+
+    def test_general_search_covers_name_alias_and_coordinates(self):
+        TargetName.objects.create(target=Target.objects.get(name='ConeC'), name='Bulge-Alias-7')
+
+        self.assertEqual(self.found(query='ConeA'), ['ConeA'])
+        self.assertEqual(self.found(query='Bulge-Alias'), ['ConeC'])
+        # RA or Dec: the text typed is in the coordinate, as the table shows it
+        self.assertEqual(self.found(query='268.001'), ['ConeB'])
+        self.assertEqual(self.found(query='268'), ['ConeA', 'ConeB'])
+        self.assertEqual(self.found(query='268.0'), ['ConeA', 'ConeB'])   # RA 268 has no ".0" in its text
+        self.assertEqual(self.found(query='-29'), ['ConeA', 'ConeB'])
+        self.assertEqual(self.found(query='10'), ['ConeC'])
+        self.assertEqual(self.found(query='10.0'), ['ConeC'])
+        self.assertEqual(self.found(query='10.1'), [])
+        self.assertEqual(self.found(query='269'), [])
+
+    def test_general_search_finds_the_digits_anywhere_in_name_or_coordinates(self):
+        """267 is found in the name, in an RA or in a Dec, wherever in the number the digits are"""
+        wanted = {
+            'RaExactly267': (267.0, 10.0),
+            'RaContains267': (258.2673467, 10.0),
+            'DecContains267': (30.0, -30.45267),
+            'Name267Here': (30.0, 10.0),
+        }
+        unwanted = {'NoDigitsHere': (266.8993392941, -29.37799376882)}
+        for name, (ra, dec) in {**wanted, **unwanted}.items():
+            Target.objects.create(name=name, ra=ra, dec=dec, type='SIDEREAL')
+
+        response = self.client.get(reverse('targets:list'), {'query': '267'}, headers={'HX-Request': 'true'})
+        content = response.content.decode()
+
+        for name in wanted:
+            self.assertIn('>' + name + '<', content, name)
+        for name in unwanted:
+            self.assertNotIn('>' + name + '<', content, name)
+
+    def test_general_search_does_not_round_numbers(self):
+        """267 is not in 266.8993392941 or -29.37799376882, though it is within a degree of them"""
+        Target.objects.create(name='RMDC26_042811', ra=266.8993392941, dec=-29.37799376882, type='SIDEREAL')
+
+        def search(query):
+            response = self.client.get(reverse('targets:list'), {'query': query}, headers={'HX-Request': 'true'})
+            return 'RMDC26_042811' in response.content.decode()
+
+        self.assertFalse(search('267'))
+        self.assertFalse(search('-29.4'))
+        self.assertTrue(search('266.89'))
+        self.assertTrue(search('-29.37'))
+        self.assertTrue(search('042811'))
+
+        self.assertEqual(self.found(query='nothing like it'), [])
+        self.assertEqual(self.found(query=''), ['ConeA', 'ConeB', 'ConeC'])
 
     def test_the_filters_are_the_projects(self):
         response = self.client.get(reverse('targets:list'))
