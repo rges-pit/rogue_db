@@ -125,21 +125,40 @@ LOGOUT_REDIRECT_URL = '/'
 
 AUTHENTICATION_BACKENDS = TOMTOOLKIT_AUTHENTICATION_BACKENDS
 
+MANAGERS = [os.getenv('ROGUEDB_MANAGERS'),]
+ADMINS = [os.getenv('ROGUEDB_ADMIN'),]
+#EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')  # keep secrets out of settings.py
+EMAIL_USE_TLS = True
+#EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() in ('1', 'true', 'yes')
+DEFAULT_FROM_EMAIL = os.getenv('EMAIL_HOST_USER') or 'webmaster@localhost'  # the From: address on everything the TOM sends
+MANAGERS = [('TOM managers', DEFAULT_FROM_EMAIL)]
+
+# TESTING ONLY: Local SMTP server config
+#EMAIL_HOST = 'localhost'
+#EMAIL_PORT = 8025
+#EMAIL_USE_TLS = False
+
 # Password reset by email: adds the "Forgot your password?" flow. Requires a working EMAIL_BACKEND.
-# TOM_PASSWORD_RESET_ENABLED = True
+TOM_PASSWORD_RESET_ENABLED = True
 
 # Require two-factor authentication: 'all' for every user, 'superusers' for superusers only.
 TOM_MFA_REQUIRED = 'all'
 
 # Self-registration: 'open' (sign up and log in immediately) or 'approval_required'
 # (a superuser approves each account from the Users page). Default: only administrators create accounts.
-# TOM_REGISTRATION_STRATEGY = 'approval_required'
+TOM_REGISTRATION_STRATEGY = 'approval_required'
 
 # Passwords older than this many days must be changed. A password set by an administrator counts as expired.
 # TOM_PASSWORD_EXPIRY_DAYS = 60
 
 # User/Profile fields every account must have filled in.
-# TOM_REQUIRED_USER_FIELDS = ['first_name', 'last_name', 'email']
+TOM_REQUIRED_USER_FIELDS = ['first_name', 'last_name', 'email']
 
 # When set to True, the Users page shows other users only to holders of the Django
 # "Can view user" permission (auth.view_user, which can be granted per user or per

@@ -1,0 +1,5 @@
+Thank you for registering for {{ tom_name }}.
+Your account on {{ tom_name }} has been approved.
+
+Please log in at {{ login_url }} with the username and password you chose when you registered.
+You will need to set up multi-factor authentication on first log-in.

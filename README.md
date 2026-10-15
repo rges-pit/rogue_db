@@ -17,3 +17,6 @@ Greg Olmshenk
 Claude Code has been used to accelerate the development of RogueDB, in particular for the development 
 of the website itself, which is built using the TOM Toolkit and Django.  All model fitting and science 
 analysis is developed and tested by humans. 
+
+## Local Installation 
+
