@@ -1,0 +1,66 @@
+# RogueDB with its database and its background worker.
+#
+#   cp .env.example .env       (and set SECRET_KEY)
+#   docker compose up --build
+#
+# then open http://localhost:8000. See the README.
+
+x-rogue: &rogue
+  build: .
+  env_file: .env
+  environment:
+    DB_HOST: db
+    DB_PORT: "5432"
+    ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+  volumes:
+    - rogue_data:/app/data
+    # Where alert files are put, to be ingested with:
+    #   docker compose run --rm web python manage.py ingest_alerts /ingest
+    - ./ingest:/ingest:ro
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${DB_NAME:-rogue_tom_db}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASS:-postgres}
+    volumes:
+      - rogue_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-rogue_tom_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Creates and updates the database's tables, once, before the others start
+  migrate:
+    <<: *rogue
+    command: python manage.py migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    <<: *rogue
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Runs the tasks the website queues: source diagnostics, lightcurve thumbnails, searches for moving
+  # objects. Without it they're queued and never done. It doesn't reload when the code changes: restart
+  # it with `docker compose restart worker`.
+  worker:
+    <<: *rogue
+    command: python manage.py db_worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  rogue_pgdata:
+  rogue_data:

@@ -1,0 +1,17 @@
+.git
+.gitignore
+.idea
+.claude
+.serena
+venv
+.venv
+__pycache__
+*.pyc
+.env
+db.sqlite3
+data
+tmp
+_static
+ingest
+Dockerfile
+docker-compose.yml

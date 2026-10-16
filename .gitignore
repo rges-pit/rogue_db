@@ -227,3 +227,7 @@ __marimo__/
 # Data
 data/*
 *.png
+# Alert files for the Docker ingest
+ingest/
+# Collected static files
+_static/

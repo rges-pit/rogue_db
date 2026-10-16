@@ -52,6 +52,20 @@ from altaipony.fit_flares import fit_flares
 import numpy as np
 import copy
 
+# The tests log in users who have enrolled in nothing and have no name or email. The project's
+# policies for real users (every user enrols in 2FA, and fills in their name and email) would send
+# each of them to the page for that, rather than the page being tested.
+_policy_overrides = override_settings(TOM_MFA_REQUIRED=None, TOM_REQUIRED_USER_FIELDS=[])
+
+
+def setUpModule():
+    _policy_overrides.enable()
+
+
+def tearDownModule():
+    _policy_overrides.disable()
+
+
 def create_test_target_with_photometry(name='TestObject'):
     """
     Function to create a test target with photometry and an event
@@ -488,10 +502,13 @@ class TestPyLIMAUtils(TestCase):
         """
 
         test_event, pspl_model = create_test_pylima_event()
+
         test_tel = telescopes.Telescope(name='NONE',
-                                       camera_filter='I',
-                                       pixel_scale=1,
-                                       lightcurve=np.empty(0))
+                                        camera_filter='I',
+                                        pixel_scale=1,
+                                        lightcurve=np.zeros((1,3)),
+                                        lightcurve_names=['time', 'mag', 'err_mag'],
+                                        lightcurve_units=['JD', 'mag', 'err_mag'])
 
         model_fit = create_test_model_fit(test_event, pspl_model)
 
@@ -1488,14 +1505,22 @@ class TestVersionedStatic(TestCase):
         self.assertEqual(url, '/static/tom_common/js/archive_wait.js?v=%d' % os.path.getmtime(path))
 
     def test_url_changes_with_the_file(self):
-        path = finders.find('tom_common/js/archive_wait.js')
-        before = self.render()
-        original = os.stat(path)
-        self.addCleanup(os.utime, path, (original.st_atime, original.st_mtime))
+        # A file of its own, in a static directory of its own: the project's files may not be
+        # the tests' to change (they're not, in the Docker image)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'probe.js')
+            with open(path, 'w') as f:
+                f.write('// probe')
+            with override_settings(STATICFILES_DIRS=[directory]):
+                before = self.render('{% load static_versions %}{% versioned_static "probe.js" %}')
+                original = os.stat(path)
 
-        os.utime(path, (original.st_atime, original.st_mtime + 100))
+                os.utime(path, (original.st_atime, original.st_mtime + 100))
 
-        self.assertNotEqual(self.render(), before)
+                after = self.render('{% load static_versions %}{% versioned_static "probe.js" %}')
+
+        self.assertTrue(before.startswith('/static/probe.js?v='))
+        self.assertNotEqual(after, before)
 
     def test_a_file_that_is_not_there_has_no_version(self):
         self.assertEqual(self.render('{% load static_versions %}{% versioned_static "no/such/file.js" %}'),
@@ -2138,6 +2163,43 @@ class TestIngestAlert(AlertPacketMixin, TestCase):
         self.ingest(other)
         self.assertEqual(RGESAlert.objects.count(), 2)
         self.assertEqual(Event.objects.count(), 2)
+
+
+class TestRegistrationEmails(TestCase):
+    """
+    The registration emails are the project's own. The toolkit renders them as account/email/...,
+    so they're only used where they're at templates/account/email/.
+    """
+
+    NAMES = ['registration_approved_subject.txt', 'registration_approved_message.txt',
+             'registration_requested_subject.txt', 'registration_requested_message.txt']
+
+    def test_the_templates_used_are_the_projects(self):
+        from django.conf import settings
+        from django.template.loader import get_template
+
+        for name in self.NAMES:
+            origin = get_template('account/email/' + name).origin.name
+            self.assertTrue(origin.startswith(os.path.join(settings.BASE_DIR, 'templates')), origin)
+
+    def test_approval_email(self):
+        from django.template.loader import render_to_string
+
+        context = {'user': User(username='newuser'), 'tom_name': 'RogueDB', 'login_url': 'https://rogue/login/'}
+
+        message = render_to_string('account/email/registration_approved_message.txt', context)
+
+        self.assertIn('Thank you for registering for RogueDB.', message)
+        self.assertIn('https://rogue/login/', message)
+        self.assertIn('multi-factor authentication', message)
+
+    def test_request_email_subject(self):
+        from django.template.loader import render_to_string
+
+        subject = render_to_string('account/email/registration_requested_subject.txt',
+                                   {'user': User(username='newuser')}).strip()
+
+        self.assertEqual(subject, 'New RogueDB account registration awaiting approval: newuser')
 
 
 class TestIngestUniqueness(AlertPacketMixin, TestCase):

@@ -38,7 +38,8 @@ SECRET_KEY_FALLBACKS = []
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+# The names this site is served as, comma-separated, when it isn't just on this computer
+ALLOWED_HOSTS = [host.strip() for host in os.getenv('ALLOWED_HOSTS', '').split(',') if host.strip()]
 
 
 # Application definition

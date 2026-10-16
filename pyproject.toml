@@ -1,42 +1,48 @@
-[tool.poetry]
+[project]
 name = "rogue_db"
 version = "0.1.0"
 description = "Rogue Planet Database"
-authors = ["Rachel Street <rstreet@lco.global>"]
-license = "GPL-3.0-only"
 readme = "README.md"
+license = "GPL-3.0-only"
+authors = [{ name = "Rachel Street", email = "rstreet@lco.global" }]
+requires-python = ">=3.11,<3.14"
 
-[tool.poetry.dependencies]
-python = "<3.14,>=3.11.0"
-pylima = "1.9.8"
-tomtoolkit = ">=3.0.0"
-django = "5.2.17"
-whitenoise = "5.0.1"
-psycopg2 = "^2.9.10"
-django-storages = "^1.14.4"
-django-allauth = "65.19.1"
-django-bootstrap5 = "26.2"
-django-contrib-comments = "2.2.0"
-django-crispy-forms = "2.7"
-django-extensions = "3.2.3"
-django-filter = "24.3"
-django-gravatar2 = "1.4.5"
-django-guardian = "2.4.0"
-django-htmx = "1.29.0"
-django-stubs-ext = "6.1.0"
-django-tables2 = "3.0.0"
-django-tasks = "0.6.1"
-djangorestframework = "3.18.0"
-boto3 = "^1.35.9"
-cryptography = ">=48.0.1"
-requests = ">=2.34.2"
-markdown = ">=3.8.1"
-certifi = "2026.7.22"
-altaipony = "2.1.2"
+# What RogueDB itself needs. The TOM Toolkit brings the whole Django stack (Django, allauth with MFA,
+# django-filter, django-tables2, django-tasks, crispy-forms, guardian, DRF, plotly, astropy, numpy...),
+# so those aren't repeated here: poetry.lock holds the exact versions of all of it.
+dependencies = [
+    "tomtoolkit>=3.1,<3.2",
+    "django>=5.2.17,<5.3",
+    "pylima==1.9.8",
+    # Not the PyPI release (2.1.2), which doesn't work with current pandas: this is the commit of the
+    # master branch with "fixed pandas version issue"
+    "altaipony @ git+https://github.com/ekaterinailin/AltaiPony.git@5434a47ac4f9578c130e44ef7d5598f2a88263e4",
+    # Imported by RogueDB's own code
+    "numpy",
+    "scipy",
+    "pandas",
+    "astropy",
+    "matplotlib",
+    "emcee",
+    "corner",
+    "plotly",
+    "pyerfa",
+    "requests>=2.34.2",
+    # The database driver
+    "psycopg2-binary>=2.9.10",
+    # Minimum versions for security fixes
+    "cryptography>=48.0.1",
+    "markdown>=3.8.1",
+]
 
+[tool.poetry]
+# RogueDB is a Django project, run from a checkout rather than installed as a package
+package-mode = false
+
+# aiosmtpd: a local mail server for trying out registration and password-reset emails
 [tool.poetry.group.dev.dependencies]
-factory-boy = "2.12.0"
+aiosmtpd = "*"
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
