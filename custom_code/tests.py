@@ -2165,6 +2165,31 @@ class TestIngestAlert(AlertPacketMixin, TestCase):
         self.assertEqual(Event.objects.count(), 2)
 
 
+class TestSettingsEnvironment(TestCase):
+    """A blank line in a .env file sets the variable to nothing, which is to mean its default"""
+
+    def database_settings(self, **environment):
+        env = {**os.environ, 'SECRET_KEY': 'x', 'DJANGO_SETTINGS_MODULE': 'rogue_db.settings', **environment}
+        result = subprocess.run(
+            [sys.executable, '-c',
+             'from django.conf import settings; d = settings.DATABASES["default"]; '
+             'print(d["NAME"], d["USER"], d["HOST"], d["PORT"], sep="|")'],
+            capture_output=True, text=True, env=env, cwd=os.getcwd(),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-1500:])
+        return result.stdout.strip()
+
+    def test_blank_database_settings_are_the_defaults(self):
+        blank = dict(DB_NAME='', DB_USER='', DB_HOST='', DB_PORT='', DB_PASS='')
+
+        self.assertEqual(self.database_settings(**blank), 'rogue_tom_db|postgres|127.0.0.1|5432')
+
+    def test_database_settings_from_the_environment(self):
+        given = dict(DB_NAME='mydb', DB_USER='me', DB_HOST='db', DB_PORT='5433')
+
+        self.assertEqual(self.database_settings(**given), 'mydb|me|db|5433')
+
+
 class TestRegistrationEmails(TestCase):
     """
     The registration emails are the project's own. The toolkit renders them as account/email/...,

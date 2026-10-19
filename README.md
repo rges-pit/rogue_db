@@ -58,6 +58,9 @@ provide PyPI wheels and have to be compiled.  Once the build has finished, open 
 http://localhost:8000 into the navigation bar.  Note that you can change the port number by editing the  
 `WEB_PORT` variable in `.env`. 
 
+Leave the terminal with this container running open since it is running the webservice for RogueDB's user 
+interface.  All subsequent commands can be run in a different terminal. 
+
 BEFORE YOU PROCEED: You will need to make a superuser account for the system by running the following at the 
 commandline prompt:
 
@@ -151,6 +154,13 @@ PostgreSQL server (the Docker setup uses version 16), with a role that can creat
    python manage.py runserver        # the website, at http://localhost:8000
    python manage.py db_worker        # the tasks it queues; restart it after changing the code
    ```
+
+To ingest alerts, you can run the ingest script as before, but the JSON files for the alerts 
+can be in any directory you wish.  
+
+```bash
+docker python manage.py ingest_alerts <path to alerts directory> --max-workers 4
+```
 
 ### Settings
 

@@ -86,12 +86,14 @@ WSGI_APPLICATION = 'rogue_db.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': os.getenv('DB_ENGINE', 'django.db.backends.postgresql'),
-        'NAME': os.getenv('DB_NAME', 'rogue_tom_db'),
-        'USER': os.getenv('DB_USER', 'postgres'),
+        # "or", not getenv's default: a variable that is set but empty (a blank line of a .env file)
+        # is the same as one that isn't set
+        'ENGINE': os.getenv('DB_ENGINE') or 'django.db.backends.postgresql',
+        'NAME': os.getenv('DB_NAME') or 'rogue_tom_db',
+        'USER': os.getenv('DB_USER') or 'postgres',
         'PASSWORD': os.getenv('DB_PASS', ''),
-        'HOST': os.getenv('DB_HOST', '127.0.0.1'),
-        'PORT': os.getenv('DB_PORT', '5432'),
+        'HOST': os.getenv('DB_HOST') or '127.0.0.1',
+        'PORT': os.getenv('DB_PORT') or '5432',
     },
 
     'sqlite': {

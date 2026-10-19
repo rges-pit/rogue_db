@@ -9,6 +9,10 @@ x-rogue: &rogue
   build: .
   env_file: .env
   environment:
+    # The same defaults as the database's (below), so that a blank line in .env means the same to both
+    DB_NAME: ${DB_NAME:-rogue_tom_db}
+    DB_USER: ${DB_USER:-postgres}
+    DB_PASS: ${DB_PASS:-postgres}
     DB_HOST: db
     DB_PORT: "5432"
     ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
