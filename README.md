@@ -32,6 +32,15 @@ RogueDB includes scripts to automate the ingest of sets of alerts for analysis.
 
 Be aware that this runs on the Django development server (`DEBUG` is on in `settings.py`).  
 
+### Configuration and required parameters
+
+There are a few necessary parameters that must be declared during the installation.  These are 
+listed in the file ``.env.example``, and the file's role in the installation is described below.  
+Regardless of which method you choose, you need to set some of these parameters (see the file for details). 
+The optional parameters are only required if you want to activate user registration with email approval. 
+Full documentation on that process is [here](https://tom-toolkit.readthedocs.io/en/stable/common/email_configuration.html).  
+
+
 ### With Docker
 
 RogueDB's repo includes ``Dockerfile'' that can be used to build a Docker container with all the necessary 
