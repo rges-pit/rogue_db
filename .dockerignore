@@ -7,7 +7,15 @@ venv
 .venv
 __pycache__
 *.pyc
+# Anything that holds a secret: the image must be safe to give to other people
 .env
+.env.*
+!.env.example
+.envrc
+local_settings.py
+*.sqlite3
+*.pem
+*.key
 db.sqlite3
 data
 tmp
