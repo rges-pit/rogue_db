@@ -21,6 +21,12 @@
       {% endif %}
     </div>
   </div>
+  {% if mcmc_chains_url %}
+    <div class="event-params-group">
+      <div class="event-params-label">MCMC chains</div>
+      <a href="{{ mcmc_chains_url }}" class="btn btn-sm btn-outline-secondary mt-1" hx-boost="false">Download MCMC chains (.npy)</a>
+    </div>
+  {% endif %}
   {% if corner_plot %}
     <div class="event-params-group">
       <div class="event-params-label">Corner plot</div>

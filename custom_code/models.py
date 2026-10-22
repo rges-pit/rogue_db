@@ -302,6 +302,7 @@ class EventModel(models.Model):
     tau_threshold = models.FloatField(default=0, null=True, blank=True)
 
     corner_plot = models.ImageField(upload_to='eventmodel_plots/%Y/%m/%d/', null=True, blank=True)
+    mcmc_chains = models.FileField(upload_to='arrays/%Y/%m/%d/', null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

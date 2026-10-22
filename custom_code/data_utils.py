@@ -647,9 +647,19 @@ def generate_corner_plot(emodel, results, file_name):
         utils.replace_image_file(emodel.corner_plot, file_name, ContentFile(buf.getvalue()))
         EventModel.objects.filter(pk=emodel.pk).update(corner_plot=emodel.corner_plot.name)
 
-    elif emodel and emodel.corner_plot:
+        # Output npy of MCMC chains
+        stem = file_name.removesuffix('.png').removesuffix('_corner_plot')
+        mcmcfile = stem + '_mcmc_chains.npy'
+        utils.store_array_as_np(results['samples'], mcmcfile, emodel.mcmc_chains)
+
+        EventModel.objects.filter(pk=emodel.pk).update(
+            mcmc_chains=emodel.mcmc_chains
+        )
+
+    elif emodel and (emodel.corner_plot or emodel.mcmc_chains):
         emodel.corner_plot.delete(save=False)
-        EventModel.objects.filter(pk=emodel.pk).update(corner_plot=None)
+        emodel.mcmc_chains.delete(save=False)
+        EventModel.objects.filter(pk=emodel.pk).update(corner_plot=None, mcmc_chains=None)
 
 def store_event_statistics(lcevent, results):
     """

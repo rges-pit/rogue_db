@@ -13,6 +13,7 @@ from custom_code.target_models import RogueTarget
 IMAGE_FIELDS = (
     ('thumbnail', Event._meta.get_field('thumbnail'), '_lc'),
     ('corner plot', EventModel._meta.get_field('corner_plot'), '_corner_plot'),
+    ('mcmc chains', EventModel._meta.get_field('mcmc_chains'), '_mcmc_chains'),
     ('periodogram', RogueTarget._meta.get_field('periodogram'), '_periodogram'),
 )
 
@@ -44,7 +45,7 @@ def find_image_files(field, ending, target, referenced):
     :returns: (the names of the files rows refer to, the names of the others)
     """
     directory = field.upload_to.split('/')[0]
-    name = re.compile(rf'^{re.escape(target.name)}(?:_.+)?{re.escape(ending)}(?:_[A-Za-z0-9]{{7}})?\.png$')
+    name = re.compile(rf'^{re.escape(target.name)}(?:_.+)?{re.escape(ending)}(?:_[A-Za-z0-9]{{7}})?\.(?:png|npy)$')
     leftover = {
         path for path in walk(field.storage, directory)
         if name.match(posixpath.basename(path))
@@ -82,6 +83,7 @@ class Command(BaseCommand):
         referenced_names = {
             'thumbnail': {event.thumbnail.name for event in events if event.thumbnail},
             'corner plot': {model.corner_plot.name for model in eventmodels if model.corner_plot},
+            'mcmc chains': {model.mcmc_chains.name for model in eventmodels if model.mcmc_chains},
             'periodogram': {t.periodogram.name} if getattr(t, 'periodogram', None) else set(),
         }
         files = {}

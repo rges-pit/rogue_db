@@ -1,20 +1,12 @@
 import numpy as np
+from django.core.files.base import ContentFile
+import io
 
 
 def replace_image_file(file_field, filename, content):
     """
     Save content as the picture of an image field of an instance (its FieldFile, such as an event's
-    thumbnail), in place of the picture the field already has. A source, event or model has one picture
-    of each kind, and calculating it again replaces it.
-
-    Saving the new one beside the old doesn't do that: the storage doesn't overwrite a file, but adds
-    a random suffix to the name of a new one if it's taken, so every calculation left a file behind
-    that nothing referred to. The old file is removed here: one of the same name (from earlier the
-    same day, as the name has the date in it) before the new one is saved, so that it gets the name
-    without a suffix; and one under another name (from an earlier day) after, so that if saving fails
-    the field is left with the picture it had.
-
-    The instance isn't saved (save=False): the caller does, in the way that suits it.
+    thumbnail), overwriting any existing file.
 
     :param file_field: the FieldFile, e.g. event.thumbnail
     :param filename: the name for the file, without the field's upload_to directory
@@ -130,3 +122,26 @@ def mag_to_flux(mag, mag_err):
     ferr = mag_err / (2.5 * np.log10(np.e)) * flux
 
     return flux, ferr
+
+
+def store_array_as_np(arr, file_name, model_field):
+    """
+    Function to output a Numpy array to file, compatible with different storage types
+
+    file_name should be just the desired file name without a path, e.g. RMDC26_000001_lightcurve.npy
+    """
+    buffer = io.BytesIO()
+    np.save(buffer, arr, allow_pickle=False)
+
+    file_content = ContentFile(buffer.getvalue())
+    replace_image_file(model_field, file_name, file_content)
+
+def load_array_from_file(file_field):
+    """
+    Function to load a numpy array from any file storage
+
+    The file field is a model field that references a file, such as eventmodel.mcmc_chains
+    """
+
+    with file_field.open('rb') as f:
+        return np.load(io.BytesIO(f.read()), allow_pickle=False)

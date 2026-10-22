@@ -444,7 +444,6 @@ def mcmc_parameters(pevent, model_params, mcmc_fit):
 
         # Derive MCMC samples from the chains
         chains = mcmc_fit.fit_results['MCMC_chains_with_fluxes']
-        print('PYLIMA CHAINS: ', chains.shape)
         model_params['samples'] = chains.reshape(-1, chains.shape[2])
         model_params['parameter_labels'] = list(mcmc_fit.fit_parameters.keys())
         model_params['sample_columns'] = [0, 1, 2]

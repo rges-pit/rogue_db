@@ -53,18 +53,11 @@ def generate_event_lightcurves(lcevent):
         ax.set_ylabel('Mag [' + bandpass + ']')
         ax.set_yinverted(True)
 
-        # Render to an in-memory buffer rather than a literal path, so the
-        # write goes through Event.thumbnail's storage backend (local disk
-        # now, S3 later) instead of hardcoding a filesystem location.
         buf = io.BytesIO()
         fig.savefig(buf, format='png')
         plt.close(fig)
 
         filename = event_file_stem(lcevent) + '_lc.png'
-        # save=False: FieldFile.save() with save=True calls instance.save()
-        # with no update_fields, which wouldn't satisfy on_event_saved's
-        # update_fields guard and would spuriously re-trigger the moving-object
-        # check. .update() persists the field without going through post_save.
         utils.replace_image_file(lcevent.thumbnail, filename, ContentFile(buf.getvalue()))
         Event.objects.filter(pk=lcevent.pk).update(thumbnail=lcevent.thumbnail.name)
 

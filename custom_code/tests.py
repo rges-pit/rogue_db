@@ -24,6 +24,7 @@ import datetime
 import importlib
 import json
 from concurrent.futures import ProcessPoolExecutor
+import io
 import multiprocessing
 import os
 import subprocess
@@ -1144,6 +1145,173 @@ class TestIngestAlertsWorkers(TestCase):
 
             with self.assertRaises(FileNotFoundError):
                 future.result(timeout=120)
+
+
+class TestMcmcChains(TestCase):
+    """The MCMC samples of a model are saved as a .npy file, and the corner plot is made from them"""
+
+    def setUp(self):
+        self.media = tempfile.TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        settings_override = override_settings(MEDIA_ROOT=self.media.name)
+        settings_override.enable()
+        self.addCleanup(settings_override.disable)
+
+        self.target = Target.objects.create(name='ChainsTarget', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(
+            target=self.target, event_id='ChainsTarget_1', start_time=2460000.0, duration=2.0)
+        self.model = PSPLModel.objects.create(event=self.event, model_type='PSPL microlensing')
+        self.samples = np.random.default_rng(3).normal(size=(500, 5))
+
+    def results(self):
+        return {'samples': self.samples, 'sample_columns': [0, 1, 2], 'parameter_labels': ['t0', 'u0', 'tE']}
+
+    def stored(self):
+        return EventModel.objects.get(pk=self.model.pk)
+
+    def files(self, directory):
+        return [path for path in storage_walk(default_storage, directory)]
+
+    def test_array_round_trips_through_the_storage(self):
+        utils.store_array_as_np(self.samples, 'chains_test.npy', self.model.mcmc_chains)
+        self.model.save()
+
+        stored = self.stored()
+        loaded = utils.load_array_from_file(stored.mcmc_chains)
+
+        self.assertRegex(stored.mcmc_chains.name, r'^arrays/\d{4}/\d{2}/\d{2}/chains_test\.npy$')
+        self.assertTrue(np.array_equal(loaded, self.samples))
+        self.assertEqual(loaded.dtype, self.samples.dtype)
+
+    def test_corner_plot_and_chains_are_stored(self):
+        data_utils.generate_corner_plot(self.model, self.results(), 'ChainsTarget_1_PSPL_corner_plot.png')
+
+        stored = self.stored()
+        self.assertTrue(stored.corner_plot.name.endswith('/ChainsTarget_1_PSPL_corner_plot.png'))
+        self.assertTrue(stored.mcmc_chains.name.endswith('/ChainsTarget_1_PSPL_mcmc_chains.npy'))
+        self.assertTrue(np.array_equal(utils.load_array_from_file(stored.mcmc_chains), self.samples))
+
+    def test_recalculating_replaces_the_files(self):
+        data_utils.generate_corner_plot(self.model, self.results(), 'ChainsTarget_1_PSPL_corner_plot.png')
+        self.samples = self.samples * 2.0
+        data_utils.generate_corner_plot(self.model, self.results(), 'ChainsTarget_1_PSPL_corner_plot.png')
+
+        self.assertEqual(len(self.files('arrays')), 1)
+        self.assertEqual(len(self.files('eventmodel_plots')), 1)
+        self.assertTrue(np.array_equal(utils.load_array_from_file(self.stored().mcmc_chains), self.samples))
+
+    def test_the_chains_file_is_named_from_the_plot_name_without_its_extension(self):
+        data_utils.generate_corner_plot(self.model, self.results(), 'ChainsTarget_1_other.png')
+
+        name = self.stored().mcmc_chains.name
+        self.assertTrue(name.endswith('/ChainsTarget_1_other_mcmc_chains.npy'), name)
+
+    def test_a_failed_fit_removes_the_files_and_what_refers_to_them(self):
+        data_utils.generate_corner_plot(self.model, self.results(), 'ChainsTarget_1_PSPL_corner_plot.png')
+        self.assertEqual(len(self.files('arrays')), 1)
+
+        data_utils.generate_corner_plot(self.model, {}, 'ChainsTarget_1_PSPL_corner_plot.png')
+
+        stored = self.stored()
+        self.assertFalse(stored.corner_plot)
+        self.assertFalse(stored.mcmc_chains)
+        self.assertEqual(self.files('arrays'), [])
+        self.assertEqual(self.files('eventmodel_plots'), [])
+
+    def test_remove_source_removes_the_chains(self):
+        from custom_code.management.commands.remove_source import walk as storage_walk_command
+        data_utils.generate_corner_plot(self.model, self.results(), 'ChainsTarget_1_PSPL_corner_plot.png')
+        other = Target.objects.create(name='KeepChains', ra=20.0, dec=10.0)
+        kept = default_storage.save('arrays/2026/10/11/KeepChains_1_PSPL_mcmc_chains.npy', ContentFile(b'npy'))
+        left_behind = default_storage.save('arrays/2026/10/08/ChainsTarget_1_PSPL_mcmc_chains.npy', ContentFile(b'npy'))
+
+        call_command('remove_source', 'ChainsTarget', stdout=StringIO())
+
+        self.assertEqual(self.files('arrays'), [kept])
+        self.assertFalse(default_storage.exists(left_behind))
+        self.assertTrue(Target.objects.filter(pk=other.pk).exists())
+
+
+def storage_walk(storage, directory):
+    from custom_code.management.commands.remove_source import walk
+    return list(walk(storage, directory))
+
+
+class TestMcmcChainsDownload(TestCase):
+    """The model's parameters offer its MCMC chains for download, if it has them"""
+
+    def setUp(self):
+        self.media = tempfile.TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        settings_override = override_settings(MEDIA_ROOT=self.media.name)
+        settings_override.enable()
+        self.addCleanup(settings_override.disable)
+
+        self.client.force_login(User.objects.create_user('chains_user'))
+        target = Target.objects.create(name='DownloadTarget', ra=10.0, dec=10.0)
+        event = Event.objects.create(target=target, event_id='DownloadTarget_1', start_time=2460000.0, duration=2.0)
+        self.model = PSPLModel.objects.create(event=event, model_type='PSPL microlensing', t0=2460001.0, tE=3.0)
+        self.samples = np.random.default_rng(4).normal(size=(300, 6))
+
+    def with_chains(self):
+        utils.store_array_as_np(self.samples, 'DownloadTarget_1_PSPL_mcmc_chains.npy', self.model.mcmc_chains)
+        EventModel.objects.filter(pk=self.model.pk).update(mcmc_chains=self.model.mcmc_chains.name)
+
+    def parameters_page(self):
+        response = self.client.get(reverse('eventmodels:parameters'), {'model': self.model.pk},
+                                   headers={'HX-Request': 'true'})
+        self.assertEqual(response.status_code, 200)
+        return response.content.decode()
+
+    def url(self):
+        return reverse('eventmodels:mcmc-chains', kwargs={'pk': self.model.pk})
+
+    def test_button_is_shown_if_the_model_has_chains(self):
+        self.with_chains()
+
+        html = self.parameters_page()
+
+        self.assertIn('href="%s"' % self.url(), html)
+        self.assertIn('Download MCMC chains', html)
+
+    def test_no_button_without_chains(self):
+        html = self.parameters_page()
+
+        self.assertNotIn('Download MCMC chains', html)
+        self.assertNotIn('mcmc-chains', html)
+
+    def test_the_file_is_downloaded(self):
+        self.with_chains()
+
+        response = self.client.get(self.url())
+        content = b''.join(response.streaming_content)
+
+        self.assertEqual(response.status_code, 200)
+        disposition = response['Content-Disposition']
+        self.assertTrue(disposition.startswith('attachment;'), disposition)
+        self.assertIn('DownloadTarget_1_PSPL_mcmc_chains.npy', disposition)
+        self.assertTrue(np.array_equal(np.load(io.BytesIO(content), allow_pickle=False), self.samples))
+
+    def test_a_model_without_chains_has_nothing_to_download(self):
+        self.assertEqual(self.client.get(self.url()).status_code, 404)
+
+    def test_a_file_that_is_missing_from_the_storage(self):
+        self.with_chains()
+        default_storage.delete(EventModel.objects.get(pk=self.model.pk).mcmc_chains.name)
+
+        self.assertEqual(self.client.get(self.url()).status_code, 404)
+
+    def test_a_model_that_is_not_there(self):
+        self.assertEqual(self.client.get(reverse('eventmodels:mcmc-chains', kwargs={'pk': 999999})).status_code, 404)
+
+    def test_login_is_required(self):
+        self.with_chains()
+        self.client.logout()
+
+        response = self.client.get(self.url())
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith('/accounts/login/'))
 
 
 class TestRemoveSource(TestCase):
@@ -2872,6 +3040,10 @@ class TestCutfileSearch(TestCase):
     def test_export_json(self):
         self.client.force_login(User.objects.create_user('cutfile_user'))
         url = reverse('cutfiles:list')
+        # The model has its MCMC chains and corner plot stored, and its event a thumbnail
+        EventModel.objects.filter(event__event_id='CutfileA-1').update(
+            mcmc_chains='arrays/2026/10/11/CutfileA-1_PSPL_mcmc_chains.npy',
+            corner_plot='eventmodel_plots/2026/10/11/CutfileA-1_PSPL_corner_plot.png')
 
         # The results page offers the download for the search on show
         response = self.client.get(url + '?model_type=pspl&pspl_tE_max=1&sort=chisq&page=1')
@@ -2901,6 +3073,8 @@ class TestCutfileSearch(TestCase):
         self.assertEqual(result['model']['chisq'], 50.0)
         self.assertEqual(result['model']['model_type'], 'PSPL microlensing')
         self.assertNotIn('corner_plot', result['model'])
+        self.assertNotIn('mcmc_chains', result['model'])
+        self.assertNotIn('mcmc_chains', json.dumps(data))
 
         # Every match is exported, whatever the table's page size; and a model type's own columns
         response = self.client.get(url + '?model_type=straight_line&export=json')

@@ -1,12 +1,14 @@
 import math
+import posixpath
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.serializers.json import DjangoJSONEncoder
-from django.http import JsonResponse
+from django.db import models
+from django.http import FileResponse, Http404, JsonResponse
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
-from django.views.generic.base import TemplateView
+from django.views.generic.base import TemplateView, View
 from django.views.generic.edit import CreateView
 from django.views.generic.detail import DetailView
 from django.core.exceptions import PermissionDenied
@@ -287,7 +289,35 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
         context['parameters'] = parameters
         context['blend_parameters'] = blend_parameters
         context['corner_plot'] = base.corner_plot if base.corner_plot else None
+        context['mcmc_chains_url'] = (
+            reverse('eventmodels:mcmc-chains', kwargs={'pk': base.pk}) if base.mcmc_chains else None
+        )
         return context
+
+
+class EventModelMcmcChainsView(LoginRequiredMixin, View):
+    """
+    Downloads the MCMC chains of an EventModel, the .npy file saved when its fit was made. The file is
+    sent by this view, read through the field's storage, rather than the browser being pointed at the
+    file's URL, so that it works whichever storage the files are in (local disk now, a cloud bucket
+    later, where the URL may not be one the browser can open or save under the file's name).
+    Requires the user to be logged in.
+    """
+
+    def get(self, request, pk):
+        model = get_object_or_404(EventModel, pk=pk)
+        if not model.mcmc_chains:
+            raise Http404('This model has no MCMC chains')
+
+        try:
+            file = model.mcmc_chains.open('rb')
+        except FileNotFoundError:
+            raise Http404('The file of MCMC chains is missing')
+
+        return FileResponse(
+            file, as_attachment=True, filename=posixpath.basename(model.mcmc_chains.name),
+            content_type='application/octet-stream',
+        )
 
 
 class PSPLModelCreateView(LoginRequiredMixin, CreateView):
@@ -366,12 +396,13 @@ def _json_safe(value):
 def _field_values(instance, exclude=()):
     """
     The values of an instance's own columns, keyed by field name. Relations are left
-    out (the export nests the related rows instead), as are the named fields.
+    out (the export nests the related rows instead), as are the named fields, and files
+    (thumbnails, corner plots, MCMC chains), which are pictures and arrays, not parameters.
     """
     return {
         field.name: _json_safe(field.value_from_object(instance))
         for field in instance._meta.concrete_fields
-        if not field.is_relation and field.name not in exclude
+        if not field.is_relation and not isinstance(field, models.FileField) and field.name not in exclude
     }
 
 

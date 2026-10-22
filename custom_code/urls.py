@@ -2,7 +2,7 @@ from django.urls import path, include
 
 from .views import (
     RGESAlertListView, RGESAlertCreateView,
-    EventModelListView, EventModelParametersView,
+    EventModelListView, EventModelParametersView, EventModelMcmcChainsView,
     PSPLModelCreateView, FSPLModelCreateView, WideBoundPlanetModelCreateView,
     DavenportFlareModelCreateView, PitkinFlareModelCreateView,
     TargetCutfileView, EventListView, TargetEventListView, EventDetailView, EventAlertsView,
@@ -17,6 +17,7 @@ candidates_urlpatterns = [
 eventmodels_urlpatterns = [
     path('', EventModelListView.as_view(), name='list'),
     path('parameters/', EventModelParametersView.as_view(), name='parameters'),
+    path('<int:pk>/mcmc-chains/', EventModelMcmcChainsView.as_view(), name='mcmc-chains'),
     path('create/pspl/', PSPLModelCreateView.as_view(), name='create-pspl'),
     path('create/fspl/', FSPLModelCreateView.as_view(), name='create-fspl'),
     path('create/wideboundplanet/', WideBoundPlanetModelCreateView.as_view(), name='create-wide-bound-planet'),
