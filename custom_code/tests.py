@@ -775,6 +775,49 @@ class TestFlareFitFunctions(TestCase):
         tmax = self.test_event.start_time + self.test_event.duration
         self.assertTrue(self.test_event.start_time <= results['t_peak'] <= tmax)
 
+class TestEventThumbnailIsNotALink(TestCase):
+    """
+    A thumbnail is only a picture. As a link to the file it was followed by the table's hx-boost,
+    which put the picture's bytes into the page.
+    """
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_user('thumb_user'))
+        target = Target.objects.create(name='ThumbLinkTarget', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(
+            target=target, event_id='ThumbLink_1', start_time=2460000.0, duration=2.0,
+            thumbnail='event_thumbnails/2026/10/11/ThumbLink_1_lc.png')
+
+    def test_events_table_thumbnail(self):
+        response = self.client.get(reverse('events:list'), headers={'HX-Request': 'true'})
+        html = response.content.decode()
+
+        self.assertIn('<img src="%s"' % self.event.thumbnail.url, html)
+        # Not inside a link, nor linked to the file anywhere
+        self.assertNotRegex(html, r'<a\b[^>]*>\s*<img')
+        self.assertNotIn('href="%s"' % self.event.thumbnail.url, html)
+        self.assertEqual([c.verbose_name for c in response.context['table'].columns][:2],
+                         ['Target', 'Thumbnail'])
+
+    def test_only_sortable_headers_are_marked_orderable(self):
+        # custom.css takes the sort arrows off a header that isn't, so the thumbnail's mustn't be
+        html = self.client.get(reverse('events:list'), headers={'HX-Request': 'true'}).content.decode()
+
+        thumbnail = re.search(r'<th\b([^>]*)>\s*Thumbnail\s*</th>', html).group(1)
+        event_id = re.search(r'<th\b([^>]*)>\s*Event id\s*</th>', html).group(1)
+
+        self.assertNotIn('orderable', thumbnail)
+        self.assertIn('orderable', event_id)
+
+    def test_events_table_without_a_thumbnail(self):
+        Event.objects.filter(pk=self.event.pk).update(thumbnail='')
+
+        response = self.client.get(reverse('events:list'), headers={'HX-Request': 'true'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('lightcurve thumbnail', response.content.decode())
+
+
 @override_settings(TOM_MFA_REQUIRED=None)
 class TestEventAlertsPanel(TestCase):
     """The alert parameters on the event page are styled as the event and model parameters are"""

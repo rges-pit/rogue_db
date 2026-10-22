@@ -107,6 +107,10 @@ class EventTable(EventRenderMixin, HTMXTable):
 
     target = tables.Column(linkify=True, attrs={"a": {"hx-boost": "false"}})
 
+    # Declared, not left to be made from the model's ImageField: that makes a FileColumn, which links
+    # what it shows to the file, and the table's hx-boost then loads the picture's bytes into the table
+    thumbnail = tables.Column(orderable=False)
+
     class Meta(HTMXTable.Meta):
         model = Event
         # Scrolls horizontally: this table has more columns than fit across the page

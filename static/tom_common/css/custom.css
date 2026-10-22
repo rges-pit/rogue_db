@@ -384,3 +384,14 @@ li {
   border-color: var(--rges-purple-light);
   box-shadow: 0 0 0 0.25rem rgba(166, 88, 225, 0.25);
 }
+
+/* The toolkit puts the sort arrows (main.css) and a click that sorts (the header's hx-get and pointer
+   cursor) on every column header, including those that can't be sorted, such as the thumbnails. Only a
+   sortable column has the class "orderable". A header with a checkbox (select all) is left as it is. */
+.table-container th:not(.orderable):not(.asc):not(.desc):not(:has(input))::after {
+  content: none;
+}
+.table-container th:not(.orderable):not(:has(input)) {
+  cursor: default !important;   /* the pointer is set in the header's style attribute */
+  pointer-events: none;
+}
