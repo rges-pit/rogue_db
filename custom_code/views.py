@@ -459,7 +459,7 @@ class TargetCutfileView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
                           .select_related('event__target'))
         models.sort(key=lambda model: (model.created_at, model.pk), reverse=True)
 
-        # A source's diagnostics are the latest entry's, up to the cutfile's moment, as in the search
+        # The source diagnostics given are from the most recent entry, up to the timestamp of the cutfile
         diagnostics = latest_diagnostics_by_target(
             {model.event.target_id for model in models if model.event and model.event.target_id},
             filterset.cutoff,
