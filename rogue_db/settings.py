@@ -170,7 +170,7 @@ TOM_HIDE_OTHER_USERS = True
 
 # Users must accept this version of the terms of service (write the terms in
 # templates/tom_common/partials/terms_of_service_text.html). Change the value to require re-acceptance.
-# TOM_TERMS_OF_SERVICE_VERSION = '2026-01-01'
+TOM_TERMS_OF_SERVICE_VERSION = '2026-10-23'
 
 # API tokens older than this many days are rejected; users regenerate on their profile edit page.
 # TOM_API_TOKEN_EXPIRY_DAYS = 60
