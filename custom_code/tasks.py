@@ -1,9 +1,6 @@
 from django_tasks import task
 from .target_models import RogueTarget
-from custom_code.models import Event
 from .source_functions import run_source_diagnostics
-from .solar_system import find_moving_objects_near_event
-from .event_functions import generate_event_lightcurves
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,15 +23,3 @@ def compute_source_diagnostics(target_id):
     target = get_or_skip(RogueTarget, target_id, 'compute_source_diagnostics')
     if target is not None:
         run_source_diagnostics(target)
-
-@task
-def check_event_for_moving_objects(event_id):
-    event = get_or_skip(Event, event_id, 'check_event_for_moving_objects')
-    if event is not None:
-        find_moving_objects_near_event(event)
-
-@task
-def make_event_lightcurve(event_id):
-    event = get_or_skip(Event, event_id, 'make_event_lightcurve')
-    if event is not None:
-        generate_event_lightcurves(event)

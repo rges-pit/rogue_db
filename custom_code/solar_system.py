@@ -53,6 +53,9 @@ def find_moving_objects_near_event(event, radius=2.0):
     Parameters:
         event   Event object
         radius  float   Search radius in arcsec
+
+    Returns the name of the closest one and its separation from the event in degrees, or
+    (None, None) if there isn't one, or JPL's services couldn't be reached.
     """
 
     # First get Roman's vector at the time of the Event.
@@ -67,7 +70,7 @@ def find_moving_objects_near_event(event, radius=2.0):
         if None in spacecraft_vector.values():
             logger.warning('No position for Roman returned by JPL Horizons; skipping the moving '
                            'object search for event ' + str(event.pk))
-            return
+            return None, None
 
         # Now we can query JPL's Small Bodies Identification Tool for any asteroids and comets
         # close to our Target coordinates at this time
@@ -78,14 +81,13 @@ def find_moving_objects_near_event(event, radius=2.0):
     except requests.exceptions.RequestException as error:
         logger.warning('JPL service unavailable; skipping the moving object search for event '
                        + str(event.pk) + ': ' + repr(error))
-        return
+        return None, None
 
     if closest_name:
-        Event.objects.filter(pk=event.pk).update(
-            nearest_moving_object=closest_name,
-            angular_separation_moving_object=closest_separation/3600.0,  # Stored in deg
-        )
         logger.info('Identified a moving object close to event ' + str(event.pk))
+        return closest_name, closest_separation/3600.0   # The separation in deg
+
+    return None, None
 
 def query_horizons_for_roman(jd_event):
     """

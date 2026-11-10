@@ -3,8 +3,7 @@ from django.dispatch import receiver
 
 from .target_models import RogueTarget
 from .models import Event
-from .tasks import (compute_source_diagnostics,
-                    check_event_for_moving_objects, make_event_lightcurve)
+from .tasks import compute_source_diagnostics
 
 # What the tasks of each model are worked out from. They need queuing when a row is created,
 # and when a save changes one of these; any other save leaves their results as they were.
@@ -42,13 +41,3 @@ def before_target_saved(sender, instance, update_fields, **kwargs):
 def on_target_saved(sender, instance, **kwargs):
     if getattr(instance, '_queue_tasks', True):
         compute_source_diagnostics.enqueue(instance.pk)
-
-@receiver(pre_save, sender=Event)
-def before_event_saved(sender, instance, update_fields, **kwargs):
-    instance._queue_tasks = saving_changes(instance, update_fields, EVENT_FIELDS)
-
-@receiver(post_save, sender=Event)
-def on_event_saved(sender, instance, **kwargs):
-    if getattr(instance, '_queue_tasks', True):
-        check_event_for_moving_objects.enqueue(instance.pk)
-        make_event_lightcurve.enqueue(instance.pk)

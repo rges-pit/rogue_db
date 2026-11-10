@@ -101,8 +101,7 @@ class MSOSAlertSerializer(serializers.Serializer):
             defaults=dict(
                 target=t,
                 start_time=tstart,
-                duration=duration,
-                peak_mag=0.0
+                duration=duration
             ),
         )
         self.event = e
@@ -150,12 +149,6 @@ class MSOSAlertSerializer(serializers.Serializer):
         lightcurves = self.convert_lightcurve_to_mag(validated_data)
 
         if len(lightcurves) > 0:
-
-            # If no alert_peak_mag is given, estimate it from the lightcurve in F146
-            if alert.alert_peak_mag == 0.0:
-                peak_mag = estimate_peak_mag(e, lightcurves['F146'])
-                RGESAlert.objects.filter(pk=alert.pk).update(alert_peak_mag=peak_mag)
-                Event.objects.filter(pk=e.pk).update(peak_mag=peak_mag)
 
             # Supress ERFA warnings on conversion of timestamps >5yrs away from the last known
             # leap second; simulated Roman lightcurves exceed this
@@ -214,15 +207,4 @@ class MSOSAlertSerializer(serializers.Serializer):
         logger.info('Parsed timeseries photometry')
 
         return lightcurves
-
-def estimate_peak_mag(lcevent, lightcurve):
-    """
-    Function to estimate an event's peak magnitude if none is given in the alert packet
-    """
-
-    idx = np.where(
-        (lightcurve[:,0] >= lcevent.start_time)
-        & (lightcurve[:,0] <= lcevent.start_time + lcevent.duration))
-
-    return lightcurve[idx,1].max()
 

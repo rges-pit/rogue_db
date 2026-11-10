@@ -39,13 +39,14 @@ def find_image_files(field, ending, target, referenced):
     many of the files there are belong to no row. They're recognised by their name, which starts
     with the source's name and ends with the given ending, with anything (an event ID, a model)
     between: <source>_..._lc.png, <source>_periodogram.png, or either with _<7 random
-    characters> before the .png.
+    characters> before the .png. The pictures and chains of a modeling have its number (a process's
+    primary key) after the ending too, before any random characters.
 
     :param referenced: the names of the files rows of the source refer to
     :returns: (the names of the files rows refer to, the names of the others)
     """
     directory = field.upload_to.split('/')[0]
-    name = re.compile(rf'^{re.escape(target.name)}(?:_.+)?{re.escape(ending)}(?:_[A-Za-z0-9]{{7}})?\.(?:png|npy)$')
+    name = re.compile(rf'^{re.escape(target.name)}(?:_.+)?{re.escape(ending)}(?:_\d+)?(?:_[A-Za-z0-9]{{7}})?\.(?:png|npy)$')
     leftover = {
         path for path in walk(field.storage, directory)
         if name.match(posixpath.basename(path))

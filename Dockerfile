@@ -22,6 +22,11 @@ RUN apt-get update \
 
 COPY . .
 
+# The commit the image is built from, which is recorded with the results of each modeling. The image has
+# no .git directory to ask, so docker-compose.yml passes it in (see the README)
+ARG GIT_COMMIT=unknown
+ENV ROGUEDB_GIT_COMMIT=$GIT_COMMIT
+
 # The pictures that RogueDB makes (thumbnails, corner plots, periodograms) are written to data/, which
 # docker-compose.yml keeps in a volume
 RUN useradd --create-home rogue \

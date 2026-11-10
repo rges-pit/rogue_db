@@ -1,9 +1,10 @@
+import re
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
 import numpy as np
 import logging
 from custom_code.models import (PSPLModel, FSPLModel, StraightLineModel, EventModel,
                                 DavenportFlareModel, PitkinFlareModel,
-                                Event)
+                                EventDiagnostics)
 from tom_targets.models import Target
 from custom_code import utils
 from django.core.files.base import ContentFile
@@ -300,7 +301,7 @@ def store_model_lightcurve(event, results, model_type):
             )
             logger.info('Created ' + model_type + ' lightcurve model datum for ' + event.target.name)
 
-        # If there is a pre-existing model, update it
+        # If there is a pre-existing datum, update it
         else:
             rd = qs[0]
             rd.timestamp = model_time
@@ -337,14 +338,14 @@ def generate_periodogram(source, power, frequency):
 
     logger.info('Created periodogram picture for ' + source.name)
 
-def store_microlensing_model_parameters(event, pylima_results):
+def store_microlensing_model_parameters(event, process, pylima_results):
     """Function to store the fitted model parameters in the TOM"""
 
     if 'best_model' in pylima_results.keys():
         # Fetch existing PSPL and FSPL models for this event, or create them,
         # and update them with the fitted parameters
-        pspl_model = update_microlensing_model(event, pylima_results, 'pspl')
-        fspl_model = update_microlensing_model(event, pylima_results, 'fspl')
+        pspl_model = create_microlensing_model(event, process, pylima_results, 'pspl')
+        fspl_model = create_microlensing_model(event, process, pylima_results, 'fspl')
 
         logger.info('Stored model parameters for event ' + event.target.name)
         return pspl_model, fspl_model
@@ -353,57 +354,7 @@ def store_microlensing_model_parameters(event, pylima_results):
         logger.error('No best fit model results from pyLIMA; no model stored')
         return None, None
 
-def fetch_microlensing_model(event, model_type):
-    """
-    Function to check to see if the given event has an existing model of the given type;
-    if so, this entry will be updated; otherwise a new one will be created.
-    If an unrecognised model_type is passed, None will be returned
-
-    Parameters:
-        event   Event object
-        model_type  string   Microlensing model type descriptor
-
-    Returned:
-        mulens_model    PSPLModel, FSPLModel or None
-    """
-
-    mulens_model = None
-
-    model_types_list = get_model_types_list()
-    db_model_type = model_types_list[model_type]
-
-    if db_model_type == 'PSPL microlensing':
-        qs = PSPLModel.objects.filter(
-            event=event,
-            model_type='PSPL microlensing'
-        )
-    elif db_model_type == 'FSPL microlensing':
-        qs = FSPLModel.objects.filter(
-            event=event,
-            model_type='FSPL microlensing'
-        )
-
-    if qs.count() == 0:
-        if db_model_type == 'PSPL microlensing':
-            mulens_model = PSPLModel.objects.create(
-                event=event,
-                model_type='PSPL microlensing'
-            )
-        elif db_model_type == 'FSPL microlensing':
-            mulens_model = FSPLModel.objects.create(
-                event=event,
-                model_type='FSPL microlensing'
-            )
-        logger.info('Created ' + mulens_model.model_type + ' model for event ' + event.target.name)
-
-    else:
-        mulens_model = qs[0]
-        logger.info('Retrieved ' + mulens_model.model_type + ' model for event ' + event.target.name)
-
-    return mulens_model
-
-
-def update_microlensing_model(event, fit_results, model_type):
+def create_microlensing_model(event, process, fit_results, model_type):
     """
     Update the provided microlensing Model object, which may be of any type, with
     the dictionary of fitted results.  Note that the type of the Model and results must match.
@@ -411,8 +362,20 @@ def update_microlensing_model(event, fit_results, model_type):
     """
 
     if len(fit_results[model_type]) > 0:
-        mulens_model = fetch_microlensing_model(event, model_type)
-
+        model_types_list = get_model_types_list()
+        db_model_type = model_types_list[model_type]
+        if db_model_type == 'PSPL microlensing':
+            mulens_model = PSPLModel.objects.create(
+                event=event,
+                process=process,
+                model_type='PSPL microlensing'
+            )
+        elif db_model_type == 'FSPL microlensing':
+            mulens_model = FSPLModel.objects.create(
+                event=event,
+                process=process,
+                model_type='FSPL microlensing'
+            )
         if mulens_model and len(fit_results[model_type]) > 0:
             mulens_model.t0 = fit_results[model_type]['t0']
             mulens_model.t0_error = fit_results[model_type]['t0_error']
@@ -452,39 +415,25 @@ def update_microlensing_model(event, fit_results, model_type):
     else:
         return None
 
-def store_straightline_model_parameters(event, results, model_type):
+def store_straightline_model_parameters(event, process, results, model_type):
+    """
+    Store the model parameters for a straight-line model.
+    Always creates a new model entry for reproducibiliy of cutfile results
+    """
 
     if len(results['coeffs']) > 0:
-        # If there is an existing straight line fit in the database for this event,
-        # update it; otherwise create a new entry
-        qs = StraightLineModel.objects.filter(
-            event=event,
-            model_type=model_type
+        slmodel = StraightLineModel.objects.create(
+            event = event,
+            process = process,
+            model_type = model_type,
+            chisq = results['chisq'],
+            red_chisq = results['red_chisq'],
+            BIC = results['BIC'],
+            fit_covariance = json.dumps(results['covar'].tolist()),
+            intercept = results['coeffs'][1],
+            gradient = results['coeffs'][0],
+            fit_method = results['fit_method']
         )
-
-        if qs.count() == 0:
-            slmodel = StraightLineModel.objects.create(
-                event = event,
-                model_type = model_type,
-                chisq = results['chisq'],
-                red_chisq = results['red_chisq'],
-                BIC = results['BIC'],
-                fit_covariance = json.dumps(results['covar'].tolist()),
-                intercept = results['coeffs'][1],
-                gradient = results['coeffs'][0],
-                fit_method = results['fit_method']
-            )
-
-        else:
-            slmodel = qs[0]
-            slmodel.chisq = results['chisq']
-            slmodel.red_chisq = results['red_chisq']
-            slmodel.BIC = results['BIC']
-            slmodel.fit_covariance = json.dumps(results['covar'].tolist())
-            slmodel.intercept = results['coeffs'][1]
-            slmodel.gradient = results['coeffs'][0]
-            slmodel.fit_method = results['fit_method']
-            slmodel.save()
 
         logger.info('Stored straight line model parameters and diagnostics for event ' + event.target.name)
 
@@ -493,7 +442,7 @@ def store_straightline_model_parameters(event, results, model_type):
     else:
         return None
 
-def store_davenportflare_model_parameters(event, results):
+def store_davenportflare_model_parameters(event, process, results):
     """
     Function to store the parameters from a Davenport flare model fit
 
@@ -501,45 +450,23 @@ def store_davenportflare_model_parameters(event, results):
     """
 
     if len(results) > 0:
-
-        qs = DavenportFlareModel.objects.filter(
+        flare = DavenportFlareModel.objects.create(
             event=event,
-            model_type='Davenport flare'
+            process=process,
+            model_type='Davenport flare',
+            t_peak=results['t_peak'],
+            t_peak_error=results['t_peak_error'],
+            peak_amplitude=results['peak_amplitude'],
+            peak_amplitude_error=results['peak_amplitude_error'],
+            t_FWHM=results['t_FWHM'],
+            t_FWHM_error=results['t_FWHM_error'],
+            red_chisq=results['red_chisq'],
+            chisq=results['chisq'],
+            BIC=results['BIC'],
+            fit_method=results['fit_method'],
+            tau=results['tau'],
+            tau_threshold=results['tau_threshold']
         )
-
-        if qs.count() == 0:
-            flare = DavenportFlareModel.objects.create(
-                event=event,
-                model_type='Davenport flare',
-                t_peak=results['t_peak'],
-                t_peak_error=results['t_peak_error'],
-                peak_amplitude=results['peak_amplitude'],
-                peak_amplitude_error=results['peak_amplitude_error'],
-                t_FWHM=results['t_FWHM'],
-                t_FWHM_error=results['t_FWHM_error'],
-                red_chisq=results['red_chisq'],
-                chisq=results['chisq'],
-                BIC=results['BIC'],
-                fit_method=results['fit_method'],
-                tau=results['tau'],
-                tau_threshold=results['tau_threshold']
-            )
-
-        else:
-            flare = qs[0]
-            flare.t_peak = results['t_peak']
-            flare.t_peak_error = results['t_peak_error']
-            flare.peak_amplitude = results['peak_amplitude']
-            flare.peak_amplitude_error = results['peak_amplitude_error']
-            flare.t_FWHM = results['t_FWHM']
-            flare.t_FWHM_error = results['t_FWHM_error']
-            flare.red_chisq = results['red_chisq']
-            flare.chisq = results['chisq']
-            flare.BIC = results['BIC']
-            flare.fit_method = results['fit_method']
-            flare.tau = results['tau']
-            flare.tau_threshold = results['tau_threshold']
-            flare.save()
 
         logger.info('Stored Davenport flare model parameters for event ' + event.target.name)
 
@@ -548,7 +475,7 @@ def store_davenportflare_model_parameters(event, results):
 
     return flare
 
-def store_pitkinflare_model_parameters(event, results):
+def store_pitkinflare_model_parameters(event, process, results):
     """
     Function to store the parameters from a Pitkin flare model fit
 
@@ -556,48 +483,26 @@ def store_pitkinflare_model_parameters(event, results):
     """
 
     if len(results) > 0:
-        qs = PitkinFlareModel.objects.filter(
+
+        flare = PitkinFlareModel.objects.create(
             event=event,
-            model_type='Pitkin flare'
+            process=process,
+            model_type='Pitkin flare',
+            t_peak=results['t_peak'],
+            t_peak_error=results['t_peak_error'],
+            peak_amplitude=results['peak_amplitude'],
+            peak_amplitude_error=results['peak_amplitude_error'],
+            tau_gaussian_rise=results['tau_gaussian_rise'],
+            tau_gaussian_rise_error=results['tau_gaussian_rise_error'],
+            tau_exponential_decay=results['tau_exponential_decay'],
+            tau_exponential_decay_error=results['tau_exponential_decay_error'],
+            chisq=results['chisq'],
+            red_chisq=results['red_chisq'],
+            BIC=results['BIC'],
+            fit_method=results['fit_method'],
+            tau=results['tau'],
+            tau_threshold=results['tau_threshold']
         )
-
-        if qs.count() == 0:
-            flare = PitkinFlareModel.objects.create(
-                event=event,
-                model_type='Pitkin flare',
-                t_peak=results['t_peak'],
-                t_peak_error=results['t_peak_error'],
-                peak_amplitude=results['peak_amplitude'],
-                peak_amplitude_error=results['peak_amplitude_error'],
-                tau_gaussian_rise=results['tau_gaussian_rise'],
-                tau_gaussian_rise_error=results['tau_gaussian_rise_error'],
-                tau_exponential_decay=results['tau_exponential_decay'],
-                tau_exponential_decay_error=results['tau_exponential_decay_error'],
-                chisq=results['chisq'],
-                red_chisq=results['red_chisq'],
-                BIC=results['BIC'],
-                fit_method=results['fit_method'],
-                tau=results['tau'],
-                tau_threshold=results['tau_threshold']
-            )
-
-        else:
-            flare = qs[0]
-            flare.t_peak = results['t_peak']
-            flare.t_peak_error = results['t_peak_error']
-            flare.peak_amplitude = results['peak_amplitude']
-            flare.peak_amplitude_error = results['peak_amplitude_error']
-            flare.tau_gaussian_rise = results['tau_gaussian_rise']
-            flare.tau_gaussian_rise_error = results['tau_gaussian_rise_error']
-            flare.tau_exponential_decay = results['tau_exponential_decay']
-            flare.tau_exponential_decay_error = results['tau_exponential_decay_error']
-            flare.chisq = results['chisq']
-            flare.red_chisq = results['red_chisq']
-            flare.BIC = results['BIC']
-            flare.fit_method = results['fit_method']
-            flare.tau = results['tau']
-            flare.tau_threshold = results['tau_threshold']
-            flare.save()
 
         logger.info('Stored Pitkin flare model parameters for event ' + event.target.name)
 
@@ -605,20 +510,6 @@ def store_pitkinflare_model_parameters(event, results):
         flare = None
 
     return flare
-
-def store_baseline_diagnostics(lcevent, results):
-    """Function to store the results of analysing the target's baseline data"""
-
-    if results['frac_below_baseline']:
-        lcevent.frac_below_baseline = results['frac_below_baseline']
-        lcevent.max_excursion_below_baseline = results['max_excursion_below_baseline']
-        lcevent.Npoint_above_3sigma = results['Npoint_above_3sigma']
-
-        # Only these fields: see compare_model_goodness_of_fit
-        lcevent.save(update_fields=['frac_below_baseline', 'max_excursion_below_baseline',
-                                    'Npoint_above_3sigma'])
-
-        logger.info('Stored diagostics from baseline lightcurve fit for ' + lcevent.target.name)
 
 def generate_corner_plot(emodel, results, file_name):
     """
@@ -648,7 +539,9 @@ def generate_corner_plot(emodel, results, file_name):
         EventModel.objects.filter(pk=emodel.pk).update(corner_plot=emodel.corner_plot.name)
 
         # Output npy of MCMC chains
-        stem = file_name.removesuffix('.png').removesuffix('_corner_plot')
+        # Named as the plot is, with _corner_plot taken out: X_PSPL_corner_plot_12.png has the chains
+        # X_PSPL_12_mcmc_chains.npy (12 being the modeling process)
+        stem = re.sub(r'_corner_plot(_\d+)?$', r'\1', file_name.removesuffix('.png'))
         mcmcfile = stem + '_mcmc_chains.npy'
         utils.store_array_as_np(results['samples'], mcmcfile, emodel.mcmc_chains)
 
@@ -661,18 +554,15 @@ def generate_corner_plot(emodel, results, file_name):
         emodel.mcmc_chains.delete(save=False)
         EventModel.objects.filter(pk=emodel.pk).update(corner_plot=None, mcmc_chains=None)
 
-def store_event_statistics(lcevent, results):
+def estimate_peak_mag(lcevent):
     """
-    Function to store the keyword values for an event given in the results dictionary.
-    The keywords in the dictionary need to match the corresponding Event attributes,
-    and no other values can be present
+    Function to estimate an event's peak magnitude if none is given in the alert packet
     """
+    datasets = get_reduced_data(lcevent, source_name='Roman_F146')
+    lightcurve = fetch_lightcurve(datasets)
 
-    # Update the event in the database
-    Event.objects.filter(pk=lcevent.pk).update(**results)
+    idx = np.where(
+        (lightcurve[:,0] >= lcevent.start_time)
+        & (lightcurve[:,0] <= lcevent.start_time + lcevent.duration))
 
-    # Update the event object in memory to avoid later overwrites
-    for name, value in results.items():
-        setattr(lcevent, name, value)
-
-    logger.info('Stored event statistics: ' + repr(results))
+    return lightcurve[idx,1].max()

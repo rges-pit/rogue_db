@@ -1,27 +1,28 @@
 import numpy as np
 from scipy.cluster.hierarchy import single, fcluster
 from scipy.spatial.distance import pdist
-from custom_code.models import Event
+from custom_code.models import Event, EventDiagnostics, ModelingProcess
 import matplotlib.pyplot as plt
 import logging
 
 logger = logging.getLogger(__name__)
 
-def calc_mulens_diagnostics(event, pspl_model, fspl_model, straightline_model):
+def calc_mulens_diagnostics(pspl_model, fspl_model, straightline_model, results):
     """
     Function to compare the results of PyLIMA model fits for PSPL and FSPL
     for a single event
     """
     best_mulens = get_best_event_model(pspl_model, fspl_model)
     if best_mulens:
-        event.bestmulens_model_type = str(best_mulens.model_type).replace('microlensing','').strip()
-        event.save(update_fields=['bestmulens_model_type'])
+        results['bestmulens_model_type'] = str(best_mulens.model_type).replace('microlensing','').strip()
 
     if pspl_model and straightline_model:
-        compare_mulens_with_straightline(event, pspl_model, straightline_model)
+        results = compare_mulens_with_straightline(pspl_model, straightline_model, results)
 
     if fspl_model and straightline_model:
-        compare_mulens_with_straightline(event, fspl_model, straightline_model)
+        results = compare_mulens_with_straightline(fspl_model, straightline_model, results)
+
+    return results
 
 def get_best_event_model(model1, model2):
     """
@@ -42,7 +43,7 @@ def get_best_event_model(model1, model2):
 
     return best_model
 
-def compare_mulens_with_straightline(event, model1, model2):
+def compare_mulens_with_straightline(model1, model2, results):
     """
     Function to compare the goodness-of-fit parameters for the two models given.
     The models are order so that the straight line model is always second
@@ -52,19 +53,18 @@ def compare_mulens_with_straightline(event, model1, model2):
     delta_chisq = model1.chisq - model2.chisq
     delta_bic = model1.BIC - model2.BIC
 
-    # Store these parameters on the Event. Saving just the fields set here: the instance may be
-    # out of date (the thumbnail, for one, is made by a background task while this runs), and a
-    # full save would write every field, undoing whatever has been stored since it was loaded.
+    # Add these to the results, which become the EventDiagnostics of the modeling
     if model1.model_type == 'PSPL microlensing' and model2.model_type == 'Straight line':
-        event.delta_chi2_PSPL = delta_chisq
-        event.delta_BIC_PSPL = delta_bic
-        event.save(update_fields=['delta_chi2_PSPL', 'delta_BIC_PSPL'])
-    elif model1.model_type == 'FSPL microlensing' and model2.model_type == 'Straight line':
-        event.delta_chi2_FSPL = delta_chisq
-        event.delta_BIC_FSPL = delta_bic
-        event.save(update_fields=['delta_chi2_FSPL', 'delta_BIC_FSPL'])
+        results['delta_chi2_PSPL'] = delta_chisq
+        results['delta_BIC_PSPL'] = delta_bic
 
-def compare_flare_models(event, pspl_model, fspl_model, davenport_model, pitkin_model):
+    elif model1.model_type == 'FSPL microlensing' and model2.model_type == 'Straight line':
+        results['delta_chi2_FSPL'] = delta_chisq
+        results['delta_BIC_FSPL'] = delta_bic
+
+    return results
+
+def compare_flare_models(pspl_model, fspl_model, davenport_model, pitkin_model, results):
     """
     Function to compare the results of fitting different flare models to this event,
     and to calculate the diagnostics comparing the flare models with microlensing models
@@ -74,24 +74,22 @@ def compare_flare_models(event, pspl_model, fspl_model, davenport_model, pitkin_
         mulens_model        EventModel for microlensing
         davenport_model   EventModel results of Davenport model fit
         pitkin_model      EventModel        results of Pitkin model fit
+        results     Dict        Parameters to be stored as EventDiagnostics
     """
 
     best_flare = get_best_event_model(davenport_model, pitkin_model)
     if not best_flare:
-        return
-    event.bestflare_model_type = str(best_flare.model_type).replace('flare','').strip()
+        return results
+    results['bestflare_model_type'] = str(best_flare.model_type).replace('flare','').strip()
 
     if pspl_model:
-        event.delta_chi2_PSPL_bestflare = pspl_model.chisq - best_flare.chisq
-        event.delta_BIC_PSPL_bestflare = pspl_model.BIC - best_flare.BIC
+        results['delta_chi2_PSPL_bestflare'] = pspl_model.chisq - best_flare.chisq
+        results['delta_BIC_PSPL_bestflare'] = pspl_model.BIC - best_flare.BIC
     if fspl_model:
-        event.delta_chi2_FSPL_bestflare = fspl_model.chisq - best_flare.chisq
-        event.delta_BIC_FSPL_bestflare = fspl_model.BIC - best_flare.BIC
-    event.save(update_fields=[
-        'delta_chi2_PSPL_bestflare', 'delta_BIC_PSPL_bestflare',
-        'delta_chi2_FSPL_bestflare', 'delta_BIC_FSPL_bestflare',
-        'bestflare_model_type'
-    ])
+        results['delta_chi2_FSPL_bestflare'] = fspl_model.chisq - best_flare.chisq
+        results['delta_BIC_FSPL_bestflare'] = fspl_model.BIC - best_flare.BIC
+
+    return results
 
 def calc_npoints_above_baseline(lcevent, baseline_lightcurve, event_lightcurve):
     """
@@ -120,7 +118,7 @@ def calc_npoints_above_baseline(lcevent, baseline_lightcurve, event_lightcurve):
 
     return npoints
 
-def second_peak_diagnostics(e):
+def second_peak_diagnostics(e, results):
     """Check to see if there is more than one event associated with this target"""
 
     event_list = Event.objects.filter(target=e.target).order_by('-start_time')
@@ -135,23 +133,28 @@ def second_peak_diagnostics(e):
 
         # Time to nearest other peak
         other_events = [et for et in event_list if e != et]
-        e.time_to_second_peak = delta_mid_event_times[et_idx]
-        e.second_peak_mag = other_events[et_idx].peak_mag
+        results['time_to_second_peak'] = delta_mid_event_times[et_idx]
 
-        # Only these fields: the caller goes on to save() this instance, and a full save here
-        # would write back whatever else it holds
-        Event.objects.filter(pk=e.pk).update(
-            time_to_second_peak=e.time_to_second_peak, second_peak_mag=e.second_peak_mag
-        )
+        # The other event's peak magnitude is from its latest completed modeling
+        other_event_diag = EventDiagnostics.objects.filter(
+            process__event=other_events[et_idx],
+            process__status=ModelingProcess.ProcessStatus.complete,
+            process__completed_at__isnull=False,
+        ).order_by('-process__completed_at', '-process_id').first()
+        if other_event_diag is not None:
+            results['second_peak_mag'] = other_event_diag.peak_mag
 
     logger.info('Calculated second peak diagnostics')
+    return results
 
 def link_events(events_qs, plot=False):
     """
     Function to perform a cluster analysis on all Events in [RA, Dec, time] space,
     following the approach by Will DeRocco.
 
-    All events linked to a cluster will record the number of members in that cluster
+    Returns the number of other events in the cluster each event belongs to, as a dictionary of
+    these numbers by the primary key of the Event. This is for the modeling of each event to record
+    as one of its diagnostics: it depends on all the events, so can't be worked out from one alone.
     """
 
     # Prefilter events list to avoid any invalid entries
@@ -177,10 +180,11 @@ def link_events(events_qs, plot=False):
 
     # For each Event, indicate the number of other members of the same cluster,
     # subtracting the Event itself from it's cluster membership
+    linked = {}
     for i,e in enumerate(events_list):
         event_cluster = cluster[i] - 1  # Offset for Python array indexing
-        nlinked = len(clusters[event_cluster]) - 1  # Exclude the current event from the total
-        Event.objects.filter(pk=e.pk).update(Nlinked_events=nlinked)
+        linked[e.pk] = len(clusters[event_cluster]) - 1  # Exclude the current event from the total
+    return linked
 
 def calc_baseline_magnitude(lightcurve, passband, diagnostics):
     """

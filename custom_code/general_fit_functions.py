@@ -34,7 +34,7 @@ def run_event_straightline_fit(lcevent):
                 lightcurve[:,0], lightcurve[:,1], deg=1, w=1.0/lightcurve[:,2],
                 full=False, cov=True
             )
-        except numpy.linalg.LinAlgError:
+        except np.linalg.LinAlgError:
             coeffs = np.array([0.0, 0.0])
             covar = np.array([])
 

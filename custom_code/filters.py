@@ -14,7 +14,7 @@ from django_filters.constants import EMPTY_VALUES
 from tom_common.htmx_table import HTMXTableFilterSet
 from tom_targets.filters import TargetFilterSet
 
-from .models import RGESAlert, Event, EventModel, SourceDiagnostics
+from .models import RGESAlert, Event, EventModel, SourceDiagnostics, EventDiagnostics, ModelingProcess
 from .target_models import RogueTarget
 
 
@@ -206,7 +206,7 @@ class EventFilterSet(HTMXTableFilterSet):
     def general_search(self, queryset, name, value):
         """
         Search every field of the Event for the value, as the base implementation does, plus the
-        source's name and aliases.
+        source's name and aliases, and the moving object found near the event.
 
         The base implementation can't be used as it is: it tries a text lookup on each of the
         model's fields except the forward relations, and so on the reverse ones too (an Event's
@@ -215,7 +215,12 @@ class EventFilterSet(HTMXTableFilterSet):
         if not value:
             return queryset
 
-        q_set = Q(target__name__icontains=value) | Q(target__aliases__name__icontains=value)
+        # The moving object is among the diagnostics of the latest modeling of each event
+        queryset = queryset.annotate(
+            found_moving_object=latest_event_diagnostic('nearest_moving_object')
+        )
+        q_set = (Q(target__name__icontains=value) | Q(target__aliases__name__icontains=value)
+                 | Q(found_moving_object__icontains=value))
         for field in Event._meta.get_fields():
             if field.concrete and not field.is_relation:
                 q_set |= Q(**{f'{field.name}__icontains': value})
@@ -224,14 +229,7 @@ class EventFilterSet(HTMXTableFilterSet):
     class Meta:
         model = Event
         fields = [
-            'event_id', 'start_time', 'duration',
-            'time_to_second_peak', 'second_peak_mag', 'coverage_fraction',
-            'symmetry', 'Npoint_above_3sigma', 'delta_chi2_PSPL', 'delta_BIC_PSPL',
-            'delta_chi2_FSPL', 'delta_BIC_FSPL',
-            'delta_chi2_PSPL_bestflare', 'delta_BIC_PSPL_bestflare',
-            'delta_chi2_FSPL_bestflare', 'delta_BIC_FSPL_bestflare', 'DIA_centroid_shift',
-            'PSF_centroid_shift', 'Nlinked_events', 'nearest_moving_object',
-            'angular_separation_moving_object'
+            'event_id', 'start_time', 'duration'
         ]
 
 class EventModelFilterSet(HTMXTableFilterSet):
@@ -335,6 +333,11 @@ def diagnostic_alias(field):
     return f'latest_{field}'
 
 
+def event_diagnostic_alias(field):
+    """The name of the annotation holding the latest value of an EventDiagnostics field"""
+    return f'latest_event_{field}'
+
+
 def latest_diagnostic(field, as_of=None, target='event__target'):
     """
     A subquery for the value of a SourceDiagnostics field in the most recently created entry
@@ -358,6 +361,86 @@ def latest_diagnostics_by_target(target_ids, as_of=None):
     latest = {}
     for entry in entries.order_by(*LATEST_FIRST):
         latest.setdefault(entry.target_id, entry)
+    return latest
+
+
+# The event diagnostics, held in EventDiagnostics: one row for each modeling process of an event.
+EVENT_DIAGNOSTIC_FIELDS = [
+    field.name for field in EventDiagnostics._meta.concrete_fields
+    if field.name not in ('id', 'process', 'created_at')
+]
+
+
+def latest_completed_process(as_of=None, event='event'):
+    """
+    A subquery for the modeling process whose results count as an event's current ones: its most
+    recently completed (see latest_event_diagnostics), for the event given by the lookup `event`
+    ('event' on a queryset of EventModels, the default, or 'pk' on one of events). NULL if there is
+    none.
+    """
+    processes = ModelingProcess.objects.filter(
+        event=OuterRef(event), status=ModelingProcess.ProcessStatus.complete, completed_at__isnull=False,
+    )
+    if as_of is not None:
+        processes = processes.filter(completed_at__lte=as_of)
+    return Subquery(processes.order_by('-completed_at', '-pk').values('pk')[:1])
+
+
+def current_models(queryset, as_of=None):
+    """
+    The EventModels in a queryset that are the current ones of their event: those made by its latest
+    completed modeling process, as of the moment given if there is one. An event is modeled again as
+    its data accumulates, each time making a full set of models of its own; the earlier sets are kept
+    so that a cutfile can be run again as it was, but aren't the ones to show, and neither are those
+    of a process still running or one that failed part way. A model from no process (one whose event
+    is gone, say) isn't any event's current model.
+    """
+    return queryset.filter(process=latest_completed_process(as_of))
+
+
+def latest_event_diagnostics(as_of=None):
+    """
+    The EventDiagnostics that count as an event's current ones: those of its most recently completed
+    modeling process, as of the moment given if there is one. A process that is still running, or
+    failed, has no diagnostics that can be relied on, so isn't counted. A cutfile uses the diagnostics
+    as of the moment it was made, so that running it again after the events have been refit gives
+    the same answer.
+    """
+    entries = EventDiagnostics.objects.filter(
+        process__status=ModelingProcess.ProcessStatus.complete,
+        process__completed_at__isnull=False,
+    )
+    if as_of is not None:
+        entries = entries.filter(process__completed_at__lte=as_of)
+    return entries.order_by('-process__completed_at', '-process_id')
+
+
+def latest_event_diagnostic(field, as_of=None, event='pk'):
+    """
+    A subquery for the value of an EventDiagnostics field in an event's latest diagnostics (see
+    latest_event_diagnostics), for the event given by the lookup `event`: 'pk' on a queryset of
+    events, the default, or 'event' on one of EventModels. NULL if the event has no such diagnostics.
+    """
+    entries = latest_event_diagnostics(as_of).filter(process__event=OuterRef(event))
+    return Subquery(entries.values(field)[:1])
+
+
+def annotate_event_diagnostics(queryset, fields=None, as_of=None):
+    """
+    A queryset of events, each with its latest diagnostics as attributes (named as the
+    EventDiagnostics fields) so that tables and filters can use them as they would model fields.
+    """
+    return queryset.annotate(**{
+        name: latest_event_diagnostic(name, as_of) for name in (fields or EVENT_DIAGNOSTIC_FIELDS)
+    })
+
+
+def latest_event_diagnostics_by_event(event_ids, as_of=None):
+    """The latest EventDiagnostics (see latest_event_diagnostics) of each event, by event ID"""
+    latest = {}
+    entries = latest_event_diagnostics(as_of).filter(process__event__in=event_ids).select_related('process')
+    for entry in entries:
+        latest.setdefault(entry.process.event_id, entry)
     return latest
 
 
@@ -392,12 +475,17 @@ _EVENT_PARAM_LABELS = {
 
 
 def _event_params():
+    """The parameters of an event, which are its own and those of its latest diagnostics"""
     params = []
     for field in Event._meta.get_fields():
         if not field.concrete or field.name in _EVENT_EXCLUDED_FIELDS:
             continue
         kind = 'text' if isinstance(field, models.CharField) else 'number'
         params.append(CutfileParam(field.name, _EVENT_PARAM_LABELS.get(field.name, field.name), kind))
+    for name in EVENT_DIAGNOSTIC_FIELDS:
+        field = EventDiagnostics._meta.get_field(name)
+        kind = 'text' if isinstance(field, models.CharField) else 'number'
+        params.append(CutfileParam(name, _EVENT_PARAM_LABELS.get(name, name), kind))
     return tuple(params)
 
 
@@ -457,12 +545,15 @@ def _param_filters(group, lookup_prefix, params):
     for param in params:
         path = lookup_prefix + param.name
 
-        # A source parameter held in SourceDiagnostics is filtered on an annotation of the latest
-        # entry's value, which the filter set adds when the filter is used (it alone knows the
-        # cutfile's moment). The filter is tagged with the field to annotate.
-        diagnostic_field = param.name if group == 'source' and param.name in DIAGNOSTIC_FIELDS else None
-        if diagnostic_field:
-            path = diagnostic_alias(diagnostic_field)
+        # A parameter held in SourceDiagnostics (of a source), or in EventDiagnostics (of an event),
+        # is filtered on an annotation of the latest entry's value, which the filter set adds when
+        # the filter is used (it alone knows the cutfile's moment). The filter is tagged with the
+        # field to annotate, and which kind it is.
+        diagnostic_field = None
+        if group == 'source' and param.name in DIAGNOSTIC_FIELDS:
+            diagnostic_field, path = param.name, diagnostic_alias(param.name)
+        elif group == 'event' and param.name in EVENT_DIAGNOSTIC_FIELDS:
+            diagnostic_field, path = param.name, event_diagnostic_alias(param.name)
 
         if param.kind == 'text':
             new = {f'{group}_{param.name}': django_filters.CharFilter(
@@ -481,6 +572,7 @@ def _param_filters(group, lookup_prefix, params):
                 )
         for filter_ in new.values():
             filter_.diagnostic_field = diagnostic_field
+            filter_.diagnostic_group = group
         filters.update(new)
 
     for filter_ in filters.values():
@@ -523,11 +615,15 @@ class _CutfileFilterSetBase(HTMXTableFilterSet):
         method='filter_model_types', widget=forms.CheckboxSelectMultiple,
     )
 
-    # In order to keep the results reproducible, only event models created up to this
-    # moment should be included.
+    # In order to keep the results reproducible, what is found is as it was at this moment: of each
+    # event, the models and diagnostics of its latest modeling completed by then (see current_models).
+    # So this filter selects nothing itself: filter_queryset uses its value (the cutoff).
     as_of = django_filters.IsoDateTimeFilter(
-        field_name='created_at', lookup_expr='lte', widget=forms.HiddenInput,
+        method='as_of_is_applied_by_filter_queryset', widget=forms.HiddenInput,
     )
+
+    def as_of_is_applied_by_filter_queryset(self, queryset, name, value):
+        return queryset
 
     def __init__(self, data=None, *args, **kwargs):
         data = QueryDict(mutable=True) if data is None else data.copy()
@@ -556,20 +652,30 @@ class _CutfileFilterSetBase(HTMXTableFilterSet):
 
     def with_latest_diagnostic(self, queryset, filter_, value):
         """
-        For a filter on a source diagnostic that has a value, annotates the queryset with the latest
-        entry's value of it, up to the cutfile's moment, for the filter to apply to.
+        For a filter on a source or event diagnostic that has a value, annotates the queryset with
+        the latest entry's value of it, up to the cutfile's moment, for the filter to apply to.
         """
         field = getattr(filter_, 'diagnostic_field', None)
-        alias = field and diagnostic_alias(field)
-        if field is None or value in EMPTY_VALUES or alias in queryset.query.annotations:
+        if field is None or value in EMPTY_VALUES:
             return queryset
-        return queryset.annotate(**{alias: latest_diagnostic(field, self.cutoff)})
+        if filter_.diagnostic_group == 'event':
+            alias = event_diagnostic_alias(field)
+            latest = latest_event_diagnostic(field, self.cutoff, event='event')
+        else:
+            alias = diagnostic_alias(field)
+            latest = latest_diagnostic(field, self.cutoff)
+        if alias in queryset.query.annotations:
+            return queryset
+        return queryset.annotate(**{alias: latest})
 
     def filter_queryset(self, queryset):
         """
-        Applies the filters that hold for every model, then restricts to the model types
-        searched.
+        Restricts to the current models (see current_models), applies the filters that hold for
+        every model, then restricts to the model types searched.
         """
+        # Only the models of each event's latest completed modeling, as of the cutfile's moment
+        queryset = current_models(queryset, self.cutoff)
+
         selected = [mt.slug for mt in self.selected_model_types]
         by_type = {slug: [] for slug in selected}
         for name, value in self.form.cleaned_data.items():

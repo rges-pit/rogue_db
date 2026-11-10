@@ -1,5 +1,6 @@
 from django import template
 from custom_code.models import EventModel, SourceDiagnostics
+from custom_code.filters import current_models
 
 register = template.Library()
 
@@ -62,8 +63,9 @@ def event_banner_data(event):
 @register.inclusion_tag('custom_code/partials/event_model_buttons.html')
 def event_model_buttons(event):
     """
-    Function to create a button for each EventModel for the given Event, plus
-    an Alerts button that loads the event's RGESAlerts into the same panel.
+    Function to create a button for each of the current EventModels of the given Event (those of its
+    latest completed modeling), plus an Alerts button that loads the event's RGESAlerts into the same
+    panel.
     """
-    models = EventModel.objects.filter(event=event)
+    models = current_models(EventModel.objects.filter(event=event)).order_by('pk')
     return {'models': models, 'event': event}

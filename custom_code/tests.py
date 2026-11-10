@@ -1,7 +1,8 @@
 from django.contrib.auth.models import User
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.http import QueryDict
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import NoReverseMatch, reverse
 from custom_code.serializers import MSOSAlertSerializer
 from custom_code import tasks, source_functions, solar_system, event_functions
@@ -11,8 +12,9 @@ from collections import Counter
 from django_tasks.backends.database.models import DBTaskResult
 from unittest import mock
 from custom_code.models import (Event, EventModel, PSPLModel, PitkinFlareModel, StraightLineModel,
-                                DavenportFlareModel, FSPLModel, RGESAlert, SourceDiagnostics)
-from custom_code.filters import (CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES,
+                                DavenportFlareModel, FSPLModel, RGESAlert, SourceDiagnostics, AlertIngest,
+                                EventDiagnostics, ModelingProcess)
+from custom_code.filters import (CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES, EVENT_DIAGNOSTIC_FIELDS,
                                  RogueTargetFilterSet, find_row_with)
 from tom_targets.models import Target, TargetName
 from tom_dataproducts.models import PhotometryReducedDatum, ReducedDatum
@@ -23,7 +25,7 @@ from custom_code import (pylima_fit_functions, general_fit_functions, utils,
 import datetime
 import importlib
 import json
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor
 import io
 import multiprocessing
 import os
@@ -53,10 +55,13 @@ from altaipony.fit_flares import fit_flares
 import numpy as np
 import copy
 
-# The tests log in users who have enrolled in nothing and have no name or email. The project's
-# policies for real users (every user enrols in 2FA, and fills in their name and email) would send
-# each of them to the page for that, rather than the page being tested.
-_policy_overrides = override_settings(TOM_MFA_REQUIRED=None, TOM_REQUIRED_USER_FIELDS=[])
+# The tests log in users who have enrolled in nothing, have no name or email, and have accepted no
+# terms. The project's policies for real users (every user enrols in 2FA, fills in their name and
+# email, and accepts the terms of service) would send each of them to the page for that, rather than
+# the page being tested.
+_policy_overrides = override_settings(
+    TOM_MFA_REQUIRED=None, TOM_REQUIRED_USER_FIELDS=[], TOM_TERMS_OF_SERVICE_VERSION=None,
+)
 
 
 def setUpModule():
@@ -97,10 +102,22 @@ def create_test_target_with_photometry(name='TestObject'):
         event_id='test_event' if name == 'TestObject' else 'test_event_' + name,   # Unique, as the database requires
         start_time=jd_start_time + ((20*interval) / (24.0 * 60.0)),
         duration=240 / (24.0 * 60.0),  # Units of days
-        peak_mag=16.0
     )
 
     return t, e, ndata, nlc, datums
+
+def make_modeling(event, completed_at=None, status='Complete', **diagnostics):
+    """
+    A modeling process of an event, finished at the time given (now, by default) with the status
+    given, and the diagnostics it found. Returns the process and its diagnostics.
+    """
+    completed_at = completed_at or timezone.now()
+    process = ModelingProcess.objects.create(
+        event=event, started_at=completed_at - datetime.timedelta(minutes=5),
+        completed_at=completed_at if status in ('Complete', 'Failed') else None,
+        status=status, code_version='test',
+    )
+    return process, EventDiagnostics.objects.create(process=process, **diagnostics)
 
 def create_test_target_with_gaussian():
     """
@@ -300,8 +317,8 @@ class TestDataUtils(TestCase):
 
     def test_store_flare_model_parameters(self):
         """
-        Both flare models are created the first time an event's fit is stored, and
-        updated in place after that
+        Each modeling process stores its own flare models: the next process adds new ones, and
+        leaves those of the one before as they were
         """
         fit = {
             'chisq': 12.5, 'red_chisq': 1.25, 'BIC': 30.0, 'fit_method': 'mcmc',
@@ -315,38 +332,25 @@ class TestDataUtils(TestCase):
              {'tau_gaussian_rise': 0.1, 'tau_gaussian_rise_error': 0.01,
               'tau_exponential_decay': 0.3, 'tau_exponential_decay_error': 0.02}),
         ]
+        first, _ = make_modeling(self.event)
+        second, _ = make_modeling(self.event)
         for store, model_class, extra in cases:
             with self.subTest(model=model_class.__name__):
                 results = {**fit, **extra}
 
-                flare = store(self.event, results)
+                flare = store(self.event, first, results)
                 self.assertEqual(model_class.objects.filter(event=self.event).count(), 1)
+                self.assertEqual(flare.process, first)
                 for name, value in results.items():
                     self.assertEqual(getattr(flare, name), value, name)
 
                 results['chisq'], results['tau_threshold'] = 15.0, 0.5
-                store(self.event, results)
-                flare = model_class.objects.get(event=self.event)
-                self.assertEqual((flare.chisq, flare.tau_threshold), (15.0, 0.5))
-
-    def test_store_event_statistics(self):
-        """
-        The statistics reach the database and the Event instance the caller holds, so that
-        a later save() of that instance (as the diagnostics do) doesn't write the old values
-        back over them
-        """
-        results = {'coverage_fraction': 0.85, 'symmetry': 0.4}
-
-        data_utils.store_event_statistics(self.event, results)
-
-        stored = Event.objects.get(pk=self.event.pk)
-        self.assertEqual((stored.coverage_fraction, stored.symmetry), (0.85, 0.4))
-        self.assertEqual((self.event.coverage_fraction, self.event.symmetry), (0.85, 0.4))
-
-        self.event.delta_chi2_PSPL = 3.0
-        self.event.save()
-        stored = Event.objects.get(pk=self.event.pk)
-        self.assertEqual((stored.coverage_fraction, stored.symmetry, stored.delta_chi2_PSPL), (0.85, 0.4, 3.0))
+                store(self.event, second, results)
+                self.assertEqual(model_class.objects.filter(event=self.event).count(), 2)
+                earlier = model_class.objects.get(process=first)
+                later = model_class.objects.get(process=second)
+                self.assertEqual((earlier.chisq, earlier.tau_threshold), (12.5, 0.4))
+                self.assertEqual((later.chisq, later.tau_threshold), (15.0, 0.5))
 
     def test_get_reduced_data(self):
         """
@@ -564,7 +568,7 @@ class TestGeneralFitFunctions(TestCase):
         high_points = 10
         full_lightcurve = np.empty((self.ndata,3))
         full_lightcurve[:,0] = [Time(rd.timestamp).jd for rd in self.datums]
-        full_lightcurve[0:high_points-1,1] = 16.0
+        full_lightcurve[0:high_points,1] = 16.0
         full_lightcurve[high_points:,1] = 20.0
         full_lightcurve[:,2] = 0.001
         baseline_lightcurve = full_lightcurve[high_points+1:,:]
@@ -865,9 +869,10 @@ class TestGeneralSearch(TestCase):
         self.event_a = Event.objects.create(
             target=self.target_a, event_id='EVA_24', start_time=2460000.0, duration=2.0)
         self.event_b = Event.objects.create(
-            target=self.target_b, event_id='EVB_99', start_time=2460010.0, duration=2.0,
-            nearest_moving_object='Ceres')
-        PSPLModel.objects.create(event=self.event_a, model_type='PSPL microlensing', chisq=24.0)
+            target=self.target_b, event_id='EVB_99', start_time=2460010.0, duration=2.0)
+        make_modeling(self.event_b, nearest_moving_object='Ceres')
+        PSPLModel.objects.create(
+            event=self.event_a, process=make_modeling(self.event_a)[0], model_type='PSPL microlensing', chisq=24.0)
         for event in (self.event_a, self.event_b):
             RGESAlert.objects.create(
                 alert_id=1, roman_id='ROMAN-' + event.event_id, event=event, alert_origin='MSOS')
@@ -911,11 +916,18 @@ class TestGeneralSearch(TestCase):
                 self.assertNotContains(response, unexpected)
 
         # Any field of the event: a number is found wherever it occurs
-        Event.objects.filter(pk=self.event_b.pk).update(delta_chi2_PSPL=777.5, Nlinked_events=3)
-        response = self.found('events:list', '777.5')
+        response = self.found('events:list', '2460010')
         self.assertContains(response, 'EVB_99')
         self.assertNotContains(response, 'EVA_24')
         self.assertContains(self.found('events:list', 'EVA_24'), 'EVA_24')
+
+        # The moving object is that of the latest modeling that completed, not of one that failed
+        make_modeling(self.event_a, status='Failed', nearest_moving_object='Vesta')
+        self.assertNotContains(self.found('events:list', 'vesta'), 'EVA_24')
+        make_modeling(self.event_a, nearest_moving_object='Vesta')
+        self.assertContains(self.found('events:list', 'vesta'), 'EVA_24')
+        make_modeling(self.event_a, nearest_moving_object='Pallas')
+        self.assertNotContains(self.found('events:list', 'vesta'), 'EVA_24')
 
     def test_event_table_scrolls_horizontally(self):
         # More than a page of events, so that there is a pagination bar
@@ -948,6 +960,152 @@ class TestGeneralSearch(TestCase):
                 self.assertNotContains(response, unexpected)
 
 
+class TestEventDiagnosticsPages(TestCase):
+    """The pages that show an event's diagnostics show those of its latest completed modeling"""
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_user('diagnostics_user'))
+        target = Target.objects.create(name='DiagTarget', ra=10.0, dec=10.0)
+        self.modeled = Event.objects.create(target=target, event_id='DIAG_1', start_time=2460000.0, duration=2.0)
+        self.unmodeled = Event.objects.create(target=target, event_id='DIAG_2', start_time=2460010.0, duration=2.0)
+        now = timezone.now()
+        make_modeling(self.modeled, completed_at=now - datetime.timedelta(days=1),
+                      delta_chi2_PSPL=-111.0, delta_BIC_PSPL=-1.5, peak_mag=18.25, nearest_moving_object='Old')
+        make_modeling(self.modeled, completed_at=now, delta_chi2_PSPL=-222.0, delta_BIC_PSPL=-2.5,
+                      delta_chi2_PSPL_bestflare=-5.0, delta_BIC_PSPL_bestflare=-6.0,
+                      peak_mag=17.25, nearest_moving_object='Ceres')
+        make_modeling(self.modeled, status='Running', delta_chi2_PSPL=-333.0, peak_mag=1.0)
+        make_modeling(self.modeled, status='Failed', delta_chi2_PSPL=-444.0)
+
+    def test_the_events_table_shows_the_latest_completed_modeling(self):
+        response = self.client.get(reverse('events:list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '-222')
+        self.assertContains(response, 'Ceres')
+        for stale in ('-111', '-333', '-444', 'Old'):
+            self.assertNotContains(response, stale)
+        self.assertContains(response, 'DIAG_2')    # An event not yet modeled is listed, without values
+
+    def test_the_events_table_sorts_on_the_diagnostics(self):
+        other = Event.objects.create(target=self.modeled.target, event_id='DIAG_3', start_time=2460020.0, duration=2.0)
+        make_modeling(other, delta_chi2_PSPL=-999.0)
+
+        for sort, expected in [('delta_chi2_PSPL', ['DIAG_3', 'DIAG_1']), ('-delta_chi2_PSPL', ['DIAG_1', 'DIAG_3'])]:
+            with self.subTest(sort=sort):
+                response = self.client.get(reverse('events:list'), {'sort': sort}, headers={'HX-Request': 'true'})
+                ids = [e.event_id for e in response.context['table'].page.object_list.data if e.event_id != 'DIAG_2']
+                self.assertEqual(ids, expected)
+
+    def test_the_events_table_reads_the_diagnostics_in_the_query_for_its_events(self):
+        for i in range(15):
+            event = Event.objects.create(target=self.modeled.target, event_id=f'MANY_{i}', start_time=2460100.0 + i, duration=1.0)
+            make_modeling(event, delta_chi2_PSPL=-float(i))
+
+        with CaptureQueriesContext(connection) as queries:
+            self.client.get(reverse('events:list'))
+
+        # Not one for each event
+        reading = [q for q in queries.captured_queries if 'custom_code_eventdiagnostics' in q['sql']]
+        self.assertEqual(len(reading), 1)
+
+    def test_the_detail_page_shows_the_latest_completed_modeling(self):
+        response = self.client.get(reverse('events:detail', kwargs={'pk': self.modeled.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['diagnostics'].delta_chi2_PSPL, -222.0)
+        self.assertEqual(response.context['modeling_process'].status, 'Complete')
+        self.assertContains(response, '17.25000')    # Peak mag
+        self.assertContains(response, 'Ceres')
+        for stale in ('-111', '-333', '-444'):
+            self.assertNotContains(response, stale)
+
+    def test_the_detail_page_shows_each_best_flare_value_in_its_own_cell(self):
+        html = self.client.get(reverse('events:detail', kwargs={'pk': self.modeled.pk})).content.decode()
+
+        self.assertRegex(html, r'(?s)BIC PSPL best flare</div>\s*<div class="event-params-value">-6\.000<')
+        self.assertRegex(html, r'(?s)BIC PSPL</div>\s*<div class="event-params-value">-2\.500<')
+
+    def test_the_detail_page_of_an_event_not_modeled(self):
+        response = self.client.get(reverse('events:detail', kwargs={'pk': self.unmodeled.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['diagnostics'])
+        self.assertIsNone(response.context['modeling_process'])
+
+
+class TestCurrentModelsAreShown(TestCase):
+    """
+    An event modeled more than once has a set of models from each time. The pages that list models
+    show those of its latest completed modeling: they are what the event's models now are.
+    """
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_user('models_user'))
+        target = Target.objects.create(name='ModelsTarget', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(target=target, event_id='MODELS_1', start_time=2460000.0, duration=2.0)
+        self.other = Event.objects.create(target=target, event_id='MODELS_2', start_time=2460010.0, duration=2.0)
+        now = timezone.now()
+        self.first = self.make_run(self.event, now - datetime.timedelta(days=2), chisq=111.0)
+        self.second = self.make_run(self.event, now - datetime.timedelta(days=1), chisq=222.0)
+        self.running = self.make_run(self.event, now, chisq=333.0, status='Running')
+        self.failed = self.make_run(self.event, now, chisq=444.0, status='Failed')
+        self.make_run(self.other, now, chisq=555.0)
+
+    def make_run(self, event, completed_at, chisq, status='Complete'):
+        process, _ = make_modeling(event, completed_at=completed_at, status=status)
+        PSPLModel.objects.create(event=event, process=process, model_type='PSPL microlensing', chisq=chisq)
+        StraightLineModel.objects.create(event=event, process=process, model_type='Straight line', chisq=chisq)
+        return process
+
+    def test_the_models_list_has_the_models_of_the_latest_completed_modeling(self):
+        response = self.client.get(reverse('eventmodels:list'))
+
+        chisqs = sorted(model.chisq for model in response.context['table'].page.object_list.data)
+        self.assertEqual(chisqs, [222.0, 222.0, 555.0, 555.0])
+
+    def test_the_models_list_of_one_event(self):
+        response = self.client.get(reverse('eventmodels:list'), {'event': self.event.pk})
+
+        chisqs = sorted(model.chisq for model in response.context['table'].page.object_list.data)
+        self.assertEqual(chisqs, [222.0, 222.0])
+
+    def test_a_modeling_in_progress_doesnt_change_what_is_shown_until_it_completes(self):
+        def shown():
+            response = self.client.get(reverse('eventmodels:list'), {'event': self.event.pk})
+            return {model.process_id for model in response.context['table'].page.object_list.data}
+
+        self.assertEqual(shown(), {self.second.pk})
+        ModelingProcess.objects.filter(pk=self.running.pk).update(status='Complete', completed_at=timezone.now())
+        self.assertEqual(shown(), {self.running.pk})
+
+    def test_the_event_page_has_a_button_for_each_current_model(self):
+        response = self.client.get(reverse('events:detail', kwargs={'pk': self.event.pk}))
+
+        html = response.content.decode()
+        self.assertEqual(html.count('>PSPL microlensing</a>'), 1)
+        self.assertEqual(html.count('>Straight line</a>'), 1)
+        buttons = re.findall(r'eventmodels:parameters|parameters/\?model=(\d+)', html)
+        shown = {int(pk) for pk in buttons if pk}
+        self.assertEqual(shown, set(EventModel.objects.filter(process=self.second).values_list('pk', flat=True)))
+
+    def test_an_event_not_modeled_has_no_models(self):
+        target = Target.objects.get(name='ModelsTarget')
+        unmodeled = Event.objects.create(target=target, event_id='MODELS_3', start_time=2460020.0, duration=2.0)
+
+        html = self.client.get(reverse('events:detail', kwargs={'pk': unmodeled.pk})).content.decode()
+
+        self.assertIn('No models for this event yet', html)
+
+    def test_the_parameters_of_any_model_can_still_be_shown(self):
+        """The earlier models are kept, and reached by what refers to them, such as a saved cutfile"""
+        model = EventModel.objects.get(process=self.first, model_type='PSPL microlensing')
+
+        response = self.client.get(reverse('eventmodels:parameters'), {'model': model.pk})
+
+        self.assertEqual(response.status_code, 200)
+
+
 class TestTaskQueuing(TestCase):
     """
     The tasks that work out a target's or event's derived values are queued when it is created
@@ -956,8 +1114,7 @@ class TestTaskQueuing(TestCase):
 
     def setUp(self):
         patches = {name: mock.patch(f'custom_code.signals.{name}') for name in
-                   ('compute_source_diagnostics',
-                    'check_event_for_moving_objects', 'make_event_lightcurve')}
+                   ('compute_source_diagnostics',)}
         self.queued = {name: patch.start() for name, patch in patches.items()}
         for patch in patches.values():
             self.addCleanup(patch.stop)
@@ -971,40 +1128,14 @@ class TestTaskQueuing(TestCase):
     def only(self, *names):
         return {name: int(name in names) for name in self.queued}
 
-    def test_event_tasks(self):
+    def test_event_saves_queue_nothing(self):
+        """An event's own work (its thumbnail, the moving object search) is done by its modeling"""
         target = Target.objects.create(name='QueueTarget', ra=10.0, dec=10.0)
         self.counts()
-        event_tasks = ('check_event_for_moving_objects', 'make_event_lightcurve')
 
         event = Event.objects.create(target=target, event_id='Q_1', start_time=2460000.0, duration=2.0)
-        self.assertEqual(self.counts(), self.only(*event_tasks))
-
-        # Saves that don't change when the event happens: whole or partial, repeated, or from
-        # an instance holding stale values (as in the modeling code)
-        stale = Event.objects.get(pk=event.pk)
-        event.delta_chi2_PSPL = 3.0
-        event.save()
-        event.save()
-        event.save(update_fields=['delta_chi2_PSPL'])
-        Event.objects.filter(pk=event.pk).update(peak_mag=20.0)
-        stale.save()
-        self.assertEqual(self.counts(), self.only())
-
-        # Changes to it, however they're saved
         event.duration = 3.0
         event.save()
-        self.assertEqual(self.counts(), self.only(*event_tasks))
-        event.start_time = 2460001.0
-        event.save(update_fields=['start_time'])
-        self.assertEqual(self.counts(), self.only(*event_tasks))
-
-        # ...but only when it is a change: the new value is what's stored already
-        event.save(update_fields=['start_time', 'duration'])
-        self.assertEqual(self.counts(), self.only())
-
-        # An instance with stale old values changes nothing if the stored row matches it
-        stale.start_time, stale.duration = event.start_time, event.duration
-        stale.save()
         self.assertEqual(self.counts(), self.only())
 
     def test_target_tasks(self):
@@ -1033,28 +1164,11 @@ class TestTaskQueuing(TestCase):
         self.assertEqual(self.counts(), self.only(*target_tasks))
 
 
-class TestEventThumbnailSurvivesModeling(TestCase):
+class TestModelComparisonDiagnostics(TestCase):
     """
-    The thumbnail is made by a background task while the process that ingested the alert goes on
-    modeling the event, with the Event instance it loaded before the thumbnail existed. The
-    diagnostics that save that instance must write only what they calculated: a full save writes the
-    old, empty thumbnail back over the new one.
+    The diagnostics that compare an event's models add what they find to the results of its modeling
+    (from which its EventDiagnostics are made), without touching the Event
     """
-
-    THUMBNAIL = 'event_thumbnails/2026/10/11/made_by_the_task.png'
-
-    def setUp(self):
-        target = Target.objects.create(name='ThumbTarget', ra=10.0, dec=10.0)
-        self.event = Event.objects.create(target=target, event_id='THUMB_1', start_time=2460000.0, duration=2.0)
-        # The task finishes while the ingest still holds its own copy, which has no thumbnail
-        Event.objects.filter(pk=self.event.pk).update(thumbnail=self.THUMBNAIL)
-        self.assertFalse(self.event.thumbnail)
-
-    def assertThumbnailKept(self, **expected):
-        stored = Event.objects.get(pk=self.event.pk)
-        self.assertEqual(stored.thumbnail.name, self.THUMBNAIL)
-        for name, value in expected.items():
-            self.assertAlmostEqual(getattr(stored, name), value, msg=name)
 
     def test_straight_line_comparisons(self):
         straight_line = StraightLineModel(model_type='Straight line', chisq=100.0, BIC=110.0)
@@ -1066,8 +1180,8 @@ class TestEventThumbnailSurvivesModeling(TestCase):
         ]
         for mulens, expected in cases:
             with self.subTest(model=mulens.model_type):
-                diagnostics.compare_mulens_with_straightline(self.event, mulens, straight_line)
-                self.assertThumbnailKept(**expected)
+                results = diagnostics.compare_mulens_with_straightline(mulens, straight_line, {})
+                self.assertEqual(results, expected)
 
     def test_flare_model_comparisons(self):
         pspl = PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0)
@@ -1076,13 +1190,13 @@ class TestEventThumbnailSurvivesModeling(TestCase):
         davenport = DavenportFlareModel(model_type='Davenport flare', chisq=60.0, BIC=70.0, red_chisq=1.1)
         pitkin = PitkinFlareModel(model_type='Pitkin flare', chisq=80.0, BIC=90.0, red_chisq=1.9)
 
-        diagnostics.compare_flare_models(self.event, pspl, fspl, davenport, pitkin)
+        results = diagnostics.compare_flare_models(pspl, fspl, davenport, pitkin, {})
 
-        self.assertThumbnailKept(
+        self.assertEqual(results, dict(
+            bestflare_model_type='Davenport',
             delta_chi2_PSPL_bestflare=-20.0, delta_BIC_PSPL_bestflare=-25.0,
             delta_chi2_FSPL_bestflare=-30.0, delta_BIC_FSPL_bestflare=-35.0,
-        )
-        self.assertEqual(Event.objects.get(pk=self.event.pk).bestflare_model_type.strip(), 'Davenport')
+        ))
 
     def test_best_flare_model_is_the_lower_reduced_chisq(self):
         pspl = PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0)
@@ -1090,28 +1204,377 @@ class TestEventThumbnailSurvivesModeling(TestCase):
         davenport = DavenportFlareModel(model_type='Davenport flare', chisq=60.0, BIC=70.0, red_chisq=2.5)
         pitkin = PitkinFlareModel(model_type='Pitkin flare', chisq=80.0, BIC=90.0, red_chisq=1.5)
 
-        diagnostics.compare_flare_models(self.event, pspl, fspl, davenport, pitkin)
+        results = diagnostics.compare_flare_models(pspl, fspl, davenport, pitkin, {})
 
-        self.assertThumbnailKept(delta_chi2_PSPL_bestflare=-40.0, delta_BIC_PSPL_bestflare=-45.0)
-        self.assertEqual(Event.objects.get(pk=self.event.pk).bestflare_model_type.strip(), 'Pitkin')
+        self.assertEqual(results['bestflare_model_type'], 'Pitkin')
+        self.assertEqual(results['delta_chi2_PSPL_bestflare'], -40.0)
+        self.assertEqual(results['delta_BIC_PSPL_bestflare'], -45.0)
+
+    def test_flare_comparison_without_a_flare_model_keeps_the_results(self):
+        """The results are returned whether or not a flare model was fit: they're what the next step uses"""
+        results = diagnostics.compare_flare_models(
+            PSPLModel(chisq=40.0, BIC=45.0), None, None, None, {'peak_mag': 17.0})
+        self.assertEqual(results, {'peak_mag': 17.0})
 
     def test_microlensing_diagnostics(self):
         pspl = PSPLModel(model_type='PSPL microlensing', chisq=40.0, BIC=45.0, red_chisq=1.4)
         fspl = FSPLModel(model_type='FSPL microlensing', chisq=30.0, BIC=35.0, red_chisq=1.2)
         straight_line = StraightLineModel(model_type='Straight line', chisq=100.0, BIC=110.0)
 
-        diagnostics.calc_mulens_diagnostics(self.event, pspl, fspl, straight_line)
+        results = diagnostics.calc_mulens_diagnostics(pspl, fspl, straight_line, {})
 
-        self.assertThumbnailKept(
+        self.assertEqual(results, dict(
+            bestmulens_model_type='FSPL',
             delta_chi2_PSPL=-60.0, delta_BIC_PSPL=-65.0, delta_chi2_FSPL=-70.0, delta_BIC_FSPL=-75.0,
-        )
-        self.assertEqual(Event.objects.get(pk=self.event.pk).bestmulens_model_type.strip(), 'FSPL')
+        ))
 
-    def test_baseline_diagnostics(self):
-        data_utils.store_baseline_diagnostics(self.event, {
-            'frac_below_baseline': 0.4, 'max_excursion_below_baseline': -0.3, 'Npoint_above_3sigma': 7,
-        })
-        self.assertThumbnailKept(frac_below_baseline=0.4, max_excursion_below_baseline=-0.3, Npoint_above_3sigma=7)
+
+class TestEventModelingProcess(TestCase):
+    """
+    Each modeling of an event is a process of its own, which says how far it got, and is never left
+    looking as if it were still going. An event is modeled again by a new process, which leaves the
+    earlier ones as they were.
+    """
+
+    def setUp(self):
+        target = Target.objects.create(name='StatusTarget', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(target=target, event_id='StatusTarget_1', start_time=2460000.0, duration=2.0)
+
+    def test_running_then_complete(self):
+        seen = []
+
+        def fit(event, process, nlinked_events):
+            process.refresh_from_db()
+            seen.append((process.status, process.completed_at))
+
+        with mock.patch.object(event_functions, '_fit_event_models', side_effect=fit):
+            event_functions.run_event_modeling(self.event)
+
+        self.assertEqual(seen, [('Running', None)])
+        process = ModelingProcess.objects.get(event=self.event)
+        self.assertEqual(process.status, 'Complete')
+        self.assertLessEqual(abs((timezone.now() - process.completed_at).total_seconds()), 60)
+        self.assertLessEqual(process.started_at, process.completed_at)
+        self.assertEqual(process.code_version, event_functions.__version__.get_version())
+
+    def test_a_failure_is_marked_and_raised(self):
+        with mock.patch.object(event_functions, '_fit_event_models', side_effect=ValueError('no fit')):
+            with self.assertRaises(ValueError):
+                event_functions.run_event_modeling(self.event)
+
+        process = ModelingProcess.objects.get(event=self.event)
+        self.assertEqual(process.status, 'Failed')
+        # It did end, so says when, but it isn't one whose results are to be used
+        self.assertIsNotNone(process.completed_at)
+
+    def test_modeling_again_makes_a_new_process(self):
+        with mock.patch.object(event_functions, '_fit_event_models', side_effect=[ValueError('no fit'), None, None]):
+            with self.assertRaises(ValueError):
+                event_functions.run_event_modeling(self.event)
+            event_functions.run_event_modeling(self.event)
+            event_functions.run_event_modeling(self.event)
+
+        statuses = list(ModelingProcess.objects.filter(event=self.event).order_by('pk').values_list('status', flat=True))
+        self.assertEqual(statuses, ['Failed', 'Complete', 'Complete'])
+
+    def test_the_number_of_linked_events_is_passed_on(self):
+        with mock.patch.object(event_functions, '_fit_event_models') as fit:
+            event_functions.run_event_modeling(self.event, nlinked_events=3)
+        self.assertEqual(fit.call_args.args[2], 3)
+
+
+class TestCodeVersion(TestCase):
+    """The version recorded with each modeling says which commit of the code made it"""
+
+    def setUp(self):
+        from custom_code import __version__
+        self.module = __version__
+        self.module.get_git_hash.cache_clear()
+        self.addCleanup(self.module.get_git_hash.cache_clear)
+
+    def version(self, built_from=None, git=None):
+        """The version, as it is where the environment says the image was built from `built_from`"""
+        environment = {self.module.COMMIT_ENV_VAR: built_from} if built_from is not None else {}
+        with mock.patch.dict(os.environ, environment), \
+                mock.patch.object(self.module.subprocess, 'run', **(git or {})) as run:
+            self.module.get_git_hash.cache_clear()
+            return self.module.get_version(), run
+
+    def clear_env(self):
+        patch = mock.patch.dict(os.environ)
+        patch.start()
+        self.addCleanup(patch.stop)
+        os.environ.pop(self.module.COMMIT_ENV_VAR, None)
+
+    def test_the_version_number_has_the_commit(self):
+        self.clear_env()
+        git = {'return_value': mock.Mock(stdout='1a2b3c4d5e6f\n')}
+
+        version, run = self.version(git=git)
+
+        self.assertEqual(version, '0.1.0+1a2b3c4d5e6f')
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ['git', 'describe'])
+        self.assertIn('--dirty', command)
+        self.assertIn('--exclude=*', command)    # A tag's name is never used for the hash
+        # Asked about the repository the code is in, not wherever the process was started
+        self.assertEqual(run.call_args.kwargs['cwd'], os.path.dirname(os.path.abspath(self.module.__file__)))
+
+    def test_changes_since_the_commit_are_marked(self):
+        self.clear_env()
+
+        version, _ = self.version(git={'return_value': mock.Mock(stdout='1a2b3c4d5e6f-dirty\n')})
+
+        self.assertEqual(version, '0.1.0+1a2b3c4d5e6f-dirty')
+
+    def test_the_commit_an_image_was_built_from_is_used_instead_of_asking_git(self):
+        version, run = self.version(built_from='abcdef123456-dirty')
+
+        self.assertEqual(version, '0.1.0+abcdef123456-dirty')
+        run.assert_not_called()
+
+    def test_a_long_hash_is_abbreviated_to_fit_where_it_is_stored(self):
+        version, _ = self.version(built_from='0123456789abcdef0123456789abcdef01234567-dirty')
+
+        self.assertEqual(version, '0.1.0+0123456789ab-dirty')
+        self.assertLessEqual(len(version), ModelingProcess._meta.get_field('code_version').max_length)
+
+    def test_not_knowing_the_commit_is_said_so(self):
+        # An image built without being told, or code with no repository and no git
+        for built_from, git in [('unknown', {'side_effect': FileNotFoundError('git')}),
+                                ('', {'side_effect': subprocess.CalledProcessError(128, 'git')}),
+                                ('', {'return_value': mock.Mock(stdout='\n')})]:
+            with self.subTest(built_from=built_from, git=git):
+                version, _ = self.version(built_from=built_from, git=git)
+                self.assertEqual(version, '0.1.0+unknown')
+
+    def test_in_this_repository_the_commit_is_found(self):
+        self.clear_env()
+
+        version = self.module.get_version()
+
+        self.assertRegex(version, r'^0\.1\.0\+([0-9a-f]{12}(-dirty)?|unknown)$')
+
+    def test_each_modeling_records_the_version(self):
+        target = Target.objects.create(name='VersionTarget', ra=10.0, dec=10.0)
+        event = Event.objects.create(target=target, event_id='V_1', start_time=2460000.0, duration=1.0)
+
+        with mock.patch.dict(os.environ, {self.module.COMMIT_ENV_VAR: 'abcdef123456'}), \
+                mock.patch.object(event_functions, '_fit_event_models'):
+            self.module.get_git_hash.cache_clear()
+            event_functions.run_event_modeling(event)
+
+        self.assertEqual(ModelingProcess.objects.get(event=event).code_version, '0.1.0+abcdef123456')
+
+
+class TestVersionedModelingMigration(TransactionTestCase):
+    """
+    Events modeled before each modeling was kept become one completed process each, holding the
+    diagnostics (and models) they had. A TransactionTestCase, as it migrates the database back and
+    forth, which the tests' own transaction can't undo.
+    """
+
+    BEFORE = [('custom_code', '0057_mark_modeled_events_complete')]
+    AFTER = [('custom_code', '0060_remove_event_diagnostic_fields')]
+
+    def migrate(self, targets):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+        executor = MigrationExecutor(connection)
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
+
+    def setUp(self):
+        self.addCleanup(self.migrate, [('custom_code', self.latest_migration())])
+        self.old_apps = self.migrate(self.BEFORE)
+
+    @staticmethod
+    def latest_migration():
+        from django.db import connection
+        from django.db.migrations.loader import MigrationLoader
+        loader = MigrationLoader(connection)
+        return max(name for app, name in loader.graph.leaf_nodes() if app == 'custom_code')
+
+    def test_modeled_events_each_get_a_complete_process_with_their_diagnostics_and_models(self):
+        Event_ = self.old_apps.get_model('custom_code', 'Event')
+        PSPL = self.old_apps.get_model('custom_code', 'PSPLModel')
+        modeled_at = datetime.datetime(2026, 11, 1, 12, 0, tzinfo=datetime.timezone.utc)
+        modeled = Event_.objects.create(
+            event_id='M_1', start_time=2460000.0, duration=2.0, modeling_status='Complete',
+            modeled_at=modeled_at, peak_mag=17.5, delta_chi2_PSPL=-12.0, nearest_moving_object='Ceres', Nlinked_events=2)
+        failed = Event_.objects.create(
+            event_id='M_2', start_time=2460010.0, duration=2.0, modeling_status='Failed')
+        waiting = Event_.objects.create(event_id='M_3', start_time=2460020.0, duration=2.0)
+        model = PSPL.objects.create(event_id=modeled.pk, model_type='PSPL microlensing', chisq=3.0)
+
+        apps = self.migrate(self.AFTER)
+
+        Process, Diagnostics = apps.get_model('custom_code', 'ModelingProcess'), apps.get_model('custom_code', 'EventDiagnostics')
+        process = Process.objects.get(event_id=modeled.pk)
+        self.assertEqual((process.status, process.completed_at, process.code_version),
+                         ('Complete', modeled_at, 'before-versioning'))
+        diagnostics = Diagnostics.objects.get(process=process)
+        self.assertEqual((diagnostics.peak_mag, diagnostics.delta_chi2_PSPL, diagnostics.nearest_moving_object,
+                          diagnostics.Nlinked_events), (17.5, -12.0, 'Ceres', 2))
+        self.assertEqual(apps.get_model('custom_code', 'EventModel').objects.get(pk=model.pk).process_id, process.pk)
+
+        # An event that failed keeps that; one never modeled has no process
+        self.assertEqual(Process.objects.get(event_id=failed.pk).status, 'Failed')
+        self.assertFalse(Process.objects.filter(event_id=waiting.pk).exists())
+        self.assertEqual(Process.objects.count(), 2)
+
+    def test_migrating_back_restores_the_latest_diagnostics(self):
+        Event_ = self.old_apps.get_model('custom_code', 'Event')
+        event = Event_.objects.create(
+            event_id='M_1', start_time=2460000.0, duration=2.0, modeling_status='Complete',
+            modeled_at=datetime.datetime(2026, 11, 1, tzinfo=datetime.timezone.utc), peak_mag=17.5)
+        self.migrate(self.AFTER)
+        apps = self.migrate([('custom_code', '0059_copy_event_diagnostics_to_processes')])
+        Process, Diagnostics = apps.get_model('custom_code', 'ModelingProcess'), apps.get_model('custom_code', 'EventDiagnostics')
+        later = Process.objects.create(
+            event_id=event.pk, started_at=datetime.datetime(2026, 11, 8, tzinfo=datetime.timezone.utc),
+            completed_at=datetime.datetime(2026, 11, 8, 1, tzinfo=datetime.timezone.utc), status='Complete')
+        Diagnostics.objects.create(process=later, peak_mag=16.0)
+
+        apps = self.migrate(self.BEFORE)
+
+        restored = apps.get_model('custom_code', 'Event').objects.get(pk=event.pk)
+        self.assertEqual((restored.peak_mag, restored.modeling_status), (16.0, 'Complete'))
+        self.assertEqual(restored.modeled_at, datetime.datetime(2026, 11, 8, 1, tzinfo=datetime.timezone.utc))
+
+
+class TestAlertIngestBatch(TestCase):
+    """
+    The ingest_alerts command records each batch. It's complete when the alerts are ingested and the
+    background tasks they queued have finished, failed if it stops for any reason before.
+    """
+
+    class SerialExecutor:
+        """Stands in for the pool of worker processes, doing each job as it's submitted"""
+        crash = None
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            if self.crash:
+                raise self.crash
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def submit(self, function, *args):
+            future = Future()
+            try:
+                future.set_result(function(*args))
+            except Exception as error:
+                future.set_exception(error)
+            return future
+
+    def setUp(self):
+        from custom_code.management.commands import ingest_alerts
+        self.module = ingest_alerts
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        for name in ('a.json', 'b.json'):
+            open(os.path.join(self.directory.name, name), 'w').close()
+        self.SerialExecutor.crash = None
+        self.addCleanup(setattr, self.SerialExecutor, 'crash', None)
+
+    def run_command(self, timeout=0, ingest=None):
+        patches = [
+            mock.patch.object(self.module, 'ProcessPoolExecutor', self.SerialExecutor),
+            mock.patch.object(self.module, 'ingest_alert_and_model_event', ingest or (lambda alert_file: True)),
+            mock.patch.object(self.module.time, 'sleep'),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        call_command('ingest_alerts', self.directory.name, '--task-timeout', str(timeout), stdout=StringIO())
+
+    def queue_a_task(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            return tasks.compute_source_diagnostics.enqueue(1)
+
+    def test_a_batch_is_recorded_as_complete(self):
+        self.run_command()
+
+        batch = AlertIngest.objects.get()
+        self.assertEqual(batch.status, 'Complete')
+        self.assertTrue(batch.batch_id.startswith('ingest_'))
+        self.assertLessEqual(batch.started_at, batch.completed_at)
+
+    def test_the_batch_is_running_while_the_alerts_are_ingested(self):
+        seen = []
+
+        def ingest(alert_file):
+            seen.append(AlertIngest.objects.get().status)
+            return True
+
+        self.run_command(ingest=ingest)
+
+        self.assertEqual(seen, ['Running', 'Running'])
+
+    def test_a_failed_alert_does_not_fail_the_batch(self):
+        def ingest(alert_file):
+            raise ValueError('bad alert')
+
+        self.run_command(ingest=ingest)
+
+        self.assertEqual(AlertIngest.objects.get().status, 'Complete')
+
+    def test_a_crash_marks_the_batch_failed_and_is_raised(self):
+        self.SerialExecutor.crash = RuntimeError('pool would not start')
+
+        with self.assertRaises(RuntimeError):
+            self.run_command()
+
+        batch = AlertIngest.objects.get()
+        self.assertEqual(batch.status, 'Failed')
+        self.assertIsNone(batch.completed_at)
+
+    def test_tasks_not_finished_in_time_fail_the_batch(self):
+        def ingest(alert_file):
+            self.queue_a_task()
+            return True
+
+        with self.assertRaisesRegex(CommandError, 'db_worker'):
+            self.run_command(ingest=ingest)
+
+        batch = AlertIngest.objects.get()
+        self.assertEqual(batch.status, 'Failed')
+        self.assertIsNone(batch.completed_at)
+
+    def test_tasks_that_are_finished_do_not_hold_the_batch_up(self):
+        from django_tasks.backends.database.models import DBTaskResult
+
+        def ingest(alert_file):
+            self.queue_a_task()
+            DBTaskResult.objects.update(status='SUCCEEDED')
+            return True
+
+        self.run_command(ingest=ingest)
+
+        self.assertEqual(AlertIngest.objects.get().status, 'Complete')
+
+    def test_wait_for_tasks(self):
+        from django_tasks.backends.database.models import DBTaskResult
+        before = timezone.now()
+        self.queue_a_task()
+        self.queue_a_task()
+
+        # Two are waiting
+        self.assertEqual(self.module.wait_for_tasks(before, timeout=0, poll_seconds=0), 2)
+        # One done, one failed: neither is waited for... but the third is
+        first, second = DBTaskResult.objects.order_by('pk')
+        DBTaskResult.objects.filter(pk=first.pk).update(status='SUCCEEDED')
+        DBTaskResult.objects.filter(pk=second.pk).update(status='FAILED')
+        self.assertEqual(self.module.wait_for_tasks(before, timeout=0, poll_seconds=0), 0)
+        self.queue_a_task()
+        self.assertEqual(self.module.wait_for_tasks(before, timeout=0, poll_seconds=0), 1)
+        # Tasks queued before the time given aren't the batch's
+        self.assertEqual(self.module.wait_for_tasks(timezone.now(), timeout=0, poll_seconds=0), 0)
 
 
 class TestIngestAlertsWorkers(TestCase):
@@ -1205,6 +1668,22 @@ class TestMcmcChains(TestCase):
 
         name = self.stored().mcmc_chains.name
         self.assertTrue(name.endswith('/ChainsTarget_1_other_mcmc_chains.npy'), name)
+
+    def test_the_chains_of_a_modeling_are_named_with_its_number(self):
+        data_utils.generate_corner_plot(self.model, self.results(), 'ChainsTarget_1_PSPL_corner_plot_12.png')
+
+        stored = self.stored()
+        self.assertTrue(stored.corner_plot.name.endswith('/ChainsTarget_1_PSPL_corner_plot_12.png'))
+        self.assertTrue(stored.mcmc_chains.name.endswith('/ChainsTarget_1_PSPL_12_mcmc_chains.npy'), stored.mcmc_chains.name)
+
+    def test_each_modeling_keeps_its_own_files(self):
+        other = PSPLModel.objects.create(event=self.event, model_type='PSPL microlensing')
+
+        data_utils.generate_corner_plot(self.model, self.results(), 'ChainsTarget_1_PSPL_corner_plot_1.png')
+        data_utils.generate_corner_plot(other, self.results(), 'ChainsTarget_1_PSPL_corner_plot_2.png')
+
+        self.assertEqual(len(self.files('arrays')), 2)
+        self.assertEqual(len(self.files('eventmodel_plots')), 2)
 
     def test_a_failed_fit_removes_the_files_and_what_refers_to_them(self):
         data_utils.generate_corner_plot(self.model, self.results(), 'ChainsTarget_1_PSPL_corner_plot.png')
@@ -1417,6 +1896,31 @@ class TestRemoveSource(TestCase):
         self.assertTrue(Event.objects.filter(pk=self.other_event.pk).exists())
         self.assertTrue(PSPLModel.objects.filter(pk=self.other_model.pk).exists())
 
+    def test_removes_every_modeling_of_the_source_with_its_files(self):
+        """Each modeling of an event is a process with its diagnostics, models, plots and chains"""
+        kept_process, kept_diagnostics = make_modeling(self.other_event, peak_mag=18.0)
+        files = []
+        for peak_mag in (17.0, 17.5):
+            process, _ = make_modeling(self.event, peak_mag=peak_mag)
+            plot = self.save_file(f'eventmodel_plots/2026/10/11/RemoveMe_1_PSPL_corner_plot_{process.pk}.png')
+            chains = self.save_file(f'arrays/2026/10/11/RemoveMe_1_PSPL_{process.pk}_mcmc_chains.npy')
+            PSPLModel.objects.create(
+                event=self.event, process=process, model_type='PSPL microlensing', corner_plot=plot, mcmc_chains=chains)
+            files += [plot, chains]
+        # A file left by a modeling whose model is gone is still found by its name
+        files.append(self.save_file('arrays/2026/10/11/RemoveMe_1_PSPL_99_mcmc_chains.npy'))
+        files.append(self.save_file('eventmodel_plots/2026/10/11/RemoveMe_1_PSPL_corner_plot_99.png'))
+        kept_files = [self.save_file('arrays/2026/10/11/KeepMe_1_PSPL_5_mcmc_chains.npy'),
+                      self.save_file('arrays/2026/10/11/RemoveMe2_1_PSPL_5_mcmc_chains.npy')]
+
+        self.run_command()
+
+        self.assertEqual(self.exists(files), [False] * len(files))
+        self.assertEqual(self.exists(kept_files), [True] * len(kept_files))
+        self.assertFalse(ModelingProcess.objects.filter(event__target__name='RemoveMe').exists())
+        self.assertEqual(list(EventDiagnostics.objects.values_list('process', flat=True)), [kept_process.pk])
+        self.assertTrue(ModelingProcess.objects.filter(pk=kept_process.pk).exists())
+
     def test_a_source_without_images(self):
         Event.objects.filter(pk=self.event.pk).update(thumbnail=None)
         EventModel.objects.filter(pk=self.model.pk).update(corner_plot=None)
@@ -1506,39 +2010,62 @@ class TestCornerPlotNames(TestCase):
                 with mock.patch.multiple(
                         'custom_code.event_functions', data_utils=mock.DEFAULT, diagnostics=mock.DEFAULT,
                         general_fit_functions=mock.DEFAULT, pylima_fit_functions=mock.DEFAULT,
-                        flare_fit_functions=mock.DEFAULT) as mocks:
+                        flare_fit_functions=mock.DEFAULT, solar_system=mock.DEFAULT,
+                        EventDiagnostics=mock.DEFAULT) as mocks:
                     mocks['data_utils'].store_microlensing_model_parameters.return_value = (mock.Mock(), mock.Mock())
+                    mocks['solar_system'].find_moving_objects_near_event.return_value = (None, None)
 
                     event_functions.run_event_modeling(event)
 
+                # A name for each process: the fits of the next modeling mustn't replace these files
+                process = ModelingProcess.objects.get(event=event).pk
                 self.assertEqual(self.names_made(mocks['data_utils'].generate_corner_plot), [
-                    stem + '_PSPL_corner_plot.png', stem + '_FSPL_corner_plot.png',
-                    stem + '_davenport_corner_plot.png', stem + '_pitkin_corner_plot.png',
+                    f'{stem}_PSPL_corner_plot_{process}.png', f'{stem}_FSPL_corner_plot_{process}.png',
+                    f'{stem}_davenport_corner_plot_{process}.png', f'{stem}_pitkin_corner_plot_{process}.png',
                 ])
 
-    def test_microlensing_command(self):
-        for source, event_id, stem in self.CASES:
-            with self.subTest(event_id=event_id):
-                self.make_event(source, event_id)
-                with mock.patch('custom_code.management.commands.fit_microlensing_model.data_utils') as data_utils_mock, \
-                        mock.patch('custom_code.management.commands.fit_microlensing_model.pylima_fit_functions'):
-                    data_utils_mock.store_microlensing_model_parameters.return_value = (mock.Mock(), mock.Mock())
 
-                    call_command('fit_microlensing_model', source)
+class TestFitEventCommand(TestCase):
+    """fit_event models one event, with a process of its own like any other modeling"""
 
-                self.assertEqual(self.names_made(data_utils_mock.generate_corner_plot),
-                                 [stem + '_PSPL_corner_plot.png', stem + '_FSPL_corner_plot.png'])
+    def setUp(self):
+        self.target = Target.objects.create(name='FitTarget', ra=10.0, dec=10.0)
+        self.old = Event.objects.create(target=self.target, event_id='FIT_1', start_time=2460000.0, duration=1.0)
+        self.new = Event.objects.create(target=self.target, event_id='FIT_2', start_time=2460100.0, duration=1.0)
 
-    def test_flare_command(self):
-        for source, event_id, stem in self.CASES:
-            with self.subTest(event_id=event_id):
-                self.make_event(source, event_id)
-                with mock.patch('custom_code.management.commands.fit_flare_models.data_utils') as data_utils_mock, \
-                        mock.patch('custom_code.management.commands.fit_flare_models.flare_fit_functions'):
-                    call_command('fit_flare_models', source)
+    def fit(self, *args):
+        with mock.patch('custom_code.management.commands.fit_event.event_functions') as functions:
+            call_command('fit_event', 'FitTarget', *args, stdout=StringIO())
+        return functions.run_event_modeling
 
-                self.assertEqual(self.names_made(data_utils_mock.generate_corner_plot),
-                                 [stem + '_davenport_corner_plot.png', stem + '_pitkin_corner_plot.png'])
+    def test_models_the_most_recent_event_by_default(self):
+        modeling = self.fit()
+
+        modeling.assert_called_once()
+        self.assertEqual(modeling.call_args.args[0], self.new)
+
+    def test_models_the_event_asked_for(self):
+        modeling = self.fit('--event-id', 'FIT_1')
+
+        self.assertEqual(modeling.call_args.args[0], self.old)
+
+    def test_passes_on_the_number_of_linked_events(self):
+        modeling = self.fit()
+
+        self.assertEqual(modeling.call_args.args[1], 0)    # Not linked to another event
+
+    def test_says_what_is_missing(self):
+        with self.assertRaisesRegex(CommandError, 'No source named Nothing'):
+            call_command('fit_event', 'Nothing')
+        with self.assertRaisesRegex(CommandError, 'No event found'):
+            call_command('fit_event', 'FitTarget', '--event-id', 'FIT_9')
+
+    def test_a_modeling_process_is_made_each_time(self):
+        with mock.patch.object(event_functions, '_fit_event_models'):
+            call_command('fit_event', 'FitTarget', stdout=StringIO())
+            call_command('fit_event', 'FitTarget', stdout=StringIO())
+
+        self.assertEqual(ModelingProcess.objects.filter(event=self.new, status='Complete').count(), 2)
 
 
 class TestPhotometryPlot(TestCase):
@@ -2262,32 +2789,37 @@ class TestJPLQueryRetries(TestCase):
         self.get.side_effect = requests.exceptions.ConnectionError('down')
 
         with self.assertLogs('custom_code.solar_system', level='WARNING') as logs:
-            tasks.check_event_for_moving_objects.call(self.event.pk)    # no exception
+            found = solar_system.find_moving_objects_near_event(self.event)    # no exception
 
+        self.assertEqual(found, (None, None))
         self.assertEqual(self.get.call_count, solar_system.QUERY_ATTEMPTS)
         self.assertTrue(any('skipping the moving object search' in line for line in logs.output))
-        self.event.refresh_from_db()
-        self.assertIsNone(self.event.nearest_moving_object)
 
     def test_moving_object_search_skips_if_horizons_gives_no_position(self):
         self.get.side_effect = [self.Response(500)] * solar_system.QUERY_ATTEMPTS
 
         with self.assertLogs('custom_code.solar_system', level='WARNING'):
-            solar_system.find_moving_objects_near_event(self.event)
+            found = solar_system.find_moving_objects_near_event(self.event)
 
+        # Nothing found, which is how the modeling expects to be told: two values, never None
+        self.assertEqual(found, (None, None))
         # The second service isn't asked about a position that isn't known
         self.assertEqual(self.get.call_count, solar_system.QUERY_ATTEMPTS)
 
-    def test_moving_object_found_after_a_retry_is_stored(self):
+    def test_no_moving_object_near_the_event(self):
+        with mock.patch('custom_code.solar_system.query_horizons_for_roman', return_value={'X': 1.0}), \
+                mock.patch('custom_code.solar_system.query_sbident_for_event', return_value=(None, None)):
+            self.assertEqual(solar_system.find_moving_objects_near_event(self.event), (None, None))
+
+    def test_moving_object_found_after_a_retry_is_returned(self):
         vector = {'X': 1.0, 'Y': 2.0, 'Z': 3.0, 'VX': 0.1, 'VY': 0.2, 'VZ': 0.3}
         self.get.side_effect = requests.exceptions.ConnectionError('down')
         with mock.patch('custom_code.solar_system.query_horizons_for_roman', return_value=vector), \
                 mock.patch('custom_code.solar_system.query_sbident_for_event', return_value=('433 Eros', 1.5)):
-            solar_system.find_moving_objects_near_event(self.event)
+            name, separation = solar_system.find_moving_objects_near_event(self.event)
 
-        self.event.refresh_from_db()
-        self.assertEqual(self.event.nearest_moving_object, '433 Eros')
-        self.assertAlmostEqual(self.event.angular_separation_moving_object, 1.5 / 3600.0)
+        self.assertEqual(name, '433 Eros')
+        self.assertAlmostEqual(separation, 1.5 / 3600.0)    # In degrees
 
 
 class TestBackgroundTasks(TestCase):
@@ -2298,27 +2830,19 @@ class TestBackgroundTasks(TestCase):
         self.event = Event.objects.create(target=self.target, event_id='TASK_1', start_time=2460000.0, duration=2.0)
 
     def test_tasks_run_for_existing_rows(self):
-        for task, work, row in [
-            (tasks.check_event_for_moving_objects, 'find_moving_objects_near_event', self.event),
-            (tasks.make_event_lightcurve, 'generate_event_lightcurves', self.event),
-        ]:
-            with self.subTest(task=work), mock.patch(f'custom_code.tasks.{work}') as mocked:
-                task.call(row.pk)
-                self.assertEqual(mocked.call_count, 1)
-                self.assertEqual(mocked.call_args.args[0].pk, row.pk)
+        with mock.patch('custom_code.tasks.run_source_diagnostics') as mocked:
+            tasks.compute_source_diagnostics.call(self.target.pk)
+        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(mocked.call_args.args[0].pk, self.target.pk)
 
     def test_tasks_for_deleted_rows_do_nothing(self):
-        target_pk, event_pk = self.target.pk, self.event.pk
+        target_pk = self.target.pk
         self.event.delete()
         self.target.delete()
 
-        for task, work, pk in [
-            (tasks.check_event_for_moving_objects, 'find_moving_objects_near_event', event_pk),
-            (tasks.make_event_lightcurve, 'generate_event_lightcurves', event_pk),
-        ]:
-            with self.subTest(task=work), mock.patch(f'custom_code.tasks.{work}') as mocked:
-                task.call(pk)   # no DoesNotExist
-                mocked.assert_not_called()
+        with mock.patch('custom_code.tasks.run_source_diagnostics') as mocked:
+            tasks.compute_source_diagnostics.call(target_pk)   # no DoesNotExist
+        mocked.assert_not_called()
 
 
 class AlertPacketMixin:
@@ -2349,10 +2873,6 @@ class TestIngestAlert(AlertPacketMixin, TestCase):
     def test_repeat_ingest_finds_existing_alert(self):
         first = self.ingest(self.packet())
         self.assertEqual(RGESAlert.objects.count(), 1)
-        # The peak magnitude is estimated after the alert is created, so it no longer has
-        # its initial value, and the ingest timestamp is different each time
-        self.assertNotEqual(RGESAlert.objects.get().alert_peak_mag, 0.0)
-
         second = self.ingest(self.packet())
 
         self.assertEqual(RGESAlert.objects.count(), 1)
@@ -2365,7 +2885,6 @@ class TestIngestAlert(AlertPacketMixin, TestCase):
         queued = Counter(DBTaskResult.objects.values_list('task_path', flat=True))
         self.assertEqual({path.split('.')[-1]: n for path, n in queued.items()}, {
             'compute_source_diagnostics': 1,
-            'check_event_for_moving_objects': 1, 'make_event_lightcurve': 1,
         })
 
         # A different alert for the same source is recorded
@@ -2524,8 +3043,7 @@ class TestIngestAlertsCommand(AlertPacketMixin, TestCase):
 
 class TestIngestTaskOrdering(AlertPacketMixin, TransactionTestCase):
     """
-    The tasks that need an alert's lightcurve (the source diagnostics, the event's lightcurve
-    plot) must not be queued until it has been stored. A TransactionTestCase, as the order
+    The tasks that need an alert's lightcurve (the source diagnostics) must not be queued until it has been stored. A TransactionTestCase, as the order
     only shows when transactions really commit, which a TestCase never does.
     """
 
@@ -2549,7 +3067,6 @@ class TestIngestTaskOrdering(AlertPacketMixin, TransactionTestCase):
         MSOSAlertSerializer.create.__wrapped__(serial, serial.validated_data)
 
         self.assertEqual(seen['compute_source_diagnostics'], 0)
-        self.assertEqual(seen['make_event_lightcurve'], 0)
 
     def test_tasks_are_queued_once_the_photometry_is_stored(self):
         seen = self.record_photometry_at_queuing()
@@ -2559,8 +3076,7 @@ class TestIngestTaskOrdering(AlertPacketMixin, TransactionTestCase):
         serial.save()
 
         self.assertEqual(PhotometryReducedDatum.objects.count(), 3 * 60)
-        self.assertEqual(set(seen), {'compute_source_diagnostics', 'check_event_for_moving_objects',
-                                     'make_event_lightcurve'})
+        self.assertEqual(set(seen), {'compute_source_diagnostics'})
         for task_name, nphotometry in seen.items():
             self.assertEqual(nphotometry, 3 * 60, task_name)
 
@@ -2683,38 +3199,47 @@ class TestMultiEventDiagnostics(TestCase):
 
     def test_second_peak_diagnostics(self):
 
-        diagnostics.second_peak_diagnostics(self.test_event)
+        make_modeling(self.test_event2, peak_mag=15.5)
 
-        test_event = Event.objects.get(pk=self.test_event.pk)
+        results = diagnostics.second_peak_diagnostics(self.test_event, {})
 
         midpoint = self.test_event.start_time + self.test_event.duration/2.0
         midpoint2 = self.test_event2.start_time + self.test_event2.duration/2.0
         dt = abs(midpoint - midpoint2)
-        self.assertAlmostEqual(test_event.time_to_second_peak, dt, 2)
-        self.assertAlmostEqual(test_event.second_peak_mag, self.test_event2.peak_mag)
+        self.assertAlmostEqual(abs(results['time_to_second_peak']), dt, 2)
+        self.assertAlmostEqual(results['second_peak_mag'], 15.5)
 
-    def test_second_peak_diagnostics_survive_saving_the_event(self):
-        # The modeling pipeline goes on to save() the Event instance it passes to the diagnostics
-        diagnostics.second_peak_diagnostics(self.test_event)
-        self.assertIsNotNone(self.test_event.time_to_second_peak)
+    def test_second_peak_mag_is_from_the_latest_completed_modeling(self):
+        now = timezone.now()
+        make_modeling(self.test_event2, completed_at=now - datetime.timedelta(days=2), peak_mag=15.0)
+        make_modeling(self.test_event2, completed_at=now - datetime.timedelta(days=1), peak_mag=15.5)
+        make_modeling(self.test_event2, completed_at=now, status='Failed', peak_mag=99.0)
+        make_modeling(self.test_event2, status='Running', peak_mag=98.0)
 
-        self.test_event.delta_chi2_PSPL = 3.0
-        self.test_event.save()
+        results = diagnostics.second_peak_diagnostics(self.test_event, {})
 
-        test_event = Event.objects.get(pk=self.test_event.pk)
-        self.assertIsNotNone(test_event.time_to_second_peak)
-        self.assertIsNotNone(test_event.second_peak_mag)
-        self.assertEqual(test_event.delta_chi2_PSPL, 3.0)
+        self.assertAlmostEqual(results['second_peak_mag'], 15.5)
+
+    def test_second_peak_diagnostics_without_a_modeled_neighbour(self):
+        results = diagnostics.second_peak_diagnostics(self.test_event, {})
+
+        self.assertIn('time_to_second_peak', results)
+        self.assertNotIn('second_peak_mag', results)
+
+    def test_second_peak_diagnostics_of_a_lone_event(self):
+        lone = Event.objects.create(
+            target=self.test_target2, event_id='lone', start_time=2460500.0, duration=1.0)
+        self.assertEqual(diagnostics.second_peak_diagnostics(lone, {'a': 1}), {'a': 1})
 
     def test_link_events(self):
         target_list, events_list, corr_idx = create_event_set()
 
-        diagnostics.link_events(events_list)
+        linked = diagnostics.link_events(events_list)
 
+        # How many others each is linked to is returned, by event, for the modeling to record
         for i in corr_idx:
-            e = events_list[i]
-            e = Event.objects.get(pk=e.pk)
-            assert(e.Nlinked_events == len(corr_idx) - 1)
+            self.assertEqual(linked[events_list[i].pk], len(corr_idx) - 1)
+        self.assertEqual(set(linked), {e.pk for e in events_list if e.target is not None})
 
 
 class TestCutfileSearch(TestCase):
@@ -2731,25 +3256,49 @@ class TestCutfileSearch(TestCase):
             ('CutfileA', 100.0, 'RRLyr', 2.0, 0.2, 50.0, -0.5),
             ('CutfileB', 200.0, 'Mira', 6.0, 5.0, 500.0, 0.5),
         ]
+        self.specs = {name: (tE, chisq, gradient) for name, _, _, _, tE, chisq, gradient in specs}
         for name, ra, variable_type, duration, tE, chisq, gradient in specs:
             target = Target.objects.create(name=name, ra=ra, dec=10.0)
             SourceDiagnostics.objects.create(
                 target=target, nearest_variable_type=variable_type, baseline_magnitude=20.0, period=ra / 100.0)
             event = Event.objects.create(target=target, event_id=name + '-1', start_time=2460000.0, duration=duration)
-            PSPLModel.objects.create(event=event, model_type='PSPL microlensing', tE=tE, chisq=chisq)
-            PitkinFlareModel.objects.create(event=event, model_type='Pitkin flare', t_peak=2460000.5, chisq=chisq)
-            StraightLineModel.objects.create(event=event, model_type='Straight line', gradient=gradient, intercept=20.0)
-            StraightLineModel.objects.create(event=event, model_type='Baseline', gradient=99.0, intercept=20.0)
+            # Modeled once, long ago
+            self.make_run(name, datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc))
+
+    def modeled_at(self, name, when):
+        """Say the one modeling of the source's event was completed at the time given (it was, long ago)"""
+        ModelingProcess.objects.filter(event__target__name=name).update(
+            started_at=when - datetime.timedelta(minutes=5), completed_at=when)
+
+    def make_run(self, name, completed_at, status='Complete', **diagnostics):
+        """
+        A modeling process of the event of source `name`, with the diagnostics given and the
+        models (as many as in setUp, with the same parameters) it made, ending as stated at the
+        time given. Returns the process and its diagnostics.
+        """
+        tE, chisq, gradient = self.specs[name]
+        event = Event.objects.get(target__name=name)
+        process, entry = make_modeling(event, completed_at=completed_at, status=status, **diagnostics)
+        PSPLModel.objects.create(event=event, process=process, model_type='PSPL microlensing', tE=tE, chisq=chisq)
+        PitkinFlareModel.objects.create(
+            event=event, process=process, model_type='Pitkin flare', t_peak=2460000.5, chisq=chisq)
+        StraightLineModel.objects.create(
+            event=event, process=process, model_type='Straight line', gradient=gradient, intercept=20.0)
+        StraightLineModel.objects.create(
+            event=event, process=process, model_type='Baseline', gradient=99.0, intercept=20.0)
+        return process, entry
 
     def search(self, query_string=''):
         filterset = CutfileFilterSet(QueryDict(query_string), queryset=EventModel.objects.all())
         return sorted(filterset.qs.values_list('event__target__name', flat=True))
 
-    def test_event_parameters_cover_event_model_except_thumbnail(self):
+    def test_event_parameters_cover_event_and_its_diagnostics_except_thumbnail(self):
         names = {p.name for p in CUTFILE_EVENT_PARAMS}
-        expected = {f.name for f in Event._meta.get_fields() if f.concrete} - {'id', 'target', 'thumbnail'}
-        self.assertEqual(names, expected)
+        own = {f.name for f in Event._meta.get_fields() if f.concrete} - {'id', 'target', 'thumbnail'}
+        diagnostics = {f.name for f in EventDiagnostics._meta.concrete_fields} - {'id', 'process', 'created_at'}
+        self.assertEqual(names, own | diagnostics)
         self.assertIn('peak_mag', names)
+        self.assertEqual(set(EVENT_DIAGNOSTIC_FIELDS), diagnostics)
 
     def model_types_found(self, query_string):
         filterset = CutfileFilterSet(QueryDict(query_string), queryset=EventModel.objects.all())
@@ -2854,11 +3403,9 @@ class TestCutfileSearch(TestCase):
         self.assertEqual([s['id'] for s in layout['sections'] if s['open']], ['model'])
 
     def test_search_limited_to_models_available_as_of_a_moment(self):
-        # CutfileA's models were made in 2025, CutfileB's in 2026
-        EventModel.objects.filter(event__target__name='CutfileA').update(
-            created_at=datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc))
-        EventModel.objects.filter(event__target__name='CutfileB').update(
-            created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc))
+        # CutfileA was modeled in 2025, CutfileB in 2026
+        self.modeled_at('CutfileA', datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc))
+        self.modeled_at('CutfileB', datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc))
 
         self.assertEqual(self.search('model_type=pspl'), ['CutfileA', 'CutfileB'])
         for as_of in ['2025-06-01T00:00:00Z', '2025-06-01T00:00:00+00:00', '2025-06-01T02:00:00+02:00']:
@@ -2875,7 +3422,7 @@ class TestCutfileSearch(TestCase):
         # A model made after the cutfile doesn't change what it finds
         before = self.search('model_type=pspl&as_of=2026-06-01T00:00:00Z')
         event = Event.objects.get(event_id='CutfileA-1')
-        PSPLModel.objects.create(event=event, model_type='PSPL microlensing', tE=0.1, chisq=1.0)
+        self.make_run('CutfileA', datetime.datetime(2026, 7, 1, tzinfo=datetime.timezone.utc))
         self.assertEqual(self.search('model_type=pspl&as_of=2026-06-01T00:00:00Z'), before)
 
     def make_diagnostics(self, name, created, **values):
@@ -2922,7 +3469,8 @@ class TestCutfileSearch(TestCase):
     def test_source_without_diagnostics(self):
         target = Target.objects.create(name='CutfileC', ra=300.0, dec=10.0)
         event = Event.objects.create(target=target, event_id='CutfileC-1', start_time=2460000.0, duration=1.0)
-        PSPLModel.objects.create(event=event, model_type='PSPL microlensing', tE=1.0, chisq=1.0)
+        process, _ = make_modeling(event, completed_at=datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc))
+        PSPLModel.objects.create(event=event, process=process, model_type='PSPL microlensing', tE=1.0, chisq=1.0)
 
         # Found by anything that isn't about the diagnostics, but not by their thresholds
         self.assertEqual(self.search('model_type=pspl'), ['CutfileA', 'CutfileB', 'CutfileC'])
@@ -2932,7 +3480,6 @@ class TestCutfileSearch(TestCase):
 
     def test_source_parameters_as_of_a_moment_use_the_diagnostics_then(self):
         utc = datetime.timezone.utc
-        EventModel.objects.update(created_at=datetime.datetime(2020, 1, 1, tzinfo=utc))
         # A's diagnostics were revised in 2026 (setUp's entries are made now); B's were first made then
         self.make_diagnostics('CutfileA', datetime.datetime(2025, 1, 1, tzinfo=utc),
                               nearest_variable_type='Algol', baseline_magnitude=15.0)
@@ -2976,16 +3523,125 @@ class TestCutfileSearch(TestCase):
         self.assertEqual(sources['CutfileB']['ra'], 200.0)
 
         # As of a moment, the entry then
-        EventModel.objects.update(created_at=datetime.datetime(2020, 1, 1, tzinfo=utc))
         data = self.client.get(url + '&as_of=2025-06-01T00:00:00Z').json()
         sources = {r['source']['name']: r['source'] for r in data['results']}
         self.assertEqual(sources['CutfileA']['nearest_variable_type'], 'Algol')
         self.assertEqual(sources['CutfileA']['baseline_magnitude'], 15.0)
 
+    def modeled(self, name, completed_at, **diagnostics):
+        """A completed modeling of the event of source `name`, with these diagnostics"""
+        return self.make_run(name, completed_at, **diagnostics)
+
+    def test_event_diagnostics_are_filtered_on_the_latest_modeling(self):
+        utc = datetime.timezone.utc
+        # Each event was modeled twice. Only the later is current; a modeling that failed isn't used
+        self.modeled('CutfileA', datetime.datetime(2026, 1, 1, tzinfo=utc), peak_mag=30.0, nearest_moving_object='Old')
+        self.modeled('CutfileA', datetime.datetime(2026, 1, 8, tzinfo=utc), peak_mag=16.0, nearest_moving_object='Ceres')
+        self.modeled('CutfileB', datetime.datetime(2026, 1, 1, tzinfo=utc), peak_mag=16.5)
+        self.modeled('CutfileB', datetime.datetime(2026, 1, 8, tzinfo=utc), peak_mag=25.0)
+        self.make_run('CutfileB', datetime.datetime(2026, 1, 9, tzinfo=utc), status='Failed', peak_mag=16.0)
+
+        self.assertEqual(self.search('model_type=pspl&event_peak_mag_max=17'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=pspl&event_peak_mag_min=20'), ['CutfileB'])
+        self.assertEqual(self.search('model_type=pspl&event_nearest_moving_object=cer'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=pspl&event_nearest_moving_object=old'), [])
+        # Alongside the event's own parameters, and others
+        self.assertEqual(self.search('model_type=pspl&event_peak_mag_max=17&event_duration_min=1'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=pspl&event_peak_mag_max=17&event_duration_min=5'), [])
+        self.assertEqual(self.search('model_type=pspl&event_peak_mag_max=17&pspl_tE_max=1'), ['CutfileA'])
+
+    def test_events_that_were_not_modeled_have_no_diagnostics_to_match(self):
+        self.modeled('CutfileA', timezone.now(), peak_mag=16.0)
+
+        self.assertEqual(self.search('model_type=pspl&event_peak_mag_min=0'), ['CutfileA'])
+        self.assertEqual(self.search('model_type=pspl'), ['CutfileA', 'CutfileB'])
+
+    def test_event_diagnostics_as_of_a_moment_are_those_of_the_latest_modeling_completed_by_then(self):
+        utc = datetime.timezone.utc
+        self.modeled('CutfileA', datetime.datetime(2026, 1, 1, tzinfo=utc), peak_mag=30.0)
+        self.modeled('CutfileA', datetime.datetime(2026, 1, 8, tzinfo=utc), peak_mag=16.0)
+
+        def found(as_of, peak):
+            return self.search(f'model_type=pspl&as_of={as_of}&event_peak_mag_max={peak}')
+
+        # Refit since, so it's different now, but not as it was
+        self.assertEqual(found('2026-01-05T00:00:00Z', 17), [])
+        self.assertEqual(found('2026-01-05T00:00:00Z', 31), ['CutfileA'])
+        self.assertEqual(found('2026-01-09T00:00:00Z', 17), ['CutfileA'])
+        # Before any modeling there are no diagnostics to match
+        self.assertEqual(found('2025-12-01T00:00:00Z', 99), [])
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_export_includes_the_event_diagnostics_and_the_modeling_they_are_from(self):
+        utc = datetime.timezone.utc
+        first, _ = self.modeled('CutfileA', datetime.datetime(2026, 1, 1, tzinfo=utc), peak_mag=30.0)
+        second, _ = self.modeled('CutfileA', datetime.datetime(2026, 1, 8, tzinfo=utc), peak_mag=16.0,
+                                 nearest_moving_object='Ceres')
+        self.client.force_login(User.objects.create_user('cutfile_user'))
+        url = reverse('cutfiles:list') + '?model_type=pspl&export=json'
+
+        results = {r['source']['name']: r for r in self.client.get(url).json()['results']}
+        event = results['CutfileA']['event']
+        self.assertEqual((event['peak_mag'], event['nearest_moving_object']), (16.0, 'Ceres'))
+        self.assertEqual(event['event_id'], 'CutfileA-1')
+        self.assertEqual(results['CutfileA']['modeling_process']['id'], second.pk)
+        self.assertEqual(results['CutfileA']['modeling_process']['code_version'], 'test')
+        # CutfileB was modeled once, long ago, and found nothing
+        self.assertIsNone(results['CutfileB']['event']['peak_mag'])
+        self.assertNotEqual(results['CutfileB']['modeling_process']['id'], second.pk)
+
+        # As of a moment, the modeling then
+        data = self.client.get(url + '&as_of=2026-01-05T00:00:00Z').json()
+        results = {r['source']['name']: r for r in data['results']}
+        self.assertEqual(results['CutfileA']['event']['peak_mag'], 30.0)
+        self.assertEqual(results['CutfileA']['modeling_process']['id'], first.pk)
+
+    def test_an_event_refit_has_only_the_models_of_its_latest_completed_modeling(self):
+        utc = datetime.timezone.utc
+        # CutfileA is modeled again, and again: the second time, as it was while still running, and the
+        # third time as it failed part way. Both made models, which no search should find
+        self.make_run('CutfileA', datetime.datetime(2026, 1, 8, tzinfo=utc))
+        self.make_run('CutfileA', datetime.datetime(2026, 1, 9, tzinfo=utc), status='Running')
+        self.make_run('CutfileA', datetime.datetime(2026, 1, 10, tzinfo=utc), status='Failed')
+
+        for query in ('model_type=pspl', 'model_type=straight_line', 'model_type=baseline', 'model_type=pitkin_flare'):
+            with self.subTest(query=query):
+                # One of each for each event, not one for each time it was modeled
+                self.assertEqual(self.search(query), ['CutfileA', 'CutfileB'])
+        self.assertEqual(EventModel.objects.filter(event__target__name='CutfileA').count(), 16)
+
+    def test_the_models_found_are_those_of_the_modeling_current_as_of_the_moment(self):
+        utc = datetime.timezone.utc
+        later, _ = self.make_run('CutfileA', datetime.datetime(2026, 1, 8, tzinfo=utc))
+        EventModel.objects.filter(process=later).update(chisq=7.0)
+        PSPLModel.objects.filter(process=later).update(tE=3.0)
+
+        def found(as_of, **thresholds):
+            query = QueryDict(mutable=True)
+            query.update({'model_type': 'pspl', **({'as_of': as_of} if as_of else {}), **thresholds})
+            filterset = CutfileFilterSet(query, queryset=EventModel.objects.all())
+            return sorted(filterset.qs.filter(event__target__name='CutfileA').values_list('psplmodel__tE', flat=True))
+
+        self.assertEqual(found('2026-01-05T00:00:00Z'), [0.2])    # Before the second modeling was complete
+        self.assertEqual(found('2026-01-09T00:00:00Z'), [3.0])
+        self.assertEqual(found(None), [3.0])
+        self.assertEqual(found('2019-01-01T00:00:00Z'), [])       # Before the first
+        # The parameters are those of the models then
+        self.assertEqual(found(None, pspl_tE_max='1'), [])
+        self.assertEqual(found('2026-01-05T00:00:00Z', pspl_tE_max='1'), [0.2])
+
+    def test_models_of_no_modeling_are_nobodys_current_models(self):
+        event = Event.objects.get(target__name='CutfileA')
+        PSPLModel.objects.create(event=event, model_type='PSPL microlensing', tE=0.1, chisq=1.0)
+        PSPLModel.objects.create(model_type='PSPL microlensing', tE=0.1, chisq=1.0)    # Its event has gone
+
+        self.assertEqual(self.search('model_type=pspl'), ['CutfileA', 'CutfileB'])
+        self.assertEqual(self.search('model_type=pspl&pspl_tE_max=0.15'), [])
+
     @override_settings(TOM_MFA_REQUIRED=None)
     def test_view_as_of(self):
-        EventModel.objects.filter(event__target__name='CutfileA').update(
-            created_at=datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc))
+        self.modeled_at('CutfileA', datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc))
+        self.modeled_at('CutfileB', datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc))
         self.client.force_login(User.objects.create_user('cutfile_user'))
         url = reverse('cutfiles:list')
 

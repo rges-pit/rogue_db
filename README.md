@@ -62,6 +62,16 @@ Then build the container from the ``docker-compose.yml`` file:
 docker compose up --build
 ```
 
+Each modeling of an event records the version of the code that did it, including the Git commit. A Docker
+image has no repository to look that up in, so tell the build which commit it is made from, if it is to be
+recorded:
+
+```bash
+GIT_COMMIT=$(git describe --always --dirty --abbrev=12 --exclude='*') docker compose up --build
+```
+
+(Without this, the commit is recorded as `unknown`.)
+
 The first build will likely take several minutes, since not all of the scientific packages used by RogueDB 
 provide PyPI wheels and have to be compiled.  Once the build has finished, open a browser and enter 
 http://localhost:8000 into the navigation bar.  Note that you can change the port number by editing the  
@@ -79,12 +89,12 @@ docker compose run --rm web python manage.py createsuperuser
 
 The container creates four services:
 
-| Name      | Service                                                                                                                                                                                   |
-|-----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `db`      | PostgreSQL. Its data is kept in the volume `rogue_pgdata`.                                                                                                                                |
-| `migrate` | Creates and updates the database's tables, then stops. Runs again on every `up`.                                                                                                          |
-| `web`     | The website, on port 8000.                                                                                                                                                                |
-| `worker`  | `manage.py db_worker`, which does the tasks the website queues (a source's diagnostics, an event's thumbnail, the search for moving objects). Without it these are queued and never done. |
+| Name      | Service                                                                                                                                    |
+|-----------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| `db`      | PostgreSQL. Its data is kept in the volume `rogue_pgdata`.                                                                                 |
+| `migrate` | Creates and updates the database's tables, then stops. Runs again on every `up`.                                                           |
+| `web`     | The website, on port 8000.                                                                                                                 |
+| `worker`  | `manage.py db_worker`, which does the tasks the website queues (computing source diagnostics). Without it these are queued and never done. |
 
 Image files created by RogueDB (e.g. lightcurve thumbnails) makes are kept in the volume `rogue_data`.
 

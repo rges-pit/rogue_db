@@ -27,9 +27,11 @@ from .models import (RGESAlert, Event, EventModel, MODEL_TYPE_CLASSES,
                      DavenportFlareModel, PitkinFlareModel)
 from .filters import (
     RGESAlertFilterSet, EventModelFilterSet, CutfileFilterSet, EventFilterSet,
-    CUTFILE_SOURCE_PARAMS, DIAGNOSTIC_FIELDS, latest_diagnostics_by_target
+    CUTFILE_SOURCE_PARAMS, DIAGNOSTIC_FIELDS, latest_diagnostics_by_target,
+    annotate_event_diagnostics, latest_event_diagnostics, latest_event_diagnostics_by_event, current_models
 )
-from .tables import RGESAlertTable, EventModelTable, EventTable, TargetEventTable, CutfileTable
+from .tables import (RGESAlertTable, EventModelTable, EventTable, TargetEventTable, CutfileTable,
+                     EVENT_TABLE_DIAGNOSTICS)
 from .forms import (RGESAlertForm, PSPLModelForm, FSPLModelForm, WideBoundPlanetModelForm,
                     DavenportFlareModelForm, PitkinFlareModelForm)
 
@@ -90,6 +92,14 @@ class EventListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     # available equivalent to this app's usual "newest first" default.
     ordering = ['-start_time']
 
+    # The diagnostics the table shows, which an event has a set of for each time it was modeled: the
+    # latest set is added to each event, as attributes, for the table to show and sort on
+    diagnostic_columns = EVENT_TABLE_DIAGNOSTICS
+
+    def get_queryset(self, *args, **kwargs):
+        queryset = super().get_queryset(*args, **kwargs)
+        return annotate_event_diagnostics(queryset, self.diagnostic_columns)
+
     def get_context_data(self, *args, **kwargs):
         """
         Adds the number of models visible and the query string to the context object.
@@ -125,6 +135,11 @@ class EventDetailView(LoginRequiredMixin,DetailView):
         context = super().get_context_data(*args, **kwargs)
         context['event'] = self.object
         context['target'] = self.object.target
+
+        # The diagnostics of the latest completed modeling of the event (none, if it hasn't been)
+        diagnostics = latest_event_diagnostics().filter(process__event=self.object).select_related('process').first()
+        context['diagnostics'] = diagnostics
+        context['modeling_process'] = diagnostics.process if diagnostics else None
         return context
 
 
@@ -152,6 +167,7 @@ class TargetEventListView(EventListView):
     and swaps in TargetEventTable, which drops the now-redundant target column.
     """
     table_class = TargetEventTable
+    diagnostic_columns = []
 
     def get_queryset(self, *args, **kwargs):
         queryset = super().get_queryset(*args, **kwargs)
@@ -179,8 +195,9 @@ class EventModelListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
         # Optional scoping to one Event's models -- used by the Events tab on
         # TargetDetailView (see EventTable.render_event_id), which links each
         # event_id to ?event=<pk> here. The standalone EventModel list page
-        # doesn't set this param, so it still shows every model, unfiltered.
-        queryset = super().get_queryset(*args, **kwargs)
+        # doesn't set this param, so it shows the models of every event.
+        # Of each event, those of its latest completed modeling: not the sets it has had before
+        queryset = current_models(super().get_queryset(*args, **kwargs))
         event_id = self.request.GET.get('event')
         if event_id:
             queryset = queryset.filter(event_id=event_id)
@@ -465,6 +482,26 @@ class TargetCutfileView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
             filterset.cutoff,
         )
 
+        # And the event diagnostics from the latest modeling of each event completed by then
+        event_diagnostics = latest_event_diagnostics_by_event(
+            {model.event_id for model in models if model.event_id}, filterset.cutoff
+        )
+
+        def event_values(event):
+            values = _field_values(event, exclude=('thumbnail',))
+            entry = event_diagnostics.get(event.pk)
+            if entry:
+                values.update(_field_values(entry, exclude=('id', 'created_at')))
+            return values
+
+        def modeling_process(event):
+            entry = event_diagnostics.get(event.pk)
+            if not entry:
+                return None
+            process = entry.process
+            return {'id': process.pk, 'completed_at': _json_safe(process.completed_at),
+                    'code_version': process.code_version}
+
         def source_values(target):
             entry = diagnostics.get(target.pk)
             values = {'id': target.pk, 'name': target.name}
@@ -478,7 +515,8 @@ class TargetCutfileView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
             event, target = model.event, model.event.target if model.event else None
             results.append({
                 'source': source_values(target) if target else None,
-                'event': _field_values(event, exclude=('thumbnail',)) if event else None,
+                'event': event_values(event) if event else None,
+                'modeling_process': modeling_process(event) if event else None,
                 'model': _field_values(model, exclude=('corner_plot', 'eventmodel_ptr')),
             })
 

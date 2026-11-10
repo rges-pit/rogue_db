@@ -100,6 +100,16 @@ class EventRenderMixin:
         return format_html('<img src="{}" alt="lightcurve thumbnail" style="max-height: 60px;">', value.url)
 
 
+# The diagnostics of an event that its table shows: from its latest modeling, which the view adds to
+# each event as attributes of these names (see EventListView)
+EVENT_TABLE_DIAGNOSTICS = [
+    'delta_chi2_PSPL', 'delta_BIC_PSPL', 'delta_chi2_FSPL', 'delta_BIC_FSPL',
+    'delta_chi2_PSPL_bestflare', 'delta_BIC_PSPL_bestflare',
+    'delta_chi2_FSPL_bestflare', 'delta_BIC_FSPL_bestflare',
+    'DIA_centroid_shift', 'PSF_centroid_shift', 'nearest_moving_object',
+]
+
+
 class EventTable(EventRenderMixin, HTMXTable):
     """
     Table to present information on lightcurve events, across every target.
@@ -111,17 +121,26 @@ class EventTable(EventRenderMixin, HTMXTable):
     # what it shows to the file, and the table's hx-boost then loads the picture's bytes into the table
     thumbnail = tables.Column(orderable=False)
 
+    # The event's diagnostics are not fields of the Event, but annotations the view adds
+    delta_chi2_PSPL = tables.Column(verbose_name='Δχ² PSPL')
+    delta_BIC_PSPL = tables.Column(verbose_name='ΔBIC PSPL')
+    delta_chi2_FSPL = tables.Column(verbose_name='Δχ² FSPL')
+    delta_BIC_FSPL = tables.Column(verbose_name='ΔBIC FSPL')
+    delta_chi2_PSPL_bestflare = tables.Column(verbose_name='Δχ² PSPL best flare')
+    delta_BIC_PSPL_bestflare = tables.Column(verbose_name='ΔBIC PSPL best flare')
+    delta_chi2_FSPL_bestflare = tables.Column(verbose_name='Δχ² FSPL best flare')
+    delta_BIC_FSPL_bestflare = tables.Column(verbose_name='ΔBIC FSPL best flare')
+    DIA_centroid_shift = tables.Column(verbose_name='DIA centroid shift')
+    PSF_centroid_shift = tables.Column(verbose_name='PSF centroid shift')
+    nearest_moving_object = tables.Column(verbose_name='Nearest moving object')
+
     class Meta(HTMXTable.Meta):
         model = Event
         # Scrolls horizontally: this table has more columns than fit across the page
         template_name = 'custom_code/event_table_scroll.html'
         fields = [
             'target', 'thumbnail', 'event_id', 'start_time', 'duration',
-            'delta_chi2_PSPL', 'delta_BIC_PSPL',
-            'delta_chi2_FSPL', 'delta_BIC_FSPL', 'delta_chi2_PSPL_bestflare',
-            'delta_BIC_PSPL_bestflare', 'delta_chi2_FSPL_bestflare',
-            'delta_BIC_FSPL_bestflare', 'DIA_centroid_shift', 'PSF_centroid_shift',
-            'nearest_moving_object', 'period'
+            *EVENT_TABLE_DIAGNOSTICS, 'period'
         ]
         # HTMXTable declares a 'selection' checkbox column for bulk actions; alerts
         # have no such grouping form, so it's excluded here.

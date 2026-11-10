@@ -33,27 +33,27 @@
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">Peak mag</div>
-                <div class="event-params-value">{{event.peak_mag|floatformat:5}}</div>
+                <div class="event-params-value">{{diagnostics.peak_mag|floatformat:5}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">Coverage</div>
-                <div class="event-params-value">{{event.coverage_fraction|floatformat:2}}</div>
+                <div class="event-params-value">{{diagnostics.coverage_fraction|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">Symmetry</div>
-                <div class="event-params-value">{{event.symmetry|floatformat:2}}</div>
+                <div class="event-params-value">{{diagnostics.symmetry|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;t 2nd peak [d]</div>
-                <div class="event-params-value">{{event.time_to_second_peak|floatformat:2}}</div>
+                <div class="event-params-value">{{diagnostics.time_to_second_peak|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">2nd peak mag</div>
-                <div class="event-params-value">{{event.second_peak_mag|floatformat:2}}</div>
+                <div class="event-params-value">{{diagnostics.second_peak_mag|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">N &gt; 3&sigma;</div>
-                <div class="event-params-value">{{event.Npoint_above_3sigma|floatformat:2}}</div>
+                <div class="event-params-value">{{diagnostics.Npoint_above_3sigma|floatformat:2}}</div>
               </div>
             </div>
           </div>
@@ -62,31 +62,31 @@
             <div class="event-params-grid">
               <div class="event-params-cell">
                 <div class="event-params-key">Nearest moving obj.</div>
-                <div class="event-params-value">{{event.nearest_moving_object}}</div>
+                <div class="event-params-value">{{diagnostics.nearest_moving_object}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">Sep. moving obj. [&Prime;]</div>
-                <div class="event-params-value">{{event.angular_separation_moving_object|floatformat:2}}</div>
+                <div class="event-params-value">{{diagnostics.angular_separation_moving_object|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">N linked events</div>
-                <div class="event-params-value">{{event.Nlinked_events}}</div>
+                <div class="event-params-value">{{diagnostics.Nlinked_events}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">DIA centroid shift</div>
-                <div class="event-params-value">{{event.DIA_centroid_shift|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.DIA_centroid_shift|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">PSF centroid shift</div>
-                <div class="event-params-value">{{event.PSF_centroid_shift|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.PSF_centroid_shift|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">Frac below baseline</div>
-                <div class="event-params-value">{{event.frac_below_baseline|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.frac_below_baseline|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">Max below base [mag]</div>
-                <div class="event-params-value">{{event.max_excursion_below_baseline|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.max_excursion_below_baseline|floatformat:3}}</div>
               </div>
             </div>
           </div>
@@ -95,23 +95,23 @@
             <div class="event-params-grid ">
               <div class="event-params-cell">
                 <div class="event-params-key">Best &mu;lens</div>
-                <div class="event-params-value">{{event.bestmulens_model_type}}</div>
+                <div class="event-params-value">{{diagnostics.bestmulens_model_type}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;&chi;&sup2; PSPL</div>
-                <div class="event-params-value">{{event.delta_chi2_PSPL|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.delta_chi2_PSPL|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;BIC PSPL</div>
-                <div class="event-params-value">{{event.delta_BIC_PSPL|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.delta_BIC_PSPL|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;&chi;&sup2; FSPL</div>
-                <div class="event-params-value">{{event.delta_chi2_FSPL|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.delta_chi2_FSPL|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;BIC FSPL</div>
-                <div class="event-params-value">{{event.delta_BIC_FSPL|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.delta_BIC_FSPL|floatformat:3}}</div>
               </div>
             </div>
           </div>
@@ -120,23 +120,23 @@
             <div class="event-params-grid ">
               <div class="event-params-cell">
                 <div class="event-params-key">Best flare</div>
-                <div class="event-params-value">{{event.bestflare_model_type}}</div>
+                <div class="event-params-value">{{diagnostics.bestflare_model_type}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;&chi;&sup2; PSPL best flare</div>
-                <div class="event-params-value">{{event.delta_chi2_PSPL_bestflare|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.delta_chi2_PSPL_bestflare|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;BIC PSPL best flare</div>
-                <div class="event-params-value">{{event.delta_BIC_PSPL|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.delta_BIC_PSPL_bestflare|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;&chi;&sup2; FSPL best flare</div>
-                <div class="event-params-value">{{event.delta_chi2_FSPL_bestflare|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.delta_chi2_FSPL_bestflare|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
                 <div class="event-params-key">&Delta;BIC FSPL best flare</div>
-                <div class="event-params-value">{{event.delta_BIC_FSPL|floatformat:3}}</div>
+                <div class="event-params-value">{{diagnostics.delta_BIC_FSPL_bestflare|floatformat:3}}</div>
               </div>
             </div>
           </div>

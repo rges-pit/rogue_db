@@ -1,7 +1,8 @@
 from django.contrib import admin
 from .models import (RGESAlert, Event, VariableStar,
                      PSPLModel, FSPLModel, DavenportFlareModel, PitkinFlareModel,
-                     SkewNormalModel, StraightLineModel, SourceDiagnostics)
+                     SkewNormalModel, StraightLineModel, SourceDiagnostics,
+                     AlertIngest)
 
 @admin.register(RGESAlert)
 class RGESAlertAdmin(admin.ModelAdmin):
@@ -113,3 +114,11 @@ class SourceDiagnosticsAdmin(admin.ModelAdmin):
 
     # Search bar functionality at the top
     search_fields = ('target', 'classification', 'source_magnitude')
+
+@admin.register(AlertIngest)
+class AlertIngestAdmin(admin.ModelAdmin):
+    # Columns to show in the list view table
+    list_display = ('batch_id', 'started_at', 'completed_at')
+
+    # Search bar functionality at the top
+    search_fields = ('batch_id', 'started_at', 'completed_at')

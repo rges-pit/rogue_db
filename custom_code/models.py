@@ -41,6 +41,7 @@ class Event(models.Model):
     """
     An event is a feature in a source's lightcurve that occurs during a finite time window
     """
+
     target = models.ForeignKey(
         RogueTarget,
         null=True,
@@ -51,15 +52,66 @@ class Event(models.Model):
     event_id = models.CharField(max_length=60, null=True, blank=True)
     start_time = models.FloatField(null=True, blank=True)
     duration = models.FloatField(null=True, blank=True)
+    thumbnail = models.ImageField(upload_to='event_thumbnails/%Y/%m/%d/', null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            # What the ingest looks an event up by: without this two ingests running at once can
+            # each make the event, and then neither can find "the" event again
+            models.UniqueConstraint(fields=['event_id'], name='unique_event_id'),
+        ]
+
+class ModelingProcess(models.Model):
+    """
+    Model to record the status of a given Event's modeling
+    """
+    class ProcessStatus(models.TextChoices):
+        pending = 'Pending', 'Pending'
+        running = 'Running', 'Running'
+        complete = 'Complete', 'Complete'
+        failed = 'Failed', 'Failed'
+
+    event = models.ForeignKey(
+        Event,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='modeling_processes'
+    )
+    started_at = models.DateTimeField()
+    completed_at = models.DateTimeField(blank=True, null=True)
+    status = models.CharField(
+        max_length=30,
+        choices=ProcessStatus.choices,
+        default=ProcessStatus.pending,
+        null=True
+    )
+    code_version = models.CharField(max_length=50, blank=True, null=True)
+
+class EventDiagnostics(models.Model):
+    """
+    Model to record the diagnostic parameters relating to an Event
+    """
+
+    process = models.ForeignKey(
+        ModelingProcess,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='diagnostics'
+    )
     peak_mag = models.FloatField(null=True, blank=True)
     time_to_second_peak = models.FloatField(null=True, blank=True)
     second_peak_mag = models.FloatField(null=True, blank=True)
     coverage_fraction = models.FloatField(null=True, blank=True)
     symmetry = models.FloatField(null=True, blank=True)
     Npoint_above_3sigma = models.FloatField(null=True, blank=True)
-    delta_chi2_PSPL = models.FloatField(null=True, blank=True) # Relative to flat line
+    delta_chi2_PSPL = models.FloatField(null=True, blank=True)  # Relative to flat line
     delta_BIC_PSPL = models.FloatField(null=True, blank=True)
-    delta_chi2_FSPL = models.FloatField(null=True, blank=True) # Relative to flat line
+    delta_chi2_FSPL = models.FloatField(null=True, blank=True)  # Relative to flat line
     delta_BIC_FSPL = models.FloatField(null=True, blank=True)
     delta_chi2_PSPL_bestflare = models.FloatField(null=True, blank=True)
     delta_BIC_PSPL_bestflare = models.FloatField(null=True, blank=True)
@@ -74,18 +126,11 @@ class Event(models.Model):
     angular_separation_moving_object = models.FloatField(null=True, blank=True)
     frac_below_baseline = models.FloatField(null=True, blank=True)
     max_excursion_below_baseline = models.FloatField(null=True, blank=True)
-    thumbnail = models.ImageField(upload_to='event_thumbnails/%Y/%m/%d/', null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        constraints = [
-            # What the ingest looks an event up by: without this two ingests running at once can
-            # each make the event, and then neither can find "the" event again
-            models.UniqueConstraint(fields=['event_id'], name='unique_event_id'),
-        ]
-
+        verbose_name = "event diagnostics"
 
 class RGESAlert(models.Model):
     """
@@ -282,7 +327,15 @@ class EventModel(models.Model):
         on_delete=models.SET_NULL,
         related_name='event_models'
     )
-    
+
+    process = models.ForeignKey(
+        ModelingProcess,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='event_models'
+    )
+
     model_type = models.CharField(
         max_length=60,
         choices=ModelTypes.choices,
@@ -461,3 +514,23 @@ class VariableStar(models.Model):
             return self.moa_id
         else:
             return 'NoID'
+
+class AlertIngest(models.Model):
+    """
+    Model to record the status of ingest process
+    """
+    class OperationalStatus(models.TextChoices):
+        pending = 'Pending', 'Pending'
+        running = 'Running', 'Running'
+        complete = 'Complete', 'Complete'
+        failed = 'Failed', 'Failed'
+
+    batch_id = models.CharField(max_length=50, unique=True)
+    started_at = models.DateTimeField()
+    completed_at = models.DateTimeField(blank=True, null=True)
+    status = models.CharField(
+        max_length=30,
+        choices=OperationalStatus.choices,
+        default=OperationalStatus.pending,
+        null=True
+    )

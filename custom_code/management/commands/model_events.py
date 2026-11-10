@@ -11,7 +11,11 @@ from custom_code import event_functions
 logger = logging.getLogger(__name__)
 
 
-def _init_worker():
+# The number of events linked to each event (by the Event's pk), for the fits to record as they go
+LINKED_EVENTS = {}
+
+
+def _init_worker(linked_events=None):
     """
     Runs once in each worker process before it handles any tasks.
 
@@ -25,6 +29,7 @@ def _init_worker():
     """
     django.setup()
     connections.close_all()
+    LINKED_EVENTS.update(linked_events or {})
 
 
 def fit_target(target_pk):
@@ -52,7 +57,7 @@ def fit_target(target_pk):
     if events.count() > 0:
         for e in events:
             try:
-                event_functions.run_event_modeling(e)
+                event_functions.run_event_modeling(e, LINKED_EVENTS.get(e.pk))
 
                 return target_pk, target.name, True, None
 
@@ -82,7 +87,7 @@ class Command(BaseCommand):
         # First perform a cluster analysis on all known Events in order to identify
         # clusters in RA, Dec and time
         events_list = Event.objects.all()
-        diagnostics.link_events(events_list, plot=False)
+        linked_events = diagnostics.link_events(events_list, plot=False)
 
         # Retrieve a list of Targets classified as microlensing candidates with t0 within the last
         # week.  Each Target has a last_fit parameter which has a default (i.e. unmodeled) value of
@@ -109,7 +114,9 @@ class Command(BaseCommand):
         succeeded = []
         failed = []
 
-        with ProcessPoolExecutor(max_workers=max_workers, initializer=_init_worker) as executor:
+        with ProcessPoolExecutor(
+            max_workers=max_workers, initializer=_init_worker, initargs=(linked_events,)
+        ) as executor:
             futures = {executor.submit(fit_target, pk): pk for pk in target_pks}
 
             for future in as_completed(futures):
