@@ -279,7 +279,10 @@ class EventModelFilterSet(HTMXTableFilterSet):
 
 @dataclass(frozen=True)
 class CutfileParam:
-    """One searchable parameter: a min/max pair ('number') or a contains-match ('text')."""
+    """
+    One searchable parameter: a min/max pair ('number'), a range of dates ('date': a first and last
+    day, both included, which the same min/max names are used for) or a contains-match ('text').
+    """
     name: str    # model field name
     label: str
     kind: str = 'number'
@@ -450,6 +453,8 @@ _EVENT_PARAM_LABELS = {
     'event_id': 'Event ID',
     'start_time': 'Start time [JD]',
     'duration': 'Duration [d]',
+    'created_at': 'Event created',
+    'updated_at': 'Event last updated',
     'peak_mag': 'Peak mag',
     'time_to_second_peak': 'Time to 2nd peak [d]',
     'second_peak_mag': '2nd peak mag',
@@ -474,17 +479,23 @@ _EVENT_PARAM_LABELS = {
 }
 
 
+def _param_kind(field):
+    """How a model field is searched: by a range of dates, a range of numbers or the text it contains"""
+    if isinstance(field, (models.DateTimeField, models.DateField)):
+        return 'date'
+    return 'text' if isinstance(field, models.CharField) else 'number'
+
+
 def _event_params():
     """The parameters of an event, which are its own and those of its latest diagnostics"""
     params = []
     for field in Event._meta.get_fields():
         if not field.concrete or field.name in _EVENT_EXCLUDED_FIELDS:
             continue
-        kind = 'text' if isinstance(field, models.CharField) else 'number'
+        kind = _param_kind(field)
         params.append(CutfileParam(field.name, _EVENT_PARAM_LABELS.get(field.name, field.name), kind))
     for name in EVENT_DIAGNOSTIC_FIELDS:
-        field = EventDiagnostics._meta.get_field(name)
-        kind = 'text' if isinstance(field, models.CharField) else 'number'
+        kind = _param_kind(EventDiagnostics._meta.get_field(name))
         params.append(CutfileParam(name, _EVENT_PARAM_LABELS.get(name, name), kind))
     return tuple(params)
 
@@ -560,6 +571,18 @@ def _param_filters(group, lookup_prefix, params):
                 field_name=path, lookup_expr='icontains', label=param.label,
                 widget=forms.TextInput(attrs={'class': _INPUT_CLASS, 'aria-label': param.label}),
             )}
+        elif param.kind == 'date':
+            # Whole days, in the time zone of the site (a time of day is of no use to someone choosing
+            # a date): from the start of the first to the end of the last
+            new = {}
+            for bound, lookup_expr, word in (('min', 'date__gte', 'from'), ('max', 'date__lte', 'to')):
+                new[f'{group}_{param.name}_{bound}'] = django_filters.DateFilter(
+                    field_name=path, lookup_expr=lookup_expr, label=f'{param.label} {word}',
+                    widget=forms.DateInput(format='%Y-%m-%d', attrs={
+                        'type': 'date', 'class': _INPUT_CLASS,
+                        'aria-label': f'{param.label} {word}', 'title': f'{param.label}: {word}',
+                    }),
+                )
         else:
             new = {}
             for bound, lookup_expr in (('min', 'gte'), ('max', 'lte')):

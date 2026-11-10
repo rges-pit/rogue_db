@@ -550,6 +550,8 @@ class TargetCutfileView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
         context['cutfile_layout'] = context['filter'].layout()
         context['as_of'] = context['filter'].cutoff
         context['searched_at'] = timezone.now().isoformat()
+        # For the user to put on a cutfile they save, if they choose to: the name stays on the page until then
+        context['author_name'] = self.request.user.get_full_name().strip()
         export_params = self.request.GET.copy()
         for name in self.NON_CRITERIA_PARAMS:
             export_params.pop(name, None)

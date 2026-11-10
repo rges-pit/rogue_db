@@ -125,11 +125,26 @@
             {% endfor %}
           </div>
 
-          <div class="d-flex gap-2">
+          <div class="d-flex flex-wrap align-items-center gap-2">
             <button type="submit" class="btn btn-primary">Search</button>
             <button type="button" class="btn btn-secondary" onclick="saveCutfile()">Save cutfile</button>
             <button type="button" class="btn btn-outline-secondary" onclick="clearCriteria()">Clear</button>
+            {# Not named, so it isn't sent with the search: it only decides what is saved in the cutfile #}
+            <div class="form-check form-switch ms-2 mb-0">
+              <input class="form-check-input" type="checkbox" role="switch" id="cutfile-author-toggle"
+                     data-author="{{ author_name }}"{% if not author_name %} disabled{% endif %}>
+              <label class="form-check-label" for="cutfile-author-toggle">Add my name to the cutfile as its author</label>
+            </div>
           </div>
+          {% if author_name %}
+            <p class="text-muted small mt-1 mb-0" id="cutfile-author-note">
+              If this is on, a saved cutfile has <code>author</code>: {{ author_name }}.
+            </p>
+          {% else %}
+            <p class="text-muted small mt-1 mb-0">
+              Your account has no first and last name, so there is no name to add to a cutfile.
+            </p>
+          {% endif %}
         </form>
       </div>
 
@@ -157,6 +172,7 @@
     // When set, only models created up to this moment are searched (see saveCutfile)
     const asOfInput = document.getElementById('id_as_of');
     const asOfNote = document.getElementById('as-of-note');
+    const authorToggle = document.getElementById('cutfile-author-toggle');
 
     function formatMoment(iso) {
         return new Date(iso).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -268,6 +284,8 @@
             filters[el.name] = el.type === 'number' ? parseFloat(el.value) : el.value;
         });
         const cutfile = {model_types: searchedTypes(), timestamp: timestamp, filters: filters};
+        // The name of the person who saved it, only if they chose to
+        if (authorToggle.checked && authorToggle.dataset.author) cutfile.author = authorToggle.dataset.author;
 
         const blob = new Blob([JSON.stringify(cutfile, null, 2)], {type: 'application/json'});
         const url = URL.createObjectURL(blob);
@@ -333,11 +351,13 @@
         const reader = new FileReader();
         reader.onload = function () {
             try {
-                const unplaced = applyCutfile(JSON.parse(reader.result));
+                const saved = JSON.parse(reader.result);
+                const unplaced = applyCutfile(saved);
                 const n = activeFields().length;
                 let message = 'Loaded ' + file.name + ': ' + n + (n === 1 ? ' criterion' : ' criteria') +
                     ' set. Model types searched: ' + typesSummary() + '. Searching the models available on ' +
                     formatMoment(asOfInput.value) + '.';
+                if (typeof saved.author === 'string' && saved.author !== '') message += ' Saved by ' + saved.author + '.';
                 if (unplaced.length) message += ' Could not use: ' + unplaced.join(', ') + '.';
                 setStatus(message, unplaced.length ? 'warning' : 'success');
             } catch (e) {

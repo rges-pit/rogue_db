@@ -3638,6 +3638,109 @@ class TestCutfileSearch(TestCase):
         self.assertEqual(self.search('model_type=pspl'), ['CutfileA', 'CutfileB'])
         self.assertEqual(self.search('model_type=pspl&pspl_tE_max=0.15'), [])
 
+    def set_event_dates(self, name, created, updated):
+        Event.objects.filter(target__name=name).update(created_at=created, updated_at=updated)
+
+    def test_event_dates_are_searched_by_a_range_of_days(self):
+        utc = datetime.timezone.utc
+        # Created at noon on the 10th, and late on the 20th: a day is the whole day, whatever the time
+        self.set_event_dates('CutfileA', datetime.datetime(2026, 3, 10, 12, 0, tzinfo=utc),
+                             datetime.datetime(2026, 4, 1, 0, 0, tzinfo=utc))
+        self.set_event_dates('CutfileB', datetime.datetime(2026, 3, 20, 23, 30, tzinfo=utc),
+                             datetime.datetime(2026, 4, 30, 23, 59, tzinfo=utc))
+
+        for query, expected in [
+            ('event_created_at_min=2026-03-15', ['CutfileB']),
+            ('event_created_at_max=2026-03-15', ['CutfileA']),
+            ('event_created_at_max=2026-03-10', ['CutfileA']),     # the 10th itself, including its afternoon
+            ('event_created_at_min=2026-03-10&event_created_at_max=2026-03-10', ['CutfileA']),
+            ('event_created_at_min=2026-03-20&event_created_at_max=2026-03-20', ['CutfileB']),
+            ('event_created_at_min=2026-03-11&event_created_at_max=2026-03-19', []),
+            ('event_created_at_min=2026-03-01&event_created_at_max=2026-03-31', ['CutfileA', 'CutfileB']),
+            ('event_updated_at_min=2026-04-15', ['CutfileB']),
+            ('event_updated_at_max=2026-04-01', ['CutfileA']),
+            # With other parameters: of the event, its diagnostics and its models
+            ('event_created_at_min=2026-03-01&event_duration_min=5', ['CutfileB']),
+            ('event_created_at_min=2026-03-01&pspl_tE_max=1', ['CutfileA']),
+        ]:
+            with self.subTest(query=query):
+                self.assertEqual(self.search('model_type=pspl&' + query), expected)
+
+    def test_event_dates_are_date_fields_of_the_form(self):
+        kinds = {p.name: p.kind for p in CUTFILE_EVENT_PARAMS}
+        self.assertEqual((kinds['created_at'], kinds['updated_at']), ('date', 'date'))
+        self.assertEqual(kinds['duration'], 'number')
+        self.assertEqual(kinds['event_id'], 'text')
+
+        self.client.force_login(User.objects.create_user('dates_user'))
+        html = self.client.get(reverse('cutfiles:list')).content.decode()
+        for name, label in [('created_at', 'Event created'), ('updated_at', 'Event last updated')]:
+            for bound, word in [('min', 'from'), ('max', 'to')]:
+                field = re.search(rf'<input[^>]*id="id_event_{name}_{bound}"[^>]*>', html).group(0)
+                self.assertIn('type="date"', field)
+                self.assertIn(f'aria-label="{label} {word}"', field)
+        # The parameters that aren't dates are as they were
+        self.assertIn('type="number"', re.search(r'<input[^>]*id="id_event_duration_min"[^>]*>', html).group(0))
+
+    def test_a_date_that_is_not_one_is_ignored_rather_than_an_error(self):
+        self.client.force_login(User.objects.create_user('dates_user'))
+
+        for value in ('not-a-date', '2026-13-45', '1'):
+            with self.subTest(value=value):
+                response = self.client.get(reverse('cutfiles:list'), {'model_type': 'pspl', 'event_created_at_min': value})
+                self.assertEqual(response.status_code, 200)
+
+    def test_dates_are_saved_in_a_cutfile_as_given(self):
+        # The page reads the date fields as text, which is how a cutfile holds them (see saveCutfile)
+        self.client.force_login(User.objects.create_user('dates_user'))
+        html = self.client.get(reverse('cutfiles:list'), {
+            'model_type': 'pspl', 'event_created_at_min': '2026-03-15'}).content.decode()
+
+        field = re.search(r'<input[^>]*id="id_event_created_at_min"[^>]*>', html).group(0)
+        self.assertIn('value="2026-03-15"', field)
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_author_switch_offers_the_users_full_name(self):
+        self.client.force_login(User.objects.create_user('author_user', first_name='Ada', last_name='Lovelace'))
+
+        response = self.client.get(reverse('cutfiles:list'))
+
+        self.assertEqual(response.context['author_name'], 'Ada Lovelace')
+        html = response.content.decode()
+        switch = re.search(r'<input[^>]*id="cutfile-author-toggle"[^>]*>', html).group(0)
+        self.assertIn('data-author="Ada Lovelace"', switch)
+        self.assertNotIn('disabled', switch)
+        # Off until it's switched on, and not sent with the search, which doesn't need it
+        self.assertNotIn('checked', switch)
+        self.assertNotIn('name=', switch)
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_author_switch_is_unavailable_without_a_full_name(self):
+        for first, last in [('', ''), ('Ada', ''), ('', '   ')]:
+            with self.subTest(first=first, last=last):
+                self.client.force_login(User.objects.create_user(
+                    f'noname_{first}{len(last)}', first_name=first, last_name=last))
+
+                response = self.client.get(reverse('cutfiles:list'))
+
+                if first:
+                    self.assertEqual(response.context['author_name'], first)   # Django's full name: what there is
+                    continue
+                self.assertEqual(response.context['author_name'], '')
+                switch = re.search(r'<input[^>]*id="cutfile-author-toggle"[^>]*>', response.content.decode()).group(0)
+                self.assertIn('disabled', switch)
+                self.assertContains(response, 'no first and last name')
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_the_name_is_escaped_in_the_page(self):
+        self.client.force_login(User.objects.create_user(
+            'tricky_user', first_name='Ada"><script>alert(1)</script>', last_name='O\'Neil'))
+
+        html = self.client.get(reverse('cutfiles:list')).content.decode()
+
+        self.assertNotIn('<script>alert(1)</script>', html)
+        self.assertIn('data-author="Ada&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt; O&#x27;Neil"', html)
+
     @override_settings(TOM_MFA_REQUIRED=None)
     def test_view_as_of(self):
         self.modeled_at('CutfileA', datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc))
