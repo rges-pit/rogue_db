@@ -2794,6 +2794,11 @@ class TestCutfileSearch(TestCase):
         # Thresholds for a type that isn't searched are ignored
         self.assertEqual(self.search('model_type=pspl&pitkin_flare_t_peak_max=1'), ['CutfileA', 'CutfileB'])
 
+    def test_searches_target_event_eventmodel_parameters_at_once(self):
+        query = 'source_ra_min=90&source_ra_max=150&event_duration_min=1.5&event_duration_max=2.5'\
+                + '&model_type=pspl&pspl_tE_min=0.0&pspl_tE_max=0.5'
+        self.assertEqual(self.search(query), ['CutfileA'])
+
     def test_straight_line_parameters(self):
         self.assertEqual(self.search('model_type=straight_line'), ['CutfileA', 'CutfileB'])
         self.assertEqual(self.search('model_type=straight_line&straight_line_gradient_max=0'), ['CutfileA'])
