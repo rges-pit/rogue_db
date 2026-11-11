@@ -1,0 +1,70 @@
+{% extends 'tom_common/base.html' %}
+{% load static %}
+{% block content %}
+<h2>About RogueDB</h2>
+
+<p>
+    RogueDB is a database of <i>candidate</i> Free-Floating Planets (FFPs) microlensing events selected
+    in real time by a pipeline developed by the <a href="https://rges-pit.github.io">
+    Roman Galactic Exoplanet Survey Project Investigation Team (RGES-PIT)</a>.
+</p>
+<p>
+    <figure>
+    <img src="{% static 'tom_common/img/roguedb_pipeline.png' %}" alt="Flowchart of the pipeline of alerts feeding RogueDB">
+    <figcaption><i>Flowchart of the pipeline of alerts feeding RogueDB</i></figcaption>
+    </figure>
+</p>
+<p>
+    In the context of this pipeline, an "event" is considered to be an interval of brightening detected
+    in the timeseries photometry from a source star.  Detected events are passed to two
+    independent classification packages (pyAethra and a neutral network classifier), which
+    identify FFP candidates and attempt to flag false positives such as flares.  RogueDB is
+    designed to be the repository for the output from this software, and a flexible interface for
+    exploring the results.
+</p>
+<h4>Alert Ingest and Model Fitting</h4>
+<p>
+    When an alert is ingested into RogueDB, it immediately fits a range of different models to the
+    segment of the lightcurve containing the event.  These include:
+
+    <ul>
+    <li>Straight line models fitted to the whole lightcurve segment and just the baseline data,</li>
+    <li>Point-Source, Point-Lens microlensing models,</li>
+    <li>Finite-Source, Point-Lens microlensing models,</li>
+    <li>Davenport flare models,</li>
+    <li>Pitkin flare models.</li>
+    </ul>
+    The results of these models are used to compute a range of diagnostic parameters which are available for review
+    on RogueDB's event detail pages.
+</p>
+<p>
+    These model fits are performed three times for each event: when a new alert is ingested;
+    2 days later and 1 week after the first alert.  RogueDB stores the results of all of these fits,
+    but the results displayed in the event details pages are those from the most recent fit.
+</p>
+<h4>Cutfiles</h4>
+<p>
+    Cutfiles provide a mechanism for querying and selecting subsets of FFP candidates according to user-defined
+    criteria in a way that is reproducible.
+</p>
+<p>
+    The results of all model fits and their results are versioned and timestamped within RogueDB.
+    When you compose a cutfile query you can include a date - this ensures that you retrieve the
+    results of models fitted up until that date.  Queries can be composed with any combination of
+    source, event and event model diagnostic parameters, and then stored as a JSON file for
+    future reference.  These files can be uploaded in order to repeat the query.
+</p>
+<h4>Credits</h4>
+<p>RogueDB was designed by Will DeRocco and implemented by Rachel Street using the
+<a href="https://tom-toolkit.readthedocs.io/en/stable/index.html">TOM Toolkit</a>.
+The alerts it ingests are provided by the pyAethra software developed by Aikaterini Vandorou and
+a neural network classifier by Greg Olmshenk and Will DeRocco.  The cb2rges image analysis software
+was developed by Jay Anderson.</p>
+
+<h4>Acknowledgements</h4>
+<p>
+    The developers of RogueDB gratefully acknowledge funding from a NASA Roman Cycle 1 grant,
+    program ID 19015.
+</p>
+
+{% endblock %}

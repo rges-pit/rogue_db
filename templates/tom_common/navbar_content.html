@@ -10,3 +10,6 @@
 <li class="nav-item {% if 'user' in request.resolver_match.url_name %}active{% endif %}">
     <a class="nav-link" href="{% url 'user-list' %}">Users</a>
 </li>
+<li class="nav-item {% if 'about' in request.resolver_match.url_name %}active{% endif %}">
+    <a class="nav-link" href="{% url 'about' %}">About</a>
+</li>
