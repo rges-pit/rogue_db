@@ -563,6 +563,9 @@ def estimate_peak_mag(lcevent):
 
     idx = np.where(
         (lightcurve[:,0] >= lcevent.start_time)
-        & (lightcurve[:,0] <= lcevent.start_time + lcevent.duration))
+        & (lightcurve[:,0] <= lcevent.start_time + lcevent.duration))[0]
 
-    return lightcurve[idx,1].max()
+    if len(idx) > 0:
+        return lightcurve[idx,1].min()
+    else:
+        return None

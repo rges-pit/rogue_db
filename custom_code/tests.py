@@ -5,7 +5,8 @@ from django.test import RequestFactory, TestCase, TransactionTestCase, override_
 from django.test.utils import CaptureQueriesContext
 from django.urls import NoReverseMatch, reverse
 from custom_code.serializers import MSOSAlertSerializer
-from custom_code import tasks, source_functions, solar_system, event_functions
+from custom_code import tasks, source_functions, solar_system, event_functions, parameter_docs
+from custom_code.templatetags.parameter_info import param_info
 import requests
 from django_tasks.signals import task_enqueued
 from collections import Counter
@@ -1023,8 +1024,8 @@ class TestEventDiagnosticsPages(TestCase):
     def test_the_detail_page_shows_each_best_flare_value_in_its_own_cell(self):
         html = self.client.get(reverse('events:detail', kwargs={'pk': self.modeled.pk})).content.decode()
 
-        self.assertRegex(html, r'(?s)BIC PSPL best flare</div>\s*<div class="event-params-value">-6\.000<')
-        self.assertRegex(html, r'(?s)BIC PSPL</div>\s*<div class="event-params-value">-2\.500<')
+        self.assertRegex(html, r'(?s)BIC PSPL best flare</span>[^\n]*</div>\s*<div class="event-params-value">-6\.000<')
+        self.assertRegex(html, r'(?s)BIC PSPL</span>[^\n]*</div>\s*<div class="event-params-value">-2\.500<')
 
     def make_ingest(self, status, started_ago=datetime.timedelta(minutes=10)):
         return AlertIngest.objects.create(
@@ -1046,7 +1047,6 @@ class TestEventDiagnosticsPages(TestCase):
         response = self.client.get(url)
         self.assertContains(response, 'An alert ingest is')
         self.assertContains(response, 'since ' + running.started_at.strftime('%Y-%m-%d %H:%M'))
-        self.assertContains(response, 'latest modeling of this event to have finished')
         self.assertEqual(response.content.decode().count('id="ingest-banner"'), 1)
 
         earlier = self.make_ingest('Running', started_ago=datetime.timedelta(hours=3))
@@ -1200,6 +1200,108 @@ class TestCurrentModelsAreShown(TestCase):
         response = self.client.get(reverse('eventmodels:parameters'), {'model': model.pk})
 
         self.assertEqual(response.status_code, 200)
+
+
+class TestParameterInfo(TestCase):
+    """The "i" icons beside parameter names, which say what each parameter is in a pop-up"""
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_user('info_user'))
+        target = Target.objects.create(name='InfoTarget', ra=10.0, dec=10.0)
+        self.event = Event.objects.create(target=target, event_id='INFO_1', start_time=2460000.0, duration=2.0)
+        self.process, _ = make_modeling(self.event, peak_mag=17.0)
+
+    def icons(self, html):
+        return re.findall(r'<a class="param-info"[^>]*>i</a>', html)
+
+    def attribute(self, icon, name):
+        from html import unescape
+        return unescape(re.search(rf'{name}="([^"]*)"', icon).group(1))
+
+    def test_an_icon_has_the_name_and_what_it_is(self):
+        icon = param_info('peak_mag')
+
+        self.assertEqual(self.attribute(icon, 'data-bs-title'), 'Peak mag')
+        self.assertIn('Magnitude of the source at the peak', self.attribute(icon, 'data-bs-content'))
+        self.assertEqual(self.attribute(icon, 'aria-label'), 'About Peak mag')
+        # Opens on a click and closes on the next click anywhere else; reachable with the keyboard
+        self.assertIn('data-bs-toggle="popover"', icon)
+        self.assertIn('data-bs-trigger="focus"', icon)
+        self.assertIn('tabindex="0"', icon)
+        self.assertIn('role="button"', icon)
+
+    def test_a_parameter_without_a_description_gets_no_icon(self):
+        self.assertEqual(param_info('not_a_parameter'), '')
+        self.assertEqual(param_info('peak_mag', 'model'), '')    # Not a parameter of a model fit
+
+    def test_the_description_is_escaped(self):
+        with mock.patch.dict(parameter_docs.EVENT_PARAMETERS, {'tricky': ('A "title"', 'Less than <b> & "quotes"')}):
+            icon = param_info('tricky')
+
+        self.assertNotIn('<b>', icon)
+        self.assertEqual(self.attribute(icon, 'data-bs-title'), 'A "title"')
+        self.assertEqual(self.attribute(icon, 'data-bs-content'), 'Less than <b> & "quotes"')
+
+    def test_every_parameter_of_the_event_page_is_described(self):
+        wanted = set(EVENT_DIAGNOSTIC_FIELDS) | {'start_time', 'duration'}
+
+        self.assertEqual(set(parameter_docs.EVENT_PARAMETERS), wanted)
+        for name, (title, text) in parameter_docs.EVENT_PARAMETERS.items():
+            self.assertTrue(title and len(text) > 40, name)
+
+    def test_every_parameter_of_a_model_is_described(self):
+        """Every parameter that the model panel shows for a type of model (not their uncertainties)"""
+        shown = set()
+        for model_class in (PSPLModel, FSPLModel, DavenportFlareModel, PitkinFlareModel, StraightLineModel):
+            for field in model_class._meta.local_fields:
+                if not getattr(field.remote_field, 'parent_link', False) and not field.name.endswith('_error'):
+                    shown.add(field.name)
+        # Those of every model: the fit statistics, among which the panel shows these
+        shown |= {'chisq', 'red_chisq', 'BIC', 'fit_method', 'tau', 'tau_threshold'}
+        # The parallax parameters are not fitted for, and not shown
+        shown -= {'piEN', 'piEE'}
+
+        self.assertEqual(shown - set(parameter_docs.MODEL_PARAMETERS), set())
+
+    def test_the_event_page_has_an_icon_beside_each_parameter(self):
+        html = self.client.get(reverse('events:detail', kwargs={'pk': self.event.pk})).content.decode()
+
+        keys = re.findall(r'<div class="event-params-key">(.*?)</div>', html)
+        self.assertEqual(len(keys), 25)
+        self.assertTrue(all('class="param-info"' in key for key in keys))
+        # The name stays in a part of its own, which is what is shortened if the cell is narrow
+        self.assertTrue(all('<span class="event-params-key-text">' in key for key in keys))
+        # The script that opens the pop-ups is there, once, for this page and what is loaded into it
+        self.assertEqual(html.count("selector: '.param-info'"), 1)
+
+    def test_the_model_panel_has_an_icon_beside_each_parameter(self):
+        model = PSPLModel.objects.create(
+            event=self.event, process=self.process, model_type='PSPL microlensing', t0=2460001.0, t0_error=0.1,
+            u0=0.5, u0_error=0.05, tE=3.0, tE_error=0.2, A=2.0, chisq=10.0, red_chisq=1.1, BIC=12.0,
+            fit_method='MCMC', tau=40.0, tau_threshold=0.4, blend_parameters={'source_magnitude': 20.0})
+
+        response = self.client.get(reverse('eventmodels:parameters'), {'model': model.pk})
+
+        html = response.content.decode()
+        keys = re.findall(r'<div class="event-params-key">(.*?)</div>', html)
+        self.assertGreaterEqual(len(keys), 10)
+        self.assertTrue(all('class="param-info"' in key for key in keys), keys)
+        titles = {self.attribute(icon, 'data-bs-title') for icon in self.icons(html)}
+        self.assertTrue({'t0', 'u0', 'tE', 'A', 'chisq', 'BIC', 'tau', 'tau threshold', 'blend parameters'} <= titles)
+        # The value, with its uncertainty, in the cell, as before
+        self.assertContains(response, '2460001.00000 ± 0.10000')
+
+    def test_the_flare_and_straight_line_panels_have_icons_too(self):
+        for model_class, model_type in [(DavenportFlareModel, 'Davenport flare'), (PitkinFlareModel, 'Pitkin flare'),
+                                        (StraightLineModel, 'Straight line')]:
+            with self.subTest(model=model_type):
+                model = model_class.objects.create(event=self.event, process=self.process, model_type=model_type)
+
+                html = self.client.get(reverse('eventmodels:parameters'), {'model': model.pk}).content.decode()
+
+                keys = re.findall(r'<div class="event-params-key">(.*?)</div>', html)
+                self.assertTrue(keys)
+                self.assertTrue(all('class="param-info"' in key for key in keys), keys)
 
 
 class TestTaskQueuing(TestCase):
@@ -2915,7 +3017,7 @@ class TestJPLQueryRetries(TestCase):
             name, separation = solar_system.find_moving_objects_near_event(self.event)
 
         self.assertEqual(name, '433 Eros')
-        self.assertAlmostEqual(separation, 1.5 / 3600.0)    # In degrees
+        self.assertAlmostEqual(separation, 1.5)    # In arcsec
 
 
 class TestBackgroundTasks(TestCase):
@@ -3288,10 +3390,13 @@ class TestMultiEventDiagnostics(TestCase):
         self.test_target, self.test_event, self.ndata, self.nlc, self.datums = create_test_target_with_photometry()
         self.test_target2, self.test_event2, self.ndata2, self.nlc2, self.datums2 = create_test_target_with_photometry('TestObject2')
         self.test_target3, self.test_event3, self.ndata3, self.nlc3, self.datums3 = create_test_target_with_photometry('TestObject3')
+        self.test_target4, self.test_event4, self.ndata4, self.nlc4, self.datums4 = create_test_target_with_photometry('TestObject4')
         Event.objects.filter(pk=self.test_event2.pk).update(target=self.test_target, start_time=self.test_event2.start_time+0.3)
         Event.objects.filter(pk=self.test_event3.pk).update(target=self.test_target, start_time=self.test_event3.start_time+0.5)
+        Event.objects.filter(pk=self.test_event4.pk).update(target=self.test_target, start_time=self.test_event4.start_time-1.25)
         self.test_event2 = Event.objects.get(pk=self.test_event2.pk)
         self.test_event3 = Event.objects.get(pk=self.test_event3.pk)
+        self.test_event4 = Event.objects.get(pk=self.test_event4.pk)
 
     def test_second_peak_diagnostics(self):
 

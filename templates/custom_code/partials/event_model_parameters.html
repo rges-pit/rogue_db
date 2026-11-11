@@ -1,17 +1,18 @@
+{% load parameter_info %}
 {% if parameters %}
 <div class="event-params-panel">
   <div class="event-params-group">
     <div class="event-params-label">{{ model_type }} model parameters</div>
     <div class="event-params-grid">
-      {% for label, value in parameters %}
+      {% for label, value, name in parameters %}
         <div class="event-params-cell">
-          <div class="event-params-key">{{ label }}</div>
+          <div class="event-params-key"><span class="event-params-key-text">{{ label }}</span>{% param_info name 'model' %}</div>
           <div class="event-params-value">{{ value }}</div>
         </div>
       {% endfor %}
       {% if blend_parameters %}
         <div class="event-params-cell event-params-cell--full">
-          <div class="event-params-key">blend parameters</div>
+          <div class="event-params-key"><span class="event-params-key-text">blend parameters</span>{% param_info 'blend_parameters' 'model' %}</div>
           <div class="event-params-value">
             {% for key, data in blend_parameters.items %}
               {{ key }}: {{ data }}{% if not forloop.last %}<br>{% endif %}

@@ -316,7 +316,7 @@ class EventModelParametersView(LoginRequiredMixin, TemplateView):
                     )
                 else:
                     display = self._format_value(field_name, value)
-                parameters.append((verbose_name, display))
+                parameters.append((verbose_name, display, field_name))
 
         context['model_type'] = base.model_type
         context['parameters'] = parameters

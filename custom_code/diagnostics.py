@@ -101,13 +101,13 @@ def calc_npoints_above_baseline(lcevent, baseline_lightcurve, event_lightcurve):
     median_mag = np.median(baseline_lightcurve[:,1])
     stddev = (baseline_lightcurve[:,1] - median_mag).std()
 
-    idx1 = np.where(event_lightcurve[:,1] < median_mag + 3.0*stddev)[0]
+    idx1 = np.where(event_lightcurve[:,1] < median_mag - 3.0*stddev)[0]
 
     # Identify those datapoints within the event
     idx2 = np.where(event_lightcurve[:,0] >= lcevent.start_time)[0]
     idx3 = np.where(event_lightcurve[:,0] <= lcevent.start_time + lcevent.duration)[0]
     idx4 = set(idx2).intersection(set(idx3))
-    idx = list(idx4.intersection(set(idx1)))
+    idx = list(sorted(idx4.intersection(set(idx1))))
 
     # Identify groups of consecutive datapoints, and find the length of the
     # group with the most entries
@@ -129,7 +129,7 @@ def second_peak_diagnostics(e, results):
         delta_mid_event_times = np.array(
             [(et.start_time + et.duration/2.0)-mid_event for et in event_list if e != et]
         )
-        et_idx = np.argmin(delta_mid_event_times)
+        et_idx = np.argmin(abs(delta_mid_event_times))
 
         # Time to nearest other peak
         other_events = [et for et in event_list if e != et]

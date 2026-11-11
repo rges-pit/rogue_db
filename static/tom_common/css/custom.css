@@ -235,12 +235,60 @@ li {
 }
 
 .event-params-key {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   color: #adadad;
   line-height: 1.15;
   white-space: nowrap;
+}
+
+/* The name is what is shortened if the cell is too narrow, not the "i" icon beside it */
+.event-params-key-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The "i" icon beside a parameter's name: click it for what the parameter is (parameter_info tag) */
+.param-info {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font: italic 700 10px/1 Georgia, "Times New Roman", serif;
+  color: #adadad;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.param-info:hover,
+.param-info:focus {
+  color: var(--rges-purple-light);
+  text-decoration: none;
+}
+
+.param-info:focus-visible {
+  outline: 2px solid var(--rges-purple-light);
+  outline-offset: 2px;
+}
+
+/* The pop-up: dark, like the page, and not so wide that the text is hard to read */
+.popover.param-popover {
+  --bs-popover-max-width: 320px;
+  --bs-popover-bg: #1e1e24;
+  --bs-popover-border-color: rgba(255, 255, 255, 0.18);
+  --bs-popover-header-bg: #2b2b33;
+  --bs-popover-header-color: #fff;
+  --bs-popover-body-color: #e6e6e6;
+  --bs-popover-arrow-border: rgba(255, 255, 255, 0.18);
+  font-size: 13px;
 }
 
 .event-params-value {

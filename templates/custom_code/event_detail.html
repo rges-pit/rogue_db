@@ -1,5 +1,5 @@
 {% extends 'tom_common/base.html' %}
-{% load comments django_bootstrap5 tom_common_extras targets_extras observation_extras dataproduct_extras static cache plotting_functions view_layouts %}
+{% load comments django_bootstrap5 tom_common_extras targets_extras observation_extras dataproduct_extras static cache plotting_functions view_layouts parameter_info %}
 
 {% block title %}Event {{ object.name }}{% endblock %}
 {% block additional_css %}
@@ -27,35 +27,35 @@
             <div class="event-params-label">Event Parameters</div>
             <div class="event-params-grid event-params-grid--single-row">
               <div class="event-params-cell">
-                <div class="event-params-key">Start time [JD]</div>
+                <div class="event-params-key"><span class="event-params-key-text">Start time [JD]</span>{% param_info 'start_time' %}</div>
                 <div class="event-params-value">{{event.start_time|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Duration [d]</div>
+                <div class="event-params-key"><span class="event-params-key-text">Duration [d]</span>{% param_info 'duration' %}</div>
                 <div class="event-params-value">{{event.duration|floatformat:5}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Peak mag</div>
+                <div class="event-params-key"><span class="event-params-key-text">Peak mag</span>{% param_info 'peak_mag' %}</div>
                 <div class="event-params-value">{{diagnostics.peak_mag|floatformat:5}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Coverage</div>
+                <div class="event-params-key"><span class="event-params-key-text">Coverage</span>{% param_info 'coverage_fraction' %}</div>
                 <div class="event-params-value">{{diagnostics.coverage_fraction|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Symmetry</div>
+                <div class="event-params-key"><span class="event-params-key-text">Symmetry</span>{% param_info 'symmetry' %}</div>
                 <div class="event-params-value">{{diagnostics.symmetry|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">&Delta;t 2nd peak [d]</div>
+                <div class="event-params-key"><span class="event-params-key-text">&Delta;t 2nd peak [d]</span>{% param_info 'time_to_second_peak' %}</div>
                 <div class="event-params-value">{{diagnostics.time_to_second_peak|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">2nd peak mag</div>
+                <div class="event-params-key"><span class="event-params-key-text">2nd peak mag</span>{% param_info 'second_peak_mag' %}</div>
                 <div class="event-params-value">{{diagnostics.second_peak_mag|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">N &gt; 3&sigma;</div>
+                <div class="event-params-key"><span class="event-params-key-text">N &gt; 3&sigma;</span>{% param_info 'Npoint_above_3sigma' %}</div>
                 <div class="event-params-value">{{diagnostics.Npoint_above_3sigma|floatformat:2}}</div>
               </div>
             </div>
@@ -64,31 +64,31 @@
           <div class="event-params-group">
             <div class="event-params-grid">
               <div class="event-params-cell">
-                <div class="event-params-key">Nearest moving obj.</div>
+                <div class="event-params-key"><span class="event-params-key-text">Nearest moving obj.</span>{% param_info 'nearest_moving_object' %}</div>
                 <div class="event-params-value">{{diagnostics.nearest_moving_object}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Sep. moving obj. [&Prime;]</div>
+                <div class="event-params-key"><span class="event-params-key-text">Sep. moving obj. [&Prime;]</span>{% param_info 'angular_separation_moving_object' %}</div>
                 <div class="event-params-value">{{diagnostics.angular_separation_moving_object|floatformat:2}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">N linked events</div>
+                <div class="event-params-key"><span class="event-params-key-text">N linked events</span>{% param_info 'Nlinked_events' %}</div>
                 <div class="event-params-value">{{diagnostics.Nlinked_events}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">DIA centroid shift</div>
+                <div class="event-params-key"><span class="event-params-key-text">DIA centroid shift</span>{% param_info 'DIA_centroid_shift' %}</div>
                 <div class="event-params-value">{{diagnostics.DIA_centroid_shift|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">PSF centroid shift</div>
+                <div class="event-params-key"><span class="event-params-key-text">PSF centroid shift</span>{% param_info 'PSF_centroid_shift' %}</div>
                 <div class="event-params-value">{{diagnostics.PSF_centroid_shift|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Frac below baseline</div>
+                <div class="event-params-key"><span class="event-params-key-text">Frac below baseline</span>{% param_info 'frac_below_baseline' %}</div>
                 <div class="event-params-value">{{diagnostics.frac_below_baseline|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">Max below base [mag]</div>
+                <div class="event-params-key"><span class="event-params-key-text">Max below base [mag]</span>{% param_info 'max_excursion_below_baseline' %}</div>
                 <div class="event-params-value">{{diagnostics.max_excursion_below_baseline|floatformat:3}}</div>
               </div>
             </div>
@@ -97,23 +97,23 @@
           <div class="event-params-group">
             <div class="event-params-grid ">
               <div class="event-params-cell">
-                <div class="event-params-key">Best &mu;lens</div>
+                <div class="event-params-key"><span class="event-params-key-text">Best &mu;lens</span>{% param_info 'bestmulens_model_type' %}</div>
                 <div class="event-params-value">{{diagnostics.bestmulens_model_type}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">&Delta;&chi;&sup2; PSPL</div>
+                <div class="event-params-key"><span class="event-params-key-text">&Delta;&chi;&sup2; PSPL</span>{% param_info 'delta_chi2_PSPL' %}</div>
                 <div class="event-params-value">{{diagnostics.delta_chi2_PSPL|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">&Delta;BIC PSPL</div>
+                <div class="event-params-key"><span class="event-params-key-text">&Delta;BIC PSPL</span>{% param_info 'delta_BIC_PSPL' %}</div>
                 <div class="event-params-value">{{diagnostics.delta_BIC_PSPL|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">&Delta;&chi;&sup2; FSPL</div>
+                <div class="event-params-key"><span class="event-params-key-text">&Delta;&chi;&sup2; FSPL</span>{% param_info 'delta_chi2_FSPL' %}</div>
                 <div class="event-params-value">{{diagnostics.delta_chi2_FSPL|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">&Delta;BIC FSPL</div>
+                <div class="event-params-key"><span class="event-params-key-text">&Delta;BIC FSPL</span>{% param_info 'delta_BIC_FSPL' %}</div>
                 <div class="event-params-value">{{diagnostics.delta_BIC_FSPL|floatformat:3}}</div>
               </div>
             </div>
@@ -122,23 +122,23 @@
           <div class="event-params-group">
             <div class="event-params-grid ">
               <div class="event-params-cell">
-                <div class="event-params-key">Best flare</div>
+                <div class="event-params-key"><span class="event-params-key-text">Best flare</span>{% param_info 'bestflare_model_type' %}</div>
                 <div class="event-params-value">{{diagnostics.bestflare_model_type}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">&Delta;&chi;&sup2; PSPL best flare</div>
+                <div class="event-params-key"><span class="event-params-key-text">&Delta;&chi;&sup2; PSPL best flare</span>{% param_info 'delta_chi2_PSPL_bestflare' %}</div>
                 <div class="event-params-value">{{diagnostics.delta_chi2_PSPL_bestflare|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">&Delta;BIC PSPL best flare</div>
+                <div class="event-params-key"><span class="event-params-key-text">&Delta;BIC PSPL best flare</span>{% param_info 'delta_BIC_PSPL_bestflare' %}</div>
                 <div class="event-params-value">{{diagnostics.delta_BIC_PSPL_bestflare|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">&Delta;&chi;&sup2; FSPL best flare</div>
+                <div class="event-params-key"><span class="event-params-key-text">&Delta;&chi;&sup2; FSPL best flare</span>{% param_info 'delta_chi2_FSPL_bestflare' %}</div>
                 <div class="event-params-value">{{diagnostics.delta_chi2_FSPL_bestflare|floatformat:3}}</div>
               </div>
               <div class="event-params-cell">
-                <div class="event-params-key">&Delta;BIC FSPL best flare</div>
+                <div class="event-params-key"><span class="event-params-key-text">&Delta;BIC FSPL best flare</span>{% param_info 'delta_BIC_FSPL_bestflare' %}</div>
                 <div class="event-params-value">{{diagnostics.delta_BIC_FSPL_bestflare|floatformat:3}}</div>
               </div>
             </div>
@@ -167,6 +167,14 @@
 </div>
 
 <script>
+  // The "i" icons beside the parameter names show what each is in a pop-up. One handler for the whole
+  // page, so that it covers the icons of the model parameters too, which are loaded into it later.
+  // Clicking an icon opens its pop-up, and clicking anywhere else closes it.
+  new bootstrap.Popover(document.body, {
+    selector: '.param-info', container: 'body', trigger: 'focus', placement: 'top',
+    customClass: 'param-popover',
+  });
+
   // Alerts have too many columns to share the row with the lightcurve plot,
   // so its button expands #event-model-parameters-col to the full row width
   // and hides the plot column; every other (model) button restores the

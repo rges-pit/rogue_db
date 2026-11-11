@@ -85,7 +85,7 @@ def find_moving_objects_near_event(event, radius=2.0):
 
     if closest_name:
         logger.info('Identified a moving object close to event ' + str(event.pk))
-        return closest_name, closest_separation/3600.0   # The separation in deg
+        return closest_name, closest_separation   # The separation in arcsec
 
     return None, None
 

@@ -117,7 +117,7 @@ def run_baseline_fit(lcevent):
         # Calculate diagnostics for the baseline fit
         mean_mag = np.median(model_lc[:,1])
         frac_below_baseline = float(len(np.where(full_lightcurve[:,1] > mean_mag + stddev)[0])) / float(len(full_lightcurve))
-        max_excursion_below_baseline = (lightcurve[:,1] - mean_mag).min()
+        max_excursion_below_baseline = (lightcurve[:,1] - mean_mag).max()
         npoints = diagnostics.calc_npoints_above_baseline(
             lcevent,
             lightcurve,
