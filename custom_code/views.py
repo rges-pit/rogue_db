@@ -22,7 +22,7 @@ from tom_dataproducts.models import PhotometryReducedDatum
 from tom_dataproducts.forms import DataShareForm
 from django_filters.views import FilterView
 
-from .models import (RGESAlert, Event, EventModel, MODEL_TYPE_CLASSES,
+from .models import (RGESAlert, Event, EventModel, AlertIngest, ModelingProcess, MODEL_TYPE_CLASSES,
                      PSPLModel, FSPLModel, WideBoundPlanetModel,
                      DavenportFlareModel, PitkinFlareModel)
 from .filters import (
@@ -73,6 +73,16 @@ class RGESAlertCreateView(LoginRequiredMixin, CreateView):
 
     def get_success_url(self):
         return reverse('candidates:list')
+
+def running_ingests_context():
+    """
+    For a page to say if alerts are being ingested now, as what it shows may be incomplete, and change
+    as the ingest goes on: how many ingests are running (ingests_running) and when the first began
+    (ingest_started_at).
+    """
+    ingest = AlertIngest.running().aggregate(count=models.Count('pk'), since=models.Min('started_at'))
+    return {'ingests_running': ingest['count'], 'ingest_started_at': ingest['since']}
+
 
 class EventListView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
     """
@@ -140,6 +150,12 @@ class EventDetailView(LoginRequiredMixin,DetailView):
         diagnostics = latest_event_diagnostics().filter(process__event=self.object).select_related('process').first()
         context['diagnostics'] = diagnostics
         context['modeling_process'] = diagnostics.process if diagnostics else None
+        context.update(running_ingests_context())
+
+        # When the event began being modeled, if that is going on now: until it ends, what is shown
+        # is still of the modeling before
+        modeling = ModelingProcess.running().filter(event=self.object).order_by('started_at').first()
+        context['event_modeling_started_at'] = modeling.started_at if modeling else None
         return context
 
 
@@ -550,6 +566,8 @@ class TargetCutfileView(LoginRequiredMixin, HTMXTableViewMixin, FilterView):
         context['cutfile_layout'] = context['filter'].layout()
         context['as_of'] = context['filter'].cutoff
         context['searched_at'] = timezone.now().isoformat()
+        # Whether alerts are being ingested now: what is found may be incomplete, and change
+        context.update(running_ingests_context())
         # For the user to put on a cutfile they save, if they choose to: the name stays on the page until then
         context['author_name'] = self.request.user.get_full_name().strip()
         export_params = self.request.GET.copy()

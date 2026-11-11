@@ -1026,6 +1026,102 @@ class TestEventDiagnosticsPages(TestCase):
         self.assertRegex(html, r'(?s)BIC PSPL best flare</div>\s*<div class="event-params-value">-6\.000<')
         self.assertRegex(html, r'(?s)BIC PSPL</div>\s*<div class="event-params-value">-2\.500<')
 
+    def make_ingest(self, status, started_ago=datetime.timedelta(minutes=10)):
+        return AlertIngest.objects.create(
+            batch_id=f'ingest_{AlertIngest.objects.count()}_{status}', status=status,
+            started_at=timezone.now() - started_ago)
+
+    def test_the_detail_page_says_if_an_ingest_is_running(self):
+        url = reverse('events:detail', kwargs={'pk': self.modeled.pk})
+
+        # Whatever batches there have been, none running
+        for status in ('Complete', 'Failed', 'Pending'):
+            self.make_ingest(status)
+        self.make_ingest('Running', started_ago=AlertIngest.STALE_AFTER + datetime.timedelta(minutes=1))
+        response = self.client.get(url)
+        self.assertEqual(response.context['ingests_running'], 0)
+        self.assertNotContains(response, 'ingest-banner')
+
+        running = self.make_ingest('Running')
+        response = self.client.get(url)
+        self.assertContains(response, 'An alert ingest is')
+        self.assertContains(response, 'since ' + running.started_at.strftime('%Y-%m-%d %H:%M'))
+        self.assertContains(response, 'latest modeling of this event to have finished')
+        self.assertEqual(response.content.decode().count('id="ingest-banner"'), 1)
+
+        earlier = self.make_ingest('Running', started_ago=datetime.timedelta(hours=3))
+        response = self.client.get(url)
+        self.assertContains(response, '2 alert ingests are running')
+        self.assertContains(response, 'since ' + earlier.started_at.strftime('%Y-%m-%d %H:%M'))
+
+    def test_the_banner_is_there_whether_or_not_the_event_was_modeled(self):
+        self.make_ingest('Running')
+
+        for event in (self.modeled, self.unmodeled):
+            with self.subTest(event=event.event_id):
+                response = self.client.get(reverse('events:detail', kwargs={'pk': event.pk}))
+                self.assertContains(response, 'id="ingest-banner"')
+
+    def test_the_detail_page_says_if_the_event_is_being_modeled(self):
+        # setUp's event has a modeling going on, as well as the earlier ones
+        response = self.client.get(reverse('events:detail', kwargs={'pk': self.modeled.pk}))
+
+        self.assertContains(response, 'This event is being modeled now')
+        running = ModelingProcess.objects.get(event=self.modeled, status='Running')
+        self.assertContains(response, 'since ' + running.started_at.strftime('%Y-%m-%d %H:%M'))
+        # What is shown is of the one before, as ever
+        self.assertContains(response, 'from the modeling before it')
+        self.assertEqual(response.context['diagnostics'].delta_chi2_PSPL, -222.0)
+        self.assertContains(response, '-222')
+
+    def test_the_note_is_about_this_event_only(self):
+        other = Event.objects.create(
+            target=self.modeled.target, event_id='DIAG_9', start_time=2460030.0, duration=2.0)
+        make_modeling(other, delta_chi2_PSPL=-9.0)
+
+        response = self.client.get(reverse('events:detail', kwargs={'pk': other.pk}))
+
+        self.assertNotContains(response, 'being modeled now')
+        self.assertNotContains(response, 'event-modeling-note')
+
+    def test_the_note_is_not_there_for_modelings_that_have_ended_or_stopped(self):
+        other = Event.objects.create(
+            target=self.modeled.target, event_id='DIAG_9', start_time=2460030.0, duration=2.0)
+        make_modeling(other, delta_chi2_PSPL=-9.0)
+        make_modeling(other, status='Failed')
+        make_modeling(other, status='Pending')
+        # One that began longer ago than a modeling takes, and never said it had stopped
+        stale = ModelingProcess.objects.create(
+            event=other, status='Running', started_at=timezone.now() - ModelingProcess.STALE_AFTER - datetime.timedelta(minutes=1))
+        url = reverse('events:detail', kwargs={'pk': other.pk})
+
+        self.assertNotContains(self.client.get(url), 'being modeled now')
+        self.assertEqual(ModelingProcess.running().filter(event=other).count(), 0)
+
+        ModelingProcess.objects.filter(pk=stale.pk).update(
+            started_at=timezone.now() - ModelingProcess.STALE_AFTER + datetime.timedelta(minutes=1))
+        self.assertContains(self.client.get(url), 'being modeled now')
+
+    def test_the_note_for_an_event_not_modeled_before(self):
+        ModelingProcess.objects.create(event=self.unmodeled, status='Running', started_at=timezone.now())
+
+        response = self.client.get(reverse('events:detail', kwargs={'pk': self.unmodeled.pk}))
+
+        self.assertContains(response, 'This event is being modeled now')
+        self.assertContains(response, 'It has not been modeled before')
+        self.assertNotContains(response, 'from the modeling before it')
+
+    def test_the_note_goes_when_the_modeling_does(self):
+        url = reverse('events:detail', kwargs={'pk': self.modeled.pk})
+        self.assertContains(self.client.get(url), 'being modeled now')
+
+        ModelingProcess.objects.filter(event=self.modeled, status='Running').update(
+            status='Complete', completed_at=timezone.now())
+
+        response = self.client.get(url)
+        self.assertNotContains(response, 'being modeled now')
+        self.assertEqual(response.context['diagnostics'].delta_chi2_PSPL, -333.0)    # now the latest
+
     def test_the_detail_page_of_an_event_not_modeled(self):
         response = self.client.get(reverse('events:detail', kwargs={'pk': self.unmodeled.pk}))
 
@@ -3698,6 +3794,84 @@ class TestCutfileSearch(TestCase):
 
         field = re.search(r'<input[^>]*id="id_event_created_at_min"[^>]*>', html).group(0)
         self.assertIn('value="2026-03-15"', field)
+
+    def make_ingest(self, status, started_ago=datetime.timedelta(minutes=10)):
+        started = timezone.now() - started_ago
+        return AlertIngest.objects.create(
+            batch_id=f'ingest_{AlertIngest.objects.count()}_{status}', started_at=started, status=status)
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_banner_says_if_an_ingest_is_running(self):
+        self.client.force_login(User.objects.create_user('banner_user'))
+        url = reverse('cutfiles:list')
+
+        # Nothing running: none of an ingest is shown, whatever batches there have been
+        self.make_ingest('Complete')
+        self.make_ingest('Failed')
+        self.make_ingest('Pending')
+        response = self.client.get(url)
+        self.assertEqual(response.context['ingests_running'], 0)
+        self.assertNotContains(response, 'ingest is running')
+        self.assertContains(response, 'id="ingest-banner"')   # Always there, empty, for a search to fill
+
+        running = self.make_ingest('Running')
+        response = self.client.get(url)
+        self.assertEqual(response.context['ingests_running'], 1)
+        self.assertContains(response, 'An alert ingest is running')
+        self.assertContains(response, 'since ' + running.started_at.strftime('%Y-%m-%d %H:%M'))
+
+        # More than one, as when an ingest is started before another has finished: since the first
+        earlier = self.make_ingest('Running', started_ago=datetime.timedelta(hours=2))
+        response = self.client.get(url)
+        self.assertContains(response, '2 alert ingests are running')
+        self.assertContains(response, 'since ' + earlier.started_at.strftime('%Y-%m-%d %H:%M'))
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_an_ingest_that_stopped_without_saying_so_is_not_running(self):
+        self.client.force_login(User.objects.create_user('banner_user'))
+        self.make_ingest('Running', started_ago=AlertIngest.STALE_AFTER + datetime.timedelta(minutes=1))
+
+        self.assertEqual(AlertIngest.running().count(), 0)
+        self.assertNotContains(self.client.get(reverse('cutfiles:list')), 'ingest is running')
+
+        self.make_ingest('Running', started_ago=AlertIngest.STALE_AFTER - datetime.timedelta(minutes=1))
+        self.assertEqual(AlertIngest.running().count(), 1)
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_each_search_brings_the_banner_up_to_date(self):
+        """The search replaces only the table: the banner, above the tabs' content, is swapped in with it"""
+        self.client.force_login(User.objects.create_user('banner_user'))
+        url = reverse('cutfiles:list')
+        htmx = {'HX-Request': 'true'}
+
+        html = self.client.get(url, {'model_type': 'pspl'}, headers=htmx).content.decode()
+        self.assertRegex(html, r'<div id="ingest-banner" hx-swap-oob="true">\s*</div>')    # Nothing to say: clears it
+
+        ingest = self.make_ingest('Running')
+        html = self.client.get(url, {'model_type': 'pspl'}, headers=htmx).content.decode()
+        self.assertRegex(html, r'<div id="ingest-banner" hx-swap-oob="true">\s*<div class="alert alert-warning')
+        # Outside the table that the search replaces, which is what makes the swap possible
+        self.assertGreater(html.index('hx-swap-oob'), html.index('class="table-container"'))
+        self.assertEqual(html.count('id="ingest-banner"'), 1)
+
+        AlertIngest.objects.filter(pk=ingest.pk).update(status='Complete')
+        html = self.client.get(url, {'model_type': 'pspl'}, headers=htmx).content.decode()
+        self.assertRegex(html, r'<div id="ingest-banner" hx-swap-oob="true">\s*</div>')
+
+        # The whole page has it once, in its place (not also swapped into itself)
+        self.make_ingest('Running')
+        page = self.client.get(url, {'model_type': 'pspl'}).content.decode()
+        self.assertEqual(page.count('id="ingest-banner"'), 1)
+        self.assertNotIn('id="ingest-banner" hx-swap-oob', page)
+
+    @override_settings(TOM_MFA_REQUIRED=None)
+    def test_the_models_list_has_no_banner(self):
+        self.client.force_login(User.objects.create_user('banner_user'))
+        self.make_ingest('Running')
+
+        response = self.client.get(reverse('eventmodels:list'), headers={'HX-Request': 'true'})
+
+        self.assertNotContains(response, 'ingest-banner')
 
     @override_settings(TOM_MFA_REQUIRED=None)
     def test_author_switch_offers_the_users_full_name(self):

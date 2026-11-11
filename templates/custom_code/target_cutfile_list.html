@@ -25,6 +25,8 @@
       </li>
     </ul>
 
+    {% include "custom_code/partials/cutfile_ingest_banner.html" %}
+
     <div id="cutfile-status" role="status" aria-live="polite"></div>
 
     <div class="tab-content">
@@ -129,7 +131,6 @@
             <button type="submit" class="btn btn-primary">Search</button>
             <button type="button" class="btn btn-secondary" onclick="saveCutfile()">Save cutfile</button>
             <button type="button" class="btn btn-outline-secondary" onclick="clearCriteria()">Clear</button>
-            {# Not named, so it isn't sent with the search: it only decides what is saved in the cutfile #}
             <div class="form-check form-switch ms-2 mb-0">
               <input class="form-check-input" type="checkbox" role="switch" id="cutfile-author-toggle"
                      data-author="{{ author_name }}"{% if not author_name %} disabled{% endif %}>

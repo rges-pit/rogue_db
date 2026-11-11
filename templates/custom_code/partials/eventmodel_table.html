@@ -33,3 +33,8 @@
         <p class="mt-2">Loading model parameters&hellip;</p>
     </div>
 </div>
+
+{% if show_record_count and request.htmx %}
+    {# The cutfile's search replaces the table; this updates the banner that is above the tabs' content, outside it #}
+    {% include "custom_code/partials/cutfile_ingest_banner.html" with swap_with_search=True %}
+{% endif %}

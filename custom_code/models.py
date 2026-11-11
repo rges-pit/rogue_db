@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.db import models
+from django.utils import timezone
 from django.core.validators import MinValueValidator, MaxValueValidator
 from .target_models import RogueTarget
 
@@ -90,6 +93,18 @@ class ModelingProcess(models.Model):
         null=True
     )
     code_version = models.CharField(max_length=50, blank=True, null=True)
+
+    # A process that says it is running, but started longer ago than this, is taken to have been stopped
+    # (the machine was shut down, or the process killed) without the chance to mark itself failed
+    STALE_AFTER = timedelta(hours=24)
+
+    @classmethod
+    def running(cls):
+        """The modeling processes that are going on now"""
+        return cls.objects.filter(
+            status=cls.ProcessStatus.running,
+            started_at__gte=timezone.now() - cls.STALE_AFTER,
+        )
 
 class EventDiagnostics(models.Model):
     """
@@ -534,3 +549,15 @@ class AlertIngest(models.Model):
         default=OperationalStatus.pending,
         null=True
     )
+
+    # A batch that says it is running, but started longer ago than this, is taken to have been stopped
+    # (the machine was shut down, or the process killed) without the chance to mark itself failed
+    STALE_AFTER = timedelta(hours=24)
+
+    @classmethod
+    def running(cls):
+        """The batches that are being ingested now"""
+        return cls.objects.filter(
+            status=cls.OperationalStatus.running,
+            started_at__gte=timezone.now() - cls.STALE_AFTER,
+        )

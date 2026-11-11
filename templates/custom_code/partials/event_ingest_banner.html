@@ -1,0 +1,7 @@
+{# Says if alerts are being ingested: what is shown is of the latest modeling to have finished #}
+{% if ingests_running %}
+  <div class="alert alert-warning py-2 mb-3" id="ingest-banner" role="status">
+    <strong>{% if ingests_running > 1 %}{{ ingests_running }} alert ingests are{% else %}An alert ingest is{% endif %} running</strong>
+    (since {{ ingest_started_at|date:"Y-m-d H:i T" }}).
+  </div>
+{% endif %}

@@ -1,0 +1,9 @@
+<div id="ingest-banner"{% if swap_with_search %} hx-swap-oob="true"{% endif %}>
+  {% if ingests_running %}
+    <div class="alert alert-warning py-2 mb-3" role="status">
+      <strong>{% if ingests_running > 1 %}{{ ingests_running }} alert ingests are{% else %}An alert ingest is{% endif %} running</strong>
+      (since {{ ingest_started_at|date:"Y-m-d H:i T" }}).
+      Events are modeled as their alerts are ingested, so the search will find only the completed models.
+    </div>
+  {% endif %}
+</div>

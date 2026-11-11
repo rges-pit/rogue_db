@@ -1,0 +1,12 @@
+{# Says if this event is being modeled now, so that what is shown is about to be replaced #}
+{% if event_modeling_started_at %}
+  <div class="alert alert-info py-2 mb-3" id="event-modeling-note" role="status">
+    <strong>This event is being modeled now</strong>
+    (since {{ event_modeling_started_at|date:"Y-m-d H:i T" }}).
+    {% if modeling_process %}
+      The parameters and models on this page are from the modeling before it, and are replaced when this one is done.
+    {% else %}
+      It has not been modeled before, so there are no parameters or models to show until this one is done.
+    {% endif %}
+  </div>
+{% endif %}
