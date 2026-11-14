@@ -14,7 +14,7 @@ from django_tasks.backends.database.models import DBTaskResult
 from unittest import mock
 from custom_code.models import (Event, EventModel, PSPLModel, PitkinFlareModel, StraightLineModel,
                                 DavenportFlareModel, FSPLModel, RGESAlert, SourceDiagnostics, AlertIngest,
-                                EventDiagnostics, ModelingProcess)
+                                EventDiagnostics, ModelingProcess, VariableStar)
 from custom_code.filters import (CutfileFilterSet, CUTFILE_EVENT_PARAMS, CUTFILE_MODEL_TYPES, EVENT_DIAGNOSTIC_FIELDS,
                                  RogueTargetFilterSet, find_row_with)
 from tom_targets.models import Target, TargetName
@@ -4199,3 +4199,36 @@ class TestCutfileSearch(TestCase):
         # ...while a search URL loaded directly opens on the results
         response = self.client.get(url + '?model_type=fspl')
         self.assertEqual(response.context['initial_tab'], 'results')
+
+
+class TestKnownVariableNames(TestCase):
+    """The list of names the known variable stars go by"""
+
+    def test_empty_table(self):
+        self.assertEqual(variable_stars.known_variable_names(), set())
+
+    def test_a_star_contributes_each_of_its_ids(self):
+        VariableStar.objects.create(ra=266.0, dec=-30.0, ogle_id='OGLE-BLG-RRLYR-00001',
+                                    gaia_id='Gaia23bmq', vvv_id='320203006739', type='rrlyrae')
+        VariableStar.objects.create(ra=267.0, dec=-29.0, moa_id='MOA_flare_0', type='flare')
+        self.assertEqual(
+            variable_stars.known_variable_names(),
+            {'OGLE-BLG-RRLYR-00001', 'Gaia23bmq', '320203006739', 'MOA_flare_0'}
+        )
+
+    def test_missing_blank_and_padded_ids(self):
+        VariableStar.objects.create(ra=266.0, dec=-30.0, ogle_id='  OGLE-BLG-LPV-023363 ', gaia_id='')
+        VariableStar.objects.create(ra=267.0, dec=-29.0, gaia_id='   ')
+        self.assertEqual(variable_stars.known_variable_names(), {'OGLE-BLG-LPV-023363'})
+
+    def test_a_name_on_more_than_one_star_is_listed_once(self):
+        VariableStar.objects.create(ra=266.0, dec=-30.0, gaia_id='Gaia23bmq')
+        VariableStar.objects.create(ra=266.0, dec=-30.0, ogle_id='OGLE-BLG-ELL-001846', gaia_id='Gaia23bmq')
+        self.assertEqual(variable_stars.known_variable_names(), {'Gaia23bmq', 'OGLE-BLG-ELL-001846'})
+
+    def test_reads_the_stars_in_one_query(self):
+        for i in range(5):
+            VariableStar.objects.create(ra=266.0 + i, dec=-30.0, ogle_id='OGLE-%d' % i)
+        with CaptureQueriesContext(connection) as queries:
+            variable_stars.known_variable_names()
+        self.assertEqual(len(queries), 1)

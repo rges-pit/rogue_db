@@ -57,6 +57,30 @@ def find_nearest_rges_variable_catalog(target, diagnostics, radius=2):
 
     return diagnostics
 
+VARIABLE_STAR_ID_FIELDS = ('ogle_id', 'vvv_id', 'gaia_id', 'moa_id')
+
+def known_variable_names():
+    """
+    The names of all the variable stars RogueDB knows of, as a set. A VariableStar can have an ID from
+    each of several catalogs (see VARIABLE_STAR_ID_FIELDS), and each one is a name the star is
+    known by, so a star with more than one ID contributes all of them. Stars are read in a single
+    query, and IDs a star hasn't are skipped.
+    """
+    names = set()
+    for ids in VariableStar.objects.values_list(*VARIABLE_STAR_ID_FIELDS).iterator():
+        names.update(name.strip() for name in ids if name and name.strip())
+    return names
+
+def known_variable_positions():
+    """
+    Function to extract a list of SkyCoords for all currently known variables
+    """
+
+    ras, decs, pks = zip(*VariableStar.objects.values_list('ra', 'dec', 'pk'))
+    positions = SkyCoord(np.array(ras), np.array(decs), frame='icrs', unit=(u.deg, u.deg))
+
+    return positions, np.array(pks)
+
 # def check_external_variable_catalog(target):
 # Future code to check an extended external catalog will go here
 
