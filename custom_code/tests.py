@@ -12,6 +12,7 @@ from django_tasks.signals import task_enqueued
 from collections import Counter
 from django_tasks.backends.database.models import DBTaskResult
 from unittest import mock
+from custom_code.management.commands.ingest_variable_catalog import OGLE_TYPES as ogle_types
 from custom_code.models import (Event, EventModel, PSPLModel, PitkinFlareModel, StraightLineModel,
                                 DavenportFlareModel, FSPLModel, RGESAlert, SourceDiagnostics, AlertIngest,
                                 EventDiagnostics, ModelingProcess, VariableStar)
@@ -4232,3 +4233,403 @@ class TestKnownVariableNames(TestCase):
         with CaptureQueriesContext(connection) as queries:
             variable_stars.known_variable_names()
         self.assertEqual(len(queries), 1)
+
+
+class TestIngestVariableCatalog(TestCase):
+    """The ingest of a catalog of variable stars, skipping those RogueDB already knows"""
+
+    def setUp(self):
+        # Two known stars: one with an OGLE name, and one without
+        self.named = VariableStar.objects.create(ra=268.0, dec=-30.0, ogle_id='OGLE-BLG-LPV-1', type='lpv')
+        self.unnamed = VariableStar.objects.create(ra=268.1, dec=-30.0, moa_id='MOA_flare_7', type='flare')
+
+    def ingest(self, lines, catalog_format='OGLE'):
+        with tempfile.NamedTemporaryFile('w', suffix='.vars', delete=False) as f:
+            f.write('\n'.join(lines) + '\n')
+        self.addCleanup(os.unlink, f.name)
+        call_command('ingest_variable_catalog', f.name, catalog_format)
+
+    def test_new_stars_are_added_and_known_ones_are_not(self):
+        self.ingest([
+            'BLG500.01.1 268.5 -29.5 0.7 -1.8',        # new
+            'BLG500.01.2 268.6 -29.5 0.7 -1.8',        # new
+            'BLG500.01.3 268.00005 -30.00005 0.7',     # 0.2" from a known star
+        ])
+        self.assertEqual(VariableStar.objects.count(), 4)
+        new = VariableStar.objects.get(ogle_id='BLG500.01.1')
+        self.assertEqual((new.ra, new.dec, new.type), (268.5, -29.5, 'OGLE variable'))
+
+    def test_a_match_does_not_overwrite_an_existing_name(self):
+        self.ingest(['BLG500.01.3 268.00005 -30.00005 0.7'])
+        self.named.refresh_from_db()
+        self.assertEqual(self.named.ogle_id, 'OGLE-BLG-LPV-1')
+
+    def test_a_match_adds_the_name_where_the_star_has_none(self):
+        self.ingest(['BLG500.01.4 268.10005 -30.00005 0.7'])
+        self.unnamed.refresh_from_db()
+        self.assertEqual((self.unnamed.ogle_id, self.unnamed.moa_id), ('BLG500.01.4', 'MOA_flare_7'))
+        self.assertEqual(VariableStar.objects.count(), 2)
+
+    def test_a_star_known_by_name_is_skipped_wherever_it_is(self):
+        self.ingest(['OGLE-BLG-LPV-1 270.0 -20.0 0.7'])
+        self.assertEqual(VariableStar.objects.count(), 2)
+
+    def test_duplicates_within_the_catalog_are_listed_once(self):
+        self.ingest([
+            'BLG500.01.1 268.5 -29.5 0.7',
+            'BLG500.01.9 268.50005 -29.50005 0.7',
+        ])
+        self.assertEqual(list(VariableStar.objects.filter(ra__gt=268.4).values_list('ogle_id', flat=True)),
+                         ['BLG500.01.1'])
+
+    def test_ingesting_a_catalog_twice_changes_nothing(self):
+        lines = ['BLG500.01.1 268.5 -29.5 0.7', 'BLG500.01.4 268.10005 -30.00005 0.7']
+        self.ingest(lines)
+        stars = list(VariableStar.objects.order_by('pk').values_list('pk', 'ra', 'dec', 'ogle_id', 'moa_id'))
+        self.ingest(lines)
+        self.assertEqual(
+            list(VariableStar.objects.order_by('pk').values_list('pk', 'ra', 'dec', 'ogle_id', 'moa_id')), stars
+        )
+
+    def test_a_catalog_into_an_empty_table(self):
+        VariableStar.objects.all().delete()
+        self.ingest(['BLG500.01.1 268.5 -29.5 0.7'])
+        self.assertEqual(VariableStar.objects.count(), 1)
+
+    def test_moa_catalog(self):
+        # 17:52:00.0 is 268.0 degrees: the first is the known star, the second is new
+        self.ingest([
+            'MOA_flare_20 d1 17:52:00.00 -30:00:00.0 flare',
+            'MOA_flare_21 d2 17:55:00.00 -29:00:00.0 flare',
+        ], catalog_format='MOA')
+        new = VariableStar.objects.get(moa_id='MOA_flare_21')
+        self.assertAlmostEqual(new.ra, 268.75)
+        self.assertEqual(new.type, 'flare')
+        self.named.refresh_from_db()
+        self.assertEqual(self.named.moa_id, 'MOA_flare_20')
+        self.assertEqual(VariableStar.objects.count(), 3)
+
+    def test_unknown_format(self):
+        with self.assertRaises(CommandError):
+            self.ingest(['BLG500.01.1 268.5 -29.5 0.7'], catalog_format='ZTF')
+
+
+class TestIngestTypedOGLECatalog(TestCase):
+    """The ingest of the OGLE catalogs that give a variable type in their header: stars RogueDB knows get the
+    type, and those it doesn't are added"""
+
+    def setUp(self):
+        # Known by an EWS field name, and only known to be variable
+        self.unclassified = VariableStar.objects.create(
+            ra=268.0, dec=-30.0, ogle_id='BLG500.01.1', type='OGLE variable')
+        # Known by a typed catalog's name, and at a position a typed catalog's entry can be matched by
+        self.typed = VariableStar.objects.create(
+            ra=268.5, dec=-29.0, ogle_id='OGLE-BLG-ECL-000001', type='eclipsing_binary')
+
+    def ingest(self, header, lines, catalog_format='OGLE_TYPED'):
+        with tempfile.NamedTemporaryFile('w', suffix='.dat', delete=False) as f:
+            f.write('\n'.join([header] + lines) + '\n')
+        self.addCleanup(os.unlink, f.name)
+        call_command('ingest_variable_catalog', f.name, catalog_format)
+
+    def star_types(self):
+        return dict(VariableStar.objects.values_list('ogle_id', 'type'))
+
+    def test_a_star_known_by_name_gets_the_type(self):
+        self.ingest('# Long Period Variable', ['BLG500.01.1 268.0 -30.0'])
+        self.unclassified.refresh_from_db()
+        self.assertEqual(self.unclassified.type, 'Long Period Variable')
+        self.assertEqual(VariableStar.objects.count(), 2)
+
+    def test_a_star_known_by_position_gets_the_type_and_keeps_its_name(self):
+        # 0.2" from the known one, and under a different name
+        self.ingest('# Long Period Variable', ['BLG500.01.2 268.50005 -29.00005'])
+        self.typed.refresh_from_db()
+        self.assertEqual((self.typed.type, self.typed.ogle_id), ('Long Period Variable', 'OGLE-BLG-ECL-000001'))
+        self.assertEqual(VariableStar.objects.count(), 2)
+
+    def test_a_star_that_is_not_known_is_added_with_the_type(self):
+        self.ingest('# Delta Scuti', ['BLG500.01.3 269.0 -28.0'])
+        new = VariableStar.objects.get(ogle_id='BLG500.01.3')
+        self.assertEqual((new.ra, new.dec, new.type), (269.0, -28.0, 'Delta Scuti'))
+
+    def test_the_type_is_the_one_in_the_header(self):
+        for number, header in enumerate(['# Eclipsing binary', '# RR Lyra', '# Spotted star', '# OGLE Variable']):
+            self.ingest(header, ['BLG500.02.%d %f -20.0' % (number, 260.0 + number)])
+            self.assertEqual(VariableStar.objects.get(ogle_id='BLG500.02.%d' % number).type, header[2:])
+
+    def test_a_misspelled_header_is_corrected(self):
+        self.ingest('# Cephied', ['BLG500.02.1 260.0 -20.0'])
+        self.assertEqual(VariableStar.objects.get(ogle_id='BLG500.02.1').type, 'Cepheid')
+
+    def test_every_known_star_is_updated_with_the_type_in_the_file(self):
+        # Whatever the star was typed as, including when the file only says it's variable
+        self.ingest('# OGLE Variable', ['OGLE-BLG-ECL-000001 268.5 -29.0'])
+        self.typed.refresh_from_db()
+        self.assertEqual(self.typed.type, 'OGLE Variable')
+        self.ingest('# Long Period Variable', ['OGLE-BLG-ECL-000001 268.5 -29.0', 'BLG500.01.1 268.0 -30.0'])
+        self.assertEqual(self.star_types(),
+                         {'OGLE-BLG-ECL-000001': 'Long Period Variable/OGLE Variable',
+                          'BLG500.01.1': 'Long Period Variable'})
+
+    def test_a_star_in_several_files_has_all_the_types(self):
+        stars = ['BLG500.03.1 265.0 -25.0', 'BLG500.03.2 265.1 -25.0']
+        self.ingest('# Eclipsing binary', stars)
+        self.ingest('# Long Period Variable', stars[:1])
+        self.assertEqual(self.star_types()['BLG500.03.1'], 'Eclipsing binary/Long Period Variable')
+        self.assertEqual(self.star_types()['BLG500.03.2'], 'Eclipsing binary')
+        self.ingest('# Delta Scuti', stars[:1])
+        self.assertEqual(self.star_types()['BLG500.03.1'], 'Delta Scuti/Eclipsing binary/Long Period Variable')
+
+    def test_the_order_the_files_are_ingested_in_does_not_matter(self):
+        self.ingest('# Long Period Variable', ['BLG500.03.1 265.0 -25.0'])
+        self.ingest('# Eclipsing binary', ['BLG500.03.1 265.0 -25.0'])
+        self.assertEqual(self.star_types()['BLG500.03.1'], 'Eclipsing binary/Long Period Variable')
+
+    def test_a_star_in_several_files_is_found_by_position_as_well_as_name(self):
+        self.ingest('# Eclipsing binary', ['BLG500.03.1 265.0 -25.0'])
+        self.ingest('# Long Period Variable', ['BLG500.04.9 265.00005 -25.00005'])
+        self.assertEqual(self.star_types()['BLG500.03.1'], 'Eclipsing binary/Long Period Variable')
+        self.assertEqual(VariableStar.objects.count(), 3)
+
+    def test_ingesting_a_catalog_twice_changes_nothing(self):
+        lines = ['BLG500.01.1 268.0 -30.0', 'BLG500.01.2 268.50005 -29.00005', 'BLG500.01.3 269.0 -28.0']
+        self.ingest('# Long Period Variable', lines)
+        self.ingest('# Eclipsing binary', lines)
+        stars = list(VariableStar.objects.order_by('pk').values_list('pk', 'ra', 'dec', 'ogle_id', 'type'))
+        self.ingest('# Long Period Variable', lines)
+        self.ingest('# Eclipsing binary', lines)
+        self.assertEqual(
+            list(VariableStar.objects.order_by('pk').values_list('pk', 'ra', 'dec', 'ogle_id', 'type')), stars
+        )
+
+    def test_of_two_stars_at_the_same_position_the_earlier_one_is_updated_every_time(self):
+        # The same star, in two catalogs. Updating the first moves it in the database's storage, so that
+        # a query that doesn't ask for an order returns the other first
+        first = VariableStar.objects.create(ra=266.0, dec=-28.0, ogle_id='OGLE-BLG-ELL-000001', type='eclipsing_binary')
+        second = VariableStar.objects.create(ra=266.0, dec=-28.0, ogle_id='OGLE-BLG-HB-0001', type='hb')
+        VariableStar.objects.filter(pk=first.pk).update(type='eclipsing_binary')
+        for _ in range(2):
+            self.ingest('# Long Period Variable', ['BLG500.06.1 266.0 -28.0'])
+            first.refresh_from_db()
+            second.refresh_from_db()
+            self.assertEqual((first.type, second.type), ('Long Period Variable', 'hb'))
+        self.ingest('# Eclipsing binary', ['BLG500.06.1 266.0 -28.0'])
+        first.refresh_from_db()
+        self.assertEqual((first.type, VariableStar.objects.count()), ('Eclipsing binary/Long Period Variable', 4))
+
+    def test_the_longest_type_fits(self):
+        # A star that is in every catalog
+        for header in ['# ' + name for name in ogle_types]:
+            self.ingest(header, ['BLG500.05.1 262.0 -22.0'])
+        star = VariableStar.objects.get(ogle_id='BLG500.05.1')
+        self.assertEqual(star.type, '/'.join(sorted(ogle_types)))
+        self.assertLessEqual(len(star.type), VariableStar._meta.get_field('type').max_length)
+
+    def test_an_unrecognised_header(self):
+        for header in ['# Quasar', 'BLG500.01.1 268.0 -30.0']:
+            with self.assertRaises(CommandError):
+                self.ingest(header, ['BLG500.01.1 268.0 -30.0'])
+        self.assertEqual(VariableStar.objects.count(), 2)
+
+    def test_the_other_formats_leave_types_alone(self):
+        self.ingest('BLG500.01.1 268.0 -30.0', ['OGLE-BLG-ECL-000001 268.5 -29.0'], catalog_format='OGLE')
+        self.assertEqual(
+            list(VariableStar.objects.order_by('pk').values_list('type', flat=True)),
+            ['OGLE variable', 'eclipsing_binary']
+        )
+
+    def test_known_variable_pks_are_per_catalog(self):
+        VariableStar.objects.create(ra=1.0, dec=1.0, moa_id='BLG500.01.1')
+        self.assertEqual(variable_stars.known_variable_pks('ogle_id'),
+                         {'BLG500.01.1': self.unclassified.pk, 'OGLE-BLG-ECL-000001': self.typed.pk})
+
+
+class TestMergeColocatedVariables(TestCase):
+    """The merge of the variable stars that are at exactly the same position, which are the same star
+    listed in more than one catalog"""
+
+    def setUp(self):
+        self.ell = VariableStar.objects.create(
+            ra=263.4774583, dec=-29.5086667, ogle_id='OGLE-BLG-ELL-001846', type='eclipsing_binary')
+        self.hb = VariableStar.objects.create(
+            ra=263.4774583, dec=-29.5086667, ogle_id='OGLE-BLG-HB-0011', type='hb')
+        # Not at the same position, though close
+        self.neighbour = VariableStar.objects.create(
+            ra=263.4774583, dec=-29.5086668, ogle_id='OGLE-BLG-ECL-000002', type='eclipsing_binary')
+
+    def merge(self, *args):
+        call_command('merge_colocated_variables', *args)
+
+    def test_stars_at_the_same_position_are_merged_into_the_earlier_one(self):
+        self.merge()
+        self.assertEqual(VariableStar.objects.count(), 2)
+        merged = VariableStar.objects.get(pk=self.ell.pk)
+        self.assertEqual(merged.ogle_id, 'OGLE-BLG-ELL-001846/OGLE-BLG-HB-0011')
+        self.assertEqual(merged.type, 'eclipsing_binary/hb')
+        self.assertEqual((merged.ra, merged.dec), (263.4774583, -29.5086667))
+        self.assertFalse(VariableStar.objects.filter(pk=self.hb.pk).exists())
+
+    def test_close_stars_are_not_merged(self):
+        self.merge()
+        neighbour = VariableStar.objects.get(pk=self.neighbour.pk)
+        self.assertEqual((neighbour.ogle_id, neighbour.type), ('OGLE-BLG-ECL-000002', 'eclipsing_binary'))
+
+    def test_the_ids_of_other_catalogs_are_combined_too(self):
+        VariableStar.objects.filter(pk=self.ell.pk).update(gaia_id='Gaia23bmq')
+        VariableStar.objects.filter(pk=self.hb.pk).update(vvv_id='320203006739', moa_id='MOA_flare_7')
+        self.merge()
+        merged = VariableStar.objects.get(pk=self.ell.pk)
+        self.assertEqual((merged.gaia_id, merged.vvv_id, merged.moa_id), ('Gaia23bmq', '320203006739', 'MOA_flare_7'))
+
+    def test_a_star_without_a_type_or_name_is_no_obstacle(self):
+        VariableStar.objects.filter(pk=self.hb.pk).update(type=None, ogle_id=None)
+        self.merge()
+        merged = VariableStar.objects.get(pk=self.ell.pk)
+        self.assertEqual((merged.ogle_id, merged.type), ('OGLE-BLG-ELL-001846', 'eclipsing_binary'))
+
+    def test_the_same_type_is_not_repeated(self):
+        VariableStar.objects.filter(pk=self.hb.pk).update(type='Eclipsing binary/Long Period Variable')
+        VariableStar.objects.filter(pk=self.ell.pk).update(type='Long Period Variable')
+        self.merge()
+        self.assertEqual(VariableStar.objects.get(pk=self.ell.pk).type, 'Eclipsing binary/Long Period Variable')
+
+    def test_more_than_two_stars_can_be_merged(self):
+        VariableStar.objects.create(ra=263.4774583, dec=-29.5086667, ogle_id='OGLE-BLG-RRLYR-1', type='rrlyrae')
+        self.merge()
+        self.assertEqual(VariableStar.objects.count(), 2)
+        merged = VariableStar.objects.get(pk=self.ell.pk)
+        self.assertEqual(merged.ogle_id, 'OGLE-BLG-ELL-001846/OGLE-BLG-HB-0011/OGLE-BLG-RRLYR-1')
+        self.assertEqual(merged.type, 'eclipsing_binary/hb/rrlyrae')
+
+    def test_a_dry_run_changes_nothing(self):
+        self.merge('--dry-run')
+        self.assertEqual(VariableStar.objects.count(), 3)
+        self.assertEqual(VariableStar.objects.get(pk=self.ell.pk).type, 'eclipsing_binary')
+
+    def test_merging_again_changes_nothing(self):
+        self.merge()
+        stars = list(VariableStar.objects.order_by('pk').values_list('pk', 'ra', 'dec', 'ogle_id', 'type'))
+        self.merge()
+        self.assertEqual(
+            list(VariableStar.objects.order_by('pk').values_list('pk', 'ra', 'dec', 'ogle_id', 'type')), stars
+        )
+
+    def test_a_group_whose_values_would_not_fit_is_left_alone(self):
+        for i in range(4):
+            VariableStar.objects.create(ra=10.0, dec=10.0, ogle_id='OGLE-BLG-ELL-%020d' % i, type='x')
+        self.merge()
+        self.assertEqual(VariableStar.objects.filter(ra=10.0).count(), 4)
+        # ...and doesn't stop the others being merged
+        self.assertEqual(VariableStar.objects.filter(ra=263.4774583).count(), 2)
+
+    def test_either_name_of_a_merged_star_is_a_known_name(self):
+        self.merge()
+        pks = variable_stars.known_variable_pks('ogle_id')
+        self.assertEqual((pks['OGLE-BLG-ELL-001846'], pks['OGLE-BLG-HB-0011']), (self.ell.pk, self.ell.pk))
+        self.assertEqual(
+            variable_stars.known_variable_names(),
+            {'OGLE-BLG-ELL-001846', 'OGLE-BLG-HB-0011', 'OGLE-BLG-ECL-000002'}
+        )
+
+    def test_a_catalog_ingest_finds_a_merged_star_by_either_name(self):
+        self.merge()
+        with tempfile.NamedTemporaryFile('w', suffix='.dat', delete=False) as f:
+            f.write('# Long Period Variable\nOGLE-BLG-HB-0011 100.0 10.0\n')
+        self.addCleanup(os.unlink, f.name)
+        call_command('ingest_variable_catalog', f.name, 'OGLE_TYPED')
+        self.assertEqual(VariableStar.objects.count(), 2)
+        self.assertEqual(VariableStar.objects.get(pk=self.ell.pk).type, 'Long Period Variable')
+
+    def test_a_typed_ingest_after_the_merge_keeps_the_other_types(self):
+        # The merged star was typed from a typed catalog on one of its rows, and the other row had its own
+        VariableStar.objects.filter(pk=self.ell.pk).update(type='Eclipsing binary')
+        self.merge()
+        lines = '# Long Period Variable\nOGLE-BLG-ELL-001846 263.4774583 -29.5086667\n'
+        with tempfile.NamedTemporaryFile('w', suffix='.dat', delete=False) as f:
+            f.write(lines)
+        self.addCleanup(os.unlink, f.name)
+        call_command('ingest_variable_catalog', f.name, 'OGLE_TYPED')
+        self.assertEqual(VariableStar.objects.get(pk=self.ell.pk).type, 'Eclipsing binary/hb/Long Period Variable')
+        call_command('ingest_variable_catalog', f.name, 'OGLE_TYPED')
+        self.assertEqual(VariableStar.objects.get(pk=self.ell.pk).type, 'Eclipsing binary/hb/Long Period Variable')
+
+
+class TestRewriteVariableTypes(TestCase):
+    """The rewrite of the types stars had before the typed OGLE catalogs into the names those give"""
+
+    def make(self, star_type):
+        return VariableStar.objects.create(ra=VariableStar.objects.count() + 1.0, dec=0.0, type=star_type)
+
+    def rewrite(self, *args):
+        call_command('rewrite_variable_types', *args)
+
+    def types(self):
+        return list(VariableStar.objects.order_by('pk').values_list('type', flat=True))
+
+    def test_old_types_are_rewritten_as_the_new_names(self):
+        for old in ['eclipsing_binary', 'lpv', 'rrlyrae', 'delta_scuti', 'cepheid']:
+            self.make(old)
+        self.rewrite()
+        self.assertEqual(self.types(), ['Eclipsing binary', 'Long Period Variable', 'RR Lyra', 'Delta Scuti', 'Cepheid'])
+
+    def test_each_of_the_types_of_a_merged_star_is_rewritten(self):
+        for old in ['eclipsing_binary/hb', 'Eclipsing binary/hb/Long Period Variable', 'lpv/eclipsing_binary',
+                    'delta_scuti/eclipsing_binary']:
+            self.make(old)
+        self.rewrite()
+        self.assertEqual(self.types(), ['Eclipsing binary/Heartbeat star', 'Eclipsing binary/Heartbeat star/Long Period Variable',
+                                        'Eclipsing binary/Long Period Variable', 'Delta Scuti/Eclipsing binary'])
+
+    def test_types_without_a_typed_catalog_name_get_a_readable_one(self):
+        for old in ['hb', 'dn', 'miras', 'cv', 'CV', 'Cv', 'bestar']:
+            self.make(old)
+        self.rewrite()
+        self.assertEqual(self.types(), ['Heartbeat star', 'Dwarf nova', 'Mira variable', 'Cataclysmic variable',
+                                        'Cataclysmic variable', 'Cataclysmic variable', 'Be star'])
+
+    def test_readable_names_are_given_in_joined_types_too(self):
+        for old in ['Eclipsing binary/hb', 'dn/Eclipsing binary', 'Eclipsing binary/hb/Long Period Variable',
+                    'hb/Long Period Variable', 'eclipsing_binary/hb']:
+            self.make(old)
+        self.rewrite()
+        self.assertEqual(self.types(), ['Eclipsing binary/Heartbeat star', 'Dwarf nova/Eclipsing binary',
+                                        'Eclipsing binary/Heartbeat star/Long Period Variable',
+                                        'Heartbeat star/Long Period Variable', 'Eclipsing binary/Heartbeat star'])
+
+    def test_other_types_are_left_alone(self):
+        # The flare type, which the code relies on, the type for stars that aren't classified, the free
+        # text of the MOA catalogs (in which a '/' means "or"), and those already named
+        others = ['OGLE variable', 'flare', 'Microlensing/CV', 'CV/Nova V6566 Sgr', 'MOA-bin-75 CV or flare',
+                  'MOA-bin-27', 'Eclipsing binary', 'Eclipsing binary/Long Period Variable',
+                  'Heartbeat star', 'Dwarf nova/Eclipsing binary']
+        for star_type in others:
+            self.make(star_type)
+        self.make(None)
+        self.rewrite()
+        self.assertEqual(self.types(), others + [None])
+
+    def test_a_dry_run_changes_nothing(self):
+        self.make('eclipsing_binary')
+        self.rewrite('--dry-run')
+        self.assertEqual(self.types(), ['eclipsing_binary'])
+
+    def test_rewriting_again_changes_nothing(self):
+        self.make('eclipsing_binary/hb')
+        self.rewrite()
+        self.rewrite()
+        self.assertEqual(self.types(), ['Eclipsing binary/Heartbeat star'])
+
+    def test_a_star_rewritten_is_taken_to_be_in_the_typed_catalogs(self):
+        # So the rewrite is for after the typed catalogs: before them, the type from one replaces it
+        star = self.make('eclipsing_binary')
+        star.ogle_id = 'BLG500.01.1'
+        star.ra, star.dec = 268.0, -30.0
+        star.save()
+        self.rewrite()
+        with tempfile.NamedTemporaryFile('w', suffix='.dat', delete=False) as f:
+            f.write('# Long Period Variable\nBLG500.01.1 268.0 -30.0\n')
+        self.addCleanup(os.unlink, f.name)
+        call_command('ingest_variable_catalog', f.name, 'OGLE_TYPED')
+        star.refresh_from_db()
+        self.assertEqual(star.type, 'Eclipsing binary/Long Period Variable')

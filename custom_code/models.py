@@ -27,9 +27,9 @@ class SourceDiagnostics(models.Model):
     baseline_mag_passband = models.CharField(max_length=50, default='')
     nearest_flare_star = models.CharField(max_length=60, default='', null=True, blank=True)
     angular_separation_flare_star = models.FloatField(default=0, null=True, blank=True)
-    nearest_variable_star = models.CharField(max_length=60, default='', null=True, blank=True)
+    nearest_variable_star = models.CharField(max_length=100, default='', null=True, blank=True)
     angular_separation_variable = models.FloatField(default=0, null=True, blank=True)
-    nearest_variable_type = models.CharField(max_length=30, default='', null=True, blank=True)
+    nearest_variable_type = models.CharField(max_length=100, default='', null=True, blank=True)
     max_peak_periodogram = models.FloatField(null=True, blank=True)
     period = models.FloatField(null=True, blank=True)
 
@@ -512,11 +512,13 @@ class VariableStar(models.Model):
            MaxValueValidator(90.0)
        ]
        )
-    ogle_id = models.CharField(max_length=30, null=True, blank=True)
+    # A star listed in more than one OGLE catalog has all its names, joined by '/'
+    ogle_id = models.CharField(max_length=100, null=True, blank=True)
     vvv_id = models.CharField(max_length=30, null=True, blank=True)
     gaia_id = models.CharField(max_length=30, null=True, blank=True)
     moa_id = models.CharField(max_length=30, null=True, blank=True)
-    type = models.CharField(max_length=30, null=True, blank=True)
+    # A star in several of the typed OGLE catalogs has all their types, joined by '/'
+    type = models.CharField(max_length=100, null=True, blank=True)
 
     def get_name(self):
         if self.ogle_id:

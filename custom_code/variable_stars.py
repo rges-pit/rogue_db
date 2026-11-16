@@ -59,24 +59,55 @@ def find_nearest_rges_variable_catalog(target, diagnostics, radius=2):
 
 VARIABLE_STAR_ID_FIELDS = ('ogle_id', 'vvv_id', 'gaia_id', 'moa_id')
 
+# A star that is more than one of something, because it is listed twice, or in more than one typed
+# catalog, has all of them in its type and its IDs, joined by this
+JOIN_SEPARATOR = '/'
+
+def combine(*values):
+    """
+    The distinct names among the values, which can each be a name or several joined by JOIN_SEPARATOR,
+    as one value, joined and in alphabetical order, so that it's the same whichever order they're given
+    in. None if there aren't any.
+    """
+    names = {name for value in values if value for name in value.split(JOIN_SEPARATOR) if name}
+    return JOIN_SEPARATOR.join(sorted(names, key=lambda name: (name.casefold(), name))) or None
+
+def split(value):
+    """The names in a value that combine() has joined, or that is just a name"""
+    return [name.strip() for name in value.split(JOIN_SEPARATOR) if name.strip()] if value else []
+
 def known_variable_names():
     """
     The names of all the variable stars RogueDB knows of, as a set. A VariableStar can have an ID from
     each of several catalogs (see VARIABLE_STAR_ID_FIELDS), and each one is a name the star is
-    known by, so a star with more than one ID contributes all of them. Stars are read in a single
-    query, and IDs a star hasn't are skipped.
+    known by, so a star with more than one ID contributes all of them, as does an ID that
+    is several names joined. Stars are read in a single query, and IDs a star hasn't are skipped.
     """
     names = set()
     for ids in VariableStar.objects.values_list(*VARIABLE_STAR_ID_FIELDS).iterator():
-        names.update(name.strip() for name in ids if name and name.strip())
+        for value in ids:
+            names.update(split(value))
     return names
+
+def known_variable_pks(id_field):
+    """
+    The stars RogueDB has an ID of in one of the catalogs (id_field is one of VARIABLE_STAR_ID_FIELDS),
+    as {ID: primary key}. Each of the names of a star that has several is an ID of it. Names are only
+    comparable within the one catalog, so unlike known_variable_names this doesn't pool them.
+    """
+    pks = {}
+    stars = VariableStar.objects.exclude(**{id_field: None}).order_by('pk')
+    for value, pk in stars.values_list(id_field, 'pk').iterator():
+        for name in split(value):
+            pks.setdefault(name, pk)
+    return pks
 
 def known_variable_positions():
     """
     Function to extract a list of SkyCoords for all currently known variables
     """
 
-    ras, decs, pks = zip(*VariableStar.objects.values_list('ra', 'dec', 'pk'))
+    ras, decs, pks = zip(*VariableStar.objects.order_by('pk').values_list('ra', 'dec', 'pk'))
     positions = SkyCoord(np.array(ras), np.array(decs), frame='icrs', unit=(u.deg, u.deg))
 
     return positions, np.array(pks)
