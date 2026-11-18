@@ -227,6 +227,8 @@ __marimo__/
 # Data
 data/*
 *.png
+# ...except the images the website itself is made of
+!static/**/*.png
 # Alert files for the Docker ingest
 ingest/
 # Collected static files
